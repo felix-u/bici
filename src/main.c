@@ -13,6 +13,12 @@ enumdef(Op, u8) {
     op_neq  = 0x08,
     op_gt   = 0x09,
     op_lt   = 0x0a,
+    op_add  = 0x0b,
+    op_sub  = 0x0c,
+    op_mul  = 0x0d,
+    op_div  = 0x0e,
+    op_inc  = 0x0f,
+    op_jump_imm = 0x10,
 };
 
 static u8 stack[256];
@@ -42,8 +48,17 @@ int main(int argc, char **argv) {
             case op_rot:  u8 temp3 = stack_get(3); *stack_loc(3) = stack_get(2); *stack_loc(2) = stack_get(1); *stack_loc(1) = temp3; break;
             case op_dup:  stack_push(stack_get(1)); break;
             case op_over: stack_push(stack_get(2)); break;
-            case op_eq: stack_push(stack_pop() == stack_pop()); break;
-            case op_neq: stack_push(stack_pop() != stack_pop()); break;
+            case op_eq:   stack_push(stack_pop() == stack_pop()); break;
+            case op_neq:  stack_push(stack_pop() != stack_pop()); break;
+            case op_gt:   { u8 right = stack_pop(), left = stack_pop(); stack_push(left < right); } break;
+            case op_lt:   { u8 right = stack_pop(), left = stack_pop(); stack_push(left > right); } break;
+            case op_add:  stack_push(stack_pop() + stack_pop()); break;
+            case op_sub:  { u8 right = stack_pop(), left = stack_pop(); stack_push(left - right); } break;
+            case op_mul:  stack_push(stack_pop() * stack_pop()); break;
+            case op_div:  { u8 right = stack_pop(), left = stack_pop(); stack_push(left / right); } break;
+            case op_inc:  stack[stack_counter - 1] += 1; break;
+            // TODO: fix
+            case op_jump_imm: i += rom_file.ptr[i + 1]; break;
             default: unreachable;
         }
     }

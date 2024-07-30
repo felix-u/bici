@@ -17,9 +17,10 @@ enumdef(Op, u8) {
 
 static u8 stack[256];
 static u8 stack_counter;
-#define stack_push(byte) stack[stack_counter++] = (byte)
-#define stack_pop() stack[--stack_counter]
-#define stack_get(i) stack[stack_counter - i]
+static force_inline u8 stack_pop(void) { return stack[--stack_counter]; }
+static force_inline void stack_push(u8 byte) { stack[stack_counter++] = byte; }
+static force_inline u8 stack_get(u8 i) { return stack[stack_counter - i]; }
+static force_inline u8 *stack_loc(u8 i) { return stack + stack_counter - i; }
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -36,13 +37,13 @@ int main(int argc, char **argv) {
         switch (op) {
             case op_push: stack_push(rom_file.ptr[++i]); break;
             case op_drop: discard(stack_pop()); break;
-            case op_nip:  stack_get(2) = stack_get(1); stack_counter -= 1; break;
-            case op_swap: u8 temp1 = stack_get(1); stack_get(1) = stack_get(2); stack_get(2) = temp1; break;
-            case op_rot:  u8 temp3 = stack_get(3); stack_get(3) = stack_get(2); stack_get(2) = stack_get(1); stack_get(1) = temp3; break;
+            case op_nip:  *stack_loc(2) = stack_get(1); discard(stack_pop()); break;
+            case op_swap: u8 temp1 = stack_get(1); *stack_loc(1) = stack_get(2); *stack_loc(2) = temp1; break;
+            case op_rot:  u8 temp3 = stack_get(3); *stack_loc(3) = stack_get(2); *stack_loc(2) = stack_get(1); *stack_loc(1) = temp3; break;
             case op_dup:  stack_push(stack_get(1)); break;
             case op_over: stack_push(stack_get(2)); break;
-            case op_eq:   stack_push(stack_pop() == stack_pop()); break;
-            case op_neq:  stack_push(stack_pop() != stack_pop()); break;
+            case op_eq: stack_push(stack_pop() == stack_pop()); break;
+            case op_neq: stack_push(stack_pop() != stack_pop()); break;
             default: unreachable;
         }
     }

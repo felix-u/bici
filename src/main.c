@@ -18,7 +18,10 @@ enumdef(Op, u8) {
     op_mul  = 0x0d,
     op_div  = 0x0e,
     op_inc  = 0x0f,
-    op_jump_imm = 0x10,
+    op_jump      =     0x10,
+    op_jump_imm  =     0x11,
+    op_jump_cond =     0x12,
+    op_jump_cond_imm = 0x13,
 };
 
 static u8 stack[256];
@@ -57,8 +60,10 @@ int main(int argc, char **argv) {
             case op_mul:  stack_push(stack_pop() * stack_pop()); break;
             case op_div:  { u8 right = stack_pop(), left = stack_pop(); stack_push(left / right); } break;
             case op_inc:  stack[stack_counter - 1] += 1; break;
-            // TODO: fix
-            case op_jump_imm: i += rom_file.ptr[i + 1]; break;
+            case op_jump:          i += stack_pop(); break;
+            case op_jump_imm:      i += rom_file.ptr[i + 1]; break;
+            case op_jump_cond:     u8 relative_addr = stack_pop(); if (stack_pop()) i += relative_addr; break;
+            case op_jump_cond_imm: i += 1; if (stack_pop()) i += rom_file.ptr[i]; break;
             default: unreachable;
         }
     }

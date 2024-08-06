@@ -40,7 +40,7 @@ enumdef(Op, u8) {
 static u8 mode_keep, mode_16;
 static u8 *s, *sp;
 
-static u8 device_table[256];
+static u8 *device_table;
 
 static u8 param_s[256], ret_s[256];
 static u8 param_sp, ret_sp;
@@ -50,7 +50,7 @@ static void s_ret(void) { s = ret_s; sp = &ret_sp; }
 static u8 *get(u16 i_back) { return s + *sp - i_back; }
 
 static void push8(u8 byte) { s[*sp] = byte; *sp += 1; }
-static u8 pop8(void) { return s[*sp - 1]; if (!mode_keep) *sp -= 1; }
+static u8 pop8(void) { u8 val = s[*sp - 1]; if (!mode_keep) *sp -= 1; return val; }
 
 static void push16(u16 byte2) { memcpy(s + (*sp), &byte2, 2); }
 
@@ -61,10 +61,13 @@ int main(int argc, char **argv) {
     }
 
     Arena arena = arena_init(65536);
-    String8 rom_file = file_read(&arena, argv[1], "rb");
+    u8 *mem = arena.mem;
+    device_table = arena_alloc(&arena, 256, 1);
+    String8 program = file_read(&arena, argv[1], "rb");
+    u16 end = (u16)(0x100 + program.len);
 
-    for (u16 i = 0; i < (u16)rom_file.len; i += 1) {
-        u8 byte = rom_file.ptr[i];
+    for (u16 i = 0x100; i < end; i += 1) {
+        u8 byte = mem[i];
         Op op = byte & 0x3f;
         mode_keep   = (byte & 0x80) >> 7;
         u8 mode_ret = (byte & 0x40) >> 6;
@@ -75,7 +78,7 @@ int main(int argc, char **argv) {
         if (mode_16) {
             unreachable;
         } else switch(op) {
-            case op_push:  push8(rom_file.ptr[++i]); break;
+            case op_push:  push8(mem[++i]); break;
             case op_drop:  discard(pop8()); break;
             case op_nip:   *get(2) = *get(1); *sp -= 1; break;
             case op_swap:  u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; break;
@@ -99,16 +102,16 @@ int main(int argc, char **argv) {
                 push8(pop8() << lshift >> rshift); 
             } break;
             case op_jump:               i += pop8(); break;
-            case op_jump_imm:           i += rom_file.ptr[i + 1]; break;
+            case op_jump_imm:           i += mem[i + 1]; break;
             case op_jump_cond:          u8 rel_addr = pop8(); if (pop8()) i += rel_addr; break;
-            case op_jump_imm_cond:      i += 1; if (pop8()) i += rom_file.ptr[i]; break;
+            case op_jump_imm_cond:      i += 1; if (pop8()) i += mem[i]; break;
             case op_jump_stash_ret:     s_ret(); push16(i); s_param(); i += pop8(); break;
-            case op_jump_imm_stash_ret: i += 1; s_ret(); push16(i); i += rom_file.ptr[i]; break;
+            case op_jump_imm_stash_ret: i += 1; s_ret(); push16(i); i += mem[i]; break;
             case op_stash:     u8 val = pop8(); s_ret(); push8(val); s_param(); break; 
-            case op_load:      push8(rom_file.ptr[pop8()]); break;
-            case op_load_rel:  push8(rom_file.ptr[i + pop8()]); break;
-            case op_store:     rom_file.ptr[pop8()] = pop8(); break;
-            case op_store_rel: rom_file.ptr[i + pop8()] = pop8(); break;
+            case op_load:      push8(mem[pop8()]); break;
+            case op_load_rel:  push8(mem[i + pop8()]); break;
+            case op_store:     mem[pop8()] = pop8(); break;
+            case op_store_rel: mem[i + pop8()] = pop8(); break;
             case op_read:      push8(device_table[pop8()]); break;
             case op_write:     device_table[pop8()] = pop8(); break;
             default: unreachable;

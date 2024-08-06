@@ -30,31 +30,17 @@ enumdef(Op, u8) {
 
 static u8 mode_keep, mode_16;
 #define mode_size (1 + mode_16)
-static u8 *stack, *stack_counter;
+static u8 *s, *sp;
 
-static u8 parameter_stack[256], return_stack[256];
-static u8 parameter_stack_counter, return_stack_counter;
-#define set_parameter_stack(void) { stack = parameter_stack; stack_counter = &parameter_stack_counter; }
-#define set_return_stack(void) { stack = return_stack; stack_counter = &return_stack_counter; }
+static u8 param_s[256], ret_s[256];
+static u8 param_sp, ret_sp;
+static void s_param(void) { s = param_s; sp = &param_sp; }
+static void s_ret(void) { s = ret_s; sp = &ret_sp; }
 
-#define get(i_back) (stack + (*stack_counter) - ((i_back) * mode_size))
+static void push8(u8 byte) { s[*sp] = byte; *sp += 1; }
+static u8 pop8(void) { *sp -= 1; return s[*sp]; }
 
-#define pop() (mode_16 ? pop_u16() : pop_u8())
-static u8 pop_u8(void) { 
-    if (!mode_keep) *stack_counter -= (1 + mode_keep); 
-    return stack[*stack_counter]; 
-}
-static u16 pop_u16(void) {
-    if (!mode_keep) *stack_counter -= 2 * (1 + mode_keep); 
-    return *((u16 *)get(0)); 
-}
-
-static void push_u8(u8 item) { stack[*stack_counter] = item; *stack_counter += 1; }
-static void push_u16(u16 item) { memmove(get(0), &item, 2); *stack_counter += 2; }
-static force_inline void push(void *item) {
-    if (mode_16) push_u16(*(u16 *)item);
-    else push_u8(*(u8 *)item);
-}
+static void push16(u16 byte2) { memcpy(s + (*sp), &byte2, 2); }
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -72,67 +58,39 @@ int main(int argc, char **argv) {
         u8 mode_return = (byte & 0x40) >> 6;
         mode_16        = (byte & 0x20) >> 5;
 
-        if (mode_return) { set_return_stack(); }
-        else { set_parameter_stack(); }
+        if (mode_return) s_ret(); else s_param();
 
-        switch (op) {
-            case op_push: push(&rom_file.ptr[++i]); break;
-            case op_drop: discard(pop()); break;
-            case op_nip:  memmove(stack + *stack_counter - 2 * mode_size, stack + *stack_counter - 1 * mode_size, mode_size); *stack_counter -= mode_size;
-            case op_swap: {
-                void *temp2 = get(2);
-                memmove(get(2), get(1), mode_size);
-                memmove(get(1), temp2, mode_size);
-            } break;
-            case op_rot: {
-                void *temp3 = get(3);
-                memmove(get(3), get(2), mode_size);
-                memmove(get(2), get(1), mode_size);
-                memmove(get(1), temp3, mode_size);
-            } break;
-            case op_dup:  { void *top = get(1); push(top); } break;
-            case op_over: { void *second = get(2); push(second); } break;
-            case op_eq:   { u16 right = (u16)pop(), left = (u16)pop(), result = (left == right); push(&result); } break;
-            case op_neq:  { u16 right = (u16)pop(), left = (u16)pop(), result = (left != right); push(&result); } break;
-            case op_gt:   { u16 right = (u16)pop(), left = (u16)pop(), result = (left > right); push(&result); } break;
-            case op_lt:   { u16 right = (u16)pop(), left = (u16)pop(), result = (left < right); push(&result); } break;
-            case op_add:  if (mode_16) push_u16(pop_u16() + pop_u16()); else push_u8(pop_u8() + pop_u8()); break;
-            case op_add:  if (mode_16) push_u16(pop_u16() + pop_u16()); else push_u8(pop_u8() + pop_u8()); break;
-            case op_sub:  { 
-                if (mode_16) {
-                    u16 right = pop_u16(), left = pop_u16(); push_u16(left - right);
-                } else {
-                    u8 right = pop_u8(), left = pop_u8(); push_u8(left - right);
-                }
-            } break;
-            case op_mul: {
-                if (mode_16) {
-                    u16 right = pop_u16(), left = pop_u16(); push_u16(left * right);
-                } else {
-                    u8 right = pop_u8(), left = pop_u8(); push_u8(left * right);
-                }
-            } break;
-            case op_div: {
-                if (mode_16) {
-                    u16 right = pop_u16(), left = pop_u16(); push_u16(left / right);
-                } else {
-                    u8 right = pop_u8(), left = pop_u8(); push_u8(left / right);
-                }
-            } break;
-            case op_inc: { void *top = get(1); if (mode_16) *(u16 *)top += 1; else *(u8 *)top += 1; } break;
-            case op_jump:               i += pop(); break;
+        if (mode_16) {
+            unreachable;
+        } else switch(op) {
+            case op_push: push8(rom_file.ptr[++i]); break;
+            case op_drop: discard(pop8()); break;
+            case op_nip:  s[*sp - 2] = s[*sp - 1]; *sp -= 1; break;
+            case op_swap: u8 temp2 = s[*sp - 2]; s[*sp - 2] = s[*sp - 1]; s[*sp - 1] = temp2; break;
+            case op_rot:  u8 temp3 = s[*sp - 3]; s[*sp - 3] = s[*sp - 2]; s[*sp - 2] = s[*sp - 1]; s[*sp - 1] = temp3; break;
+            case op_dup:  push8(s[*sp - 1]); break;
+            case op_over: push8(s[*sp - 2]); break;
+            case op_eq:   push8(pop8() == pop8()); break;
+            case op_neq:  push8(pop8() != pop8()); break;
+            case op_gt:   { u8 right = pop8(), left = pop8(); push8(left > right); } break; 
+            case op_lt:   { u8 right = pop8(), left = pop8(); push8(left < right); } break; 
+            case op_add:  push8(pop8() + pop8()); break;
+            case op_sub:  { u8 right = pop8(), left = pop8(); push8(left - right); } break; 
+            case op_mul:  push8(pop8() * pop8()); break;
+            case op_div:  { u8 right = pop8(), left = pop8(); push8(left / right); } break; 
+            case op_inc:  s[*sp - 1] += 1; break;
+            case op_jump:               i += pop8(); break;
             case op_jump_imm:           i += rom_file.ptr[i + 1]; break;
-            case op_jump_cond:          u8 relative_addr = pop(); if (pop()) i += relative_addr; break;
-            case op_jump_imm_cond:      i += 1; if (pop()) i += rom_file.ptr[i]; break;
-            case op_jump_stash_ret:     set_return_stack(); push_u16(i); set_parameter_stack(); i += pop_u16(); break; 
-            case op_jump_imm_stash_ret: set_return_stack(); push_u16(i); i += rom_file.ptr[i + 1]; break;
-            case op_return:             i = return_pop(); break;
-            case op_stash: return_push(pop()); break;
+            case op_jump_cond:          u8 relative_addr = pop8(); if (pop8()) i += relative_addr; break;
+            case op_jump_imm_cond:      i += 1; if (pop8()) i += rom_file.ptr[i]; break;
+            case op_jump_stash_ret:     s_ret(); push16(i); s_param(); i += pop8(); break;
+            case op_jump_imm_stash_ret: i += 1; s_ret(); push16(i); i += rom_file.ptr[i]; break;
+            case op_return:             s_ret(); i = pop8(); s_param(); break;
             default: unreachable;
         }
     }
 
-    for (u8 i = 0; i < stack_counter; i += 1) printf("%d; ", stack[i]);
+    for (u8 i = 0; i < *sp; i += 1) printf("%d; ", s[i]);
 
     arena_deinit(&arena);
     return 0;

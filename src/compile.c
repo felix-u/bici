@@ -22,17 +22,23 @@ static void compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
 
     for (usize i = 0; i < len; i += 1) {
         if (is_whitespace(asm[i])) continue;
+
         if (isalpha(asm[i])) {
             usize beg_i = i;
             for (; i < len && !is_whitespace(asm[i]); i += 1) {
                 if (!('a' <= asm[i] && asm[i] <= 'z')) break;
             }
             String8 lexeme = string8_range(asm_file, beg_i, i);
-            if (string8_eql(lexeme, string8("xor"))) compile_op(op_xor, 0, 0, 0);
+
+            if (false) {}
+            #define compile_if_op_string(name, val)\
+                else if (string8_eql(lexeme, string8(#name))) compile_op(val, 0, 0, 0);
+            for_op(compile_if_op_string)
             else unreachable;
 
             continue;
         }
+
         switch (asm[i]) {
             case '#': {
                 usize beg_i = i;

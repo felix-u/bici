@@ -3,40 +3,44 @@
 
 const char *usage = "usage: bici <com|run|script> <file...>";
 
+#define for_op(action)\
+    action(push,  0x00)\
+    action(drop,  0x01)\
+    action(nip,   0x02)\
+    action(swap,  0x03)\
+    action(rot,   0x04)\
+    action(dup,   0x05)\
+    action(over,  0x06)\
+    action(eq,    0x07)\
+    action(neq,   0x08)\
+    action(gt,    0x09)\
+    action(lt,    0x0a)\
+    action(add,   0x0b)\
+    action(sub,   0x0c)\
+    action(mul,   0x0d)\
+    action(div,   0x0e)\
+    action(inc,   0x0f)\
+    action(and,   0x10)\
+    action(or,    0x11)\
+    action(xor,   0x12)\
+    action(shift, 0x13)\
+    action(jump,  0x14)\
+    action(jump_imm,           0x15)\
+    action(jump_cond,          0x16)\
+    action(jump_imm_cond,      0x17)\
+    action(jump_stash_ret,     0x18)\
+    action(jump_imm_stash_ret, 0x19)\
+    action(stash,     0x1a)\
+    action(load,      0x1b)\
+    action(load_rel,  0x1c)\
+    action(store,     0x1d)\
+    action(store_rel, 0x1e)\
+    action(read,      0x1f)\
+    action(write,     0x20)\
+
 enumdef(Op, u8) {
-    op_push  = 0x00,
-    op_drop  = 0x01,
-    op_nip   = 0x02,
-    op_swap  = 0x03,
-    op_rot   = 0x04,
-    op_dup   = 0x05,
-    op_over  = 0x06,
-    op_eq    = 0x07,
-    op_neq   = 0x08,
-    op_gt    = 0x09,
-    op_lt    = 0x0a,
-    op_add   = 0x0b,
-    op_sub   = 0x0c,
-    op_mul   = 0x0d,
-    op_div   = 0x0e,
-    op_inc   = 0x0f,
-    op_and   = 0x10,
-    op_or    = 0x11,
-    op_xor   = 0x12,
-    op_shift = 0x13,
-    op_jump                = 0x14,
-    op_jump_imm            = 0x15,
-    op_jump_cond           = 0x16,
-    op_jump_imm_cond       = 0x17,
-    op_jump_stash_ret      = 0x18,
-    op_jump_imm_stash_ret  = 0x19,
-    op_stash     = 0x1a,
-    op_load      = 0x1b,
-    op_load_rel  = 0x1c,
-    op_store     = 0x1d,
-    op_store_rel = 0x1e,
-    op_read      = 0x1f,
-    op_write     = 0x20,
+    #define op_def_enum(name, val) op_##name = val,
+    for_op(op_def_enum)
 };
 
 #include "compile.c"

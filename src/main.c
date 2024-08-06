@@ -1,6 +1,8 @@
 #include "base/base_include.h"
 #include "base/base_include.c"
 
+const char *usage = "usage: bici <com|run|script> <file...>";
+
 enumdef(Op, u8) {
     op_push  = 0x00,
     op_drop  = 0x01,
@@ -37,13 +39,15 @@ enumdef(Op, u8) {
     op_write     = 0x20,
 };
 
-static u8 mode_keep, mode_16;
-static u8 *s, *sp;
+#include "compile.c"
 
 static u8 *device_table;
 
 static u8 param_s[256], ret_s[256];
 static u8 param_sp, ret_sp;
+static u8 mode_keep, mode_16;
+static u8 *s, *sp = &param_sp;
+
 static void s_param(void) { s = param_s; sp = &param_sp; }
 static void s_ret(void) { s = ret_s; sp = &ret_sp; }
 
@@ -54,16 +58,13 @@ static u8 pop8(void) { u8 val = s[*sp - 1]; if (!mode_keep) *sp -= 1; return val
 
 static void push16(u16 byte2) { memcpy(s + (*sp), &byte2, 2); }
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        err("usage: bici <rom>");
-        return 1;
-    }
+static void run(char *path_biciasm) {
+    u8 mem[65536] = {0};
+    Arena arena = { .mem = mem, .cap = 65536 };
 
-    Arena arena = arena_init(65536);
-    u8 *mem = arena.mem;
     device_table = arena_alloc(&arena, 256, 1);
-    String8 program = file_read(&arena, argv[1], "rb");
+    usize max_bytes = 65536 - 0x100;
+    String8 program = file_read(&arena, path_biciasm, "rb", max_bytes);
     u16 end = (u16)(0x100 + program.len);
 
     for (u16 i = 0x100; i < end; i += 1) {
@@ -119,6 +120,42 @@ int main(int argc, char **argv) {
     }
 
     for (u8 i = 0; i < *sp; i += 1) printf("%d; ", s[i]);
+}
+
+int main(int argc, char **argv) {
+    if (argc < 3) {
+        errf("%s", usage);
+        return 1;
+    }
+
+    Arena arena = {0};
+
+    String8 cmd = string8_from_cstring(argv[1]);
+    if (string8_eql(cmd, string8("com"))) {
+        if (argc != 4) {
+            err("usage: bici com <file.biciasm> <file.bici>");
+            return 1;
+        }
+        usize max_asm_filesize = 8 * 1024 * 1024;
+        arena = arena_init(max_asm_filesize);
+        compile(&arena, max_asm_filesize, argv[2], argv[3]);
+    } else if (string8_eql(cmd, string8("run"))) {
+        run(argv[2]);
+        return 0;
+    } else if (string8_eql(cmd, string8("script"))) {
+        if (argc != 4) {
+            err("usage: bici script <file.biciasm> <file.bici>");
+            return 1;
+        }
+        usize max_asm_filesize = 8 * 1024 * 1024;
+        arena = arena_init(max_asm_filesize);
+        compile(&arena, max_asm_filesize, argv[2], argv[3]);
+        run(argv[3]);
+        return 0;
+    } else {
+        errf("no such command '%.*s'\n%s", cmd, usage);
+        return 1;
+    }
 
     arena_deinit(&arena);
     return 0;

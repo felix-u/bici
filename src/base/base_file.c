@@ -5,7 +5,7 @@ static FILE *file_open(char *path, char *mode) {
     return file;
 }
 
-static String8 file_read(Arena *arena, char *path, char *mode) {
+static String8 file_read(Arena *arena, char *path, char *mode, usize max_bytes) {
     String8 bytes = {0};
     if (path == 0 || mode == 0) return bytes;
 
@@ -13,6 +13,12 @@ static String8 file_read(Arena *arena, char *path, char *mode) {
 
     fseek(file, 0L, SEEK_END);
     usize filesize = ftell(file);
+    if (filesize + 1 > max_bytes) {
+        fclose(file);
+        errf("file '%s' is too large: %zu/%zu bytes", path, filesize + 1, max_bytes);
+        return (String8){0};
+    }
+
     bytes.ptr = arena_alloc(arena, filesize + 1, sizeof(u8));
 
     fseek(file, 0L, SEEK_SET);

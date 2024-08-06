@@ -4,39 +4,39 @@
 const char *usage = "usage: bici <com|run|script> <file...>";
 
 #define for_op(action)\
-    action(push,  0x00)\
-    action(drop,  0x01)\
-    action(nip,   0x02)\
-    action(swap,  0x03)\
-    action(rot,   0x04)\
-    action(dup,   0x05)\
-    action(over,  0x06)\
-    action(eq,    0x07)\
-    action(neq,   0x08)\
-    action(gt,    0x09)\
-    action(lt,    0x0a)\
-    action(add,   0x0b)\
-    action(sub,   0x0c)\
-    action(mul,   0x0d)\
-    action(div,   0x0e)\
-    action(inc,   0x0f)\
-    action(and,   0x10)\
-    action(or,    0x11)\
-    action(xor,   0x12)\
-    action(shift, 0x13)\
-    action(jump,  0x14)\
-    action(jump_imm,           0x15)\
-    action(jump_cond,          0x16)\
-    action(jump_imm_cond,      0x17)\
-    action(jump_stash_ret,     0x18)\
-    action(jump_imm_stash_ret, 0x19)\
-    action(stash,     0x1a)\
-    action(load,      0x1b)\
-    action(load_rel,  0x1c)\
-    action(store,     0x1d)\
-    action(store_rel, 0x1e)\
-    action(read,      0x1f)\
-    action(write,     0x20)\
+    action(push,   0x00)\
+    action(drop,   0x01)\
+    action(nip,    0x02)\
+    action(swap,   0x03)\
+    action(rot,    0x04)\
+    action(dup,    0x05)\
+    action(over,   0x06)\
+    action(eq,     0x07)\
+    action(neq,    0x08)\
+    action(gt,     0x09)\
+    action(lt,     0x0a)\
+    action(add,    0x0b)\
+    action(sub,    0x0c)\
+    action(mul,    0x0d)\
+    action(div,    0x0e)\
+    action(inc,    0x0f)\
+    action(and,    0x10)\
+    action(or,     0x11)\
+    action(xor,    0x12)\
+    action(shift,  0x13)\
+    action(jmp,    0x14)\
+    action(jmi,    0x15)\
+    action(jeq,    0x16)\
+    action(jei,    0x17)\
+    action(jst,    0x18)\
+    action(jsi,    0x19)\
+    action(stash,  0x1a)\
+    action(load,   0x1b)\
+    action(loadr,  0x1c)\
+    action(store,  0x1d)\
+    action(storer, 0x1e)\
+    action(read,   0x1f)\
+    action(write,  0x20)\
 
 enumdef(Op, u8) {
     #define op_def_enum(name, val) op_##name = val,
@@ -83,42 +83,39 @@ static void run(char *path_biciasm) {
         if (mode_16) {
             unreachable;
         } else switch(op) {
-            case op_push:  push8(mem[++i]); break;
-            case op_drop:  discard(pop8()); break;
-            case op_nip:   *get(2) = *get(1); *sp -= 1; break;
-            case op_swap:  u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; break;
-            case op_rot:   u8 temp3 = *get(3); *get(3) = *get(2); *get(2) = *get(1); *get(1) = temp3; break;
-            case op_dup:   push8(*get(1)); break;
-            case op_over:  push8(*get(2)); break;
-            case op_eq:    push8(pop8() == pop8()); break;
-            case op_neq:   push8(pop8() != pop8()); break;
-            case op_gt:    { u8 right = pop8(), left = pop8(); push8(left > right); } break; 
-            case op_lt:    { u8 right = pop8(), left = pop8(); push8(left < right); } break; 
-            case op_add:   push8(pop8() + pop8()); break;
-            case op_sub:   { u8 right = pop8(), left = pop8(); push8(left - right); } break; 
-            case op_mul:   push8(pop8() * pop8()); break;
-            case op_div:   { u8 right = pop8(), left = pop8(); push8(left / right); } break; 
-            case op_inc:   *get(1) += 1; break;
-            case op_and:   push8(pop8() & pop8()); break;
-            case op_or:    push8(pop8() | pop8()); break;
-            case op_xor:   push8(pop8() ^ pop8()); break; 
-            case op_shift: { 
-                u8 shift = pop8(), rshift = shift & 0x0f, lshift = (shift & 0xf0) >> 4; 
-                push8(pop8() << lshift >> rshift); 
-            } break;
-            case op_jump:               i += pop8(); break;
-            case op_jump_imm:           i += mem[i + 1]; break;
-            case op_jump_cond:          u8 rel_addr = pop8(); if (pop8()) i += rel_addr; break;
-            case op_jump_imm_cond:      i += 1; if (pop8()) i += mem[i]; break;
-            case op_jump_stash_ret:     s_ret(); push16(i); s_param(); i += pop8(); break;
-            case op_jump_imm_stash_ret: i += 1; s_ret(); push16(i); i += mem[i]; break;
-            case op_stash:     u8 val = pop8(); s_ret(); push8(val); s_param(); break; 
-            case op_load:      push8(mem[pop8()]); break;
-            case op_load_rel:  push8(mem[i + pop8()]); break;
-            case op_store:     mem[pop8()] = pop8(); break;
-            case op_store_rel: mem[i + pop8()] = pop8(); break;
-            case op_read:      push8(device_table[pop8()]); break;
-            case op_write:     device_table[pop8()] = pop8(); break;
+            case op_push:   push8(mem[++i]); break;
+            case op_drop:   discard(pop8()); break;
+            case op_nip:    *get(2) = *get(1); *sp -= 1; break;
+            case op_swap:   u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; break;
+            case op_rot:    u8 temp3 = *get(3); *get(3) = *get(2); *get(2) = *get(1); *get(1) = temp3; break;
+            case op_dup:    push8(*get(1)); break;
+            case op_over:   push8(*get(2)); break;
+            case op_eq:     push8(pop8() == pop8()); break;
+            case op_neq:    push8(pop8() != pop8()); break;
+            case op_gt:     { u8 right = pop8(), left = pop8(); push8(left > right); } break; 
+            case op_lt:     { u8 right = pop8(), left = pop8(); push8(left < right); } break; 
+            case op_add:    push8(pop8() + pop8()); break;
+            case op_sub:    { u8 right = pop8(), left = pop8(); push8(left - right); } break; 
+            case op_mul:    push8(pop8() * pop8()); break;
+            case op_div:    { u8 right = pop8(), left = pop8(); push8(left / right); } break; 
+            case op_inc:    *get(1) += 1; break;
+            case op_and:    push8(pop8() & pop8()); break;
+            case op_or:     push8(pop8() | pop8()); break;
+            case op_xor:    push8(pop8() ^ pop8()); break; 
+            case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push8(pop8() << l >> r); } break;
+            case op_jmp:    i += pop8(); break;
+            case op_jmi:    i += mem[i + 1]; break;
+            case op_jeq:    u8 rel_addr = pop8(); if (pop8()) i += rel_addr; break;
+            case op_jei:    i += 1; if (pop8()) i += mem[i]; break;
+            case op_jst:    s_ret(); push16(i); s_param(); i += pop8(); break;
+            case op_jsi:    i += 1; s_ret(); push16(i); i += mem[i]; break;
+            case op_stash:  u8 val = pop8(); s_ret(); push8(val); s_param(); break; 
+            case op_load:   push8(mem[pop8()]); break;
+            case op_loadr:  push8(mem[i + pop8()]); break;
+            case op_store:  mem[pop8()] = pop8(); break;
+            case op_storer: mem[i + pop8()] = pop8(); break;
+            case op_read:   push8(device_table[pop8()]); break;
+            case op_write:  device_table[pop8()] = pop8(); break;
             default: unreachable;
         }
     }

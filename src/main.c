@@ -119,7 +119,9 @@ static void run(char *path_biciasm) {
         }
     }
 
-    for (u8 i = 0; i < *sp; i += 1) printf("%d; ", s[i]);
+    printf("\nRUN ===\n");
+    for (u8 i = 0; i < *sp; i += 1) printf("%02x ", s[i]);
+    putchar('\n');
 }
 
 int main(int argc, char **argv) {

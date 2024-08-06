@@ -13,24 +13,38 @@ static void compile_op(Op op, bool mode_16, bool mode_ret, bool mode_keep) {
     write(op | (mode_16 << 5) | (mode_ret << 6) | (mode_keep << 7));
 }
 
+static bool is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
 static void compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, char *path_bici) {
     String8 asm_file = file_read(arena, path_biciasm, "rb", max_asm_filesize);
     u8 *asm = asm_file.ptr;
     usize len = asm_file.len;
 
     for (usize i = 0; i < len; i += 1) {
+        if (is_whitespace(asm[i])) continue;
+        if (isalpha(asm[i])) {
+            usize beg_i = i;
+            for (; i < len && !is_whitespace(asm[i]); i += 1) {
+                if (!('a' <= asm[i] && asm[i] <= 'z')) break;
+            }
+            String8 lexeme = string8_range(asm_file, beg_i, i);
+            if (string8_eql(lexeme, string8("xor"))) compile_op(op_xor, 0, 0, 0);
+            else unreachable;
+
+            continue;
+        }
         switch (asm[i]) {
             case '#': {
                 usize beg_i = i;
                 i += 1; 
                 u8 digit_num = 0;
-                for (; i < len; i += 1, digit_num += 1) {
+                for (; i < len && !is_whitespace(asm[i]); i += 1, digit_num += 1) {
                     if (!((asm[i] >= '0' && asm[i] <= '9') || (asm[i] >= 'a' && asm[i] <= 'f'))) {
                         errf("expected hex digit [0-9|a-f], found byte '%c'/0d%d/0x%x at '%s'[%zu]", asm[i], asm[i], asm[i], path_biciasm, i);
                         return;
                     }
                 }
-                if (digit_num != 2 || digit_num != 4) {
+                if (digit_num != 2 && digit_num != 4) {
                     errf("expected 2 digits (byte) or 4 digits (short), found %zu digits in number at '%s'[%zu]", digit_num, path_biciasm, beg_i);
                     return;
                 }
@@ -56,6 +70,13 @@ static void compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
         }
     }
 
-    // TODO
-    discard(path_bici);
+    FILE *rom_file = file_open(path_bici, "wb");
+    if (rom_file == 0) return;
+    String8 rom = { .ptr = out, .len = pc };
+    file_write(rom_file, rom);
+    fclose(rom_file);
+
+    printf("ASM ===\n");
+    for (usize i = 0; i < pc; i += 1) printf("%02x ", out[i]);
+    putchar('\n');
 }

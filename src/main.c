@@ -56,13 +56,16 @@ static void s_param(void) { s = param_s; sp = &param_sp; }
 static void s_ret(void) { s = ret_s; sp = &ret_sp; }
 
 static u8 *get(u16 i_back) { return s + *sp - i_back; }
+static void push(u8 byte) { s[*sp] = byte; *sp += 1; }
+static u8 pop(void) { u8 val = s[*sp - 1]; if (!mode_keep) *sp -= 1; return val; }
 
-static void push8(u8 byte) { s[*sp] = byte; *sp += 1; }
-static u8 pop8(void) { u8 val = s[*sp - 1]; if (!mode_keep) *sp -= 1; return val; }
-
-static void push16(u16 byte2) { memcpy(s + (*sp), &byte2, 2); }
+#define get2(i_back) (*((u16 *)(s + *sp) - (i_back)))
+static void push2(u16 byte2) { push((u8)byte2); push(byte2 >> 8); }
+static u16 pop2(void) { u16 val = s[*sp - 1] | (s[*sp - 2] << 8); if (!mode_keep) *sp -= 2; return val; }
 
 static void run(char *path_biciasm) {
+    printf("\nRUN ===\n");
+
     u8 mem[65536] = {0};
     Arena arena = { .mem = mem, .cap = 65536 };
 
@@ -73,55 +76,58 @@ static void run(char *path_biciasm) {
 
     for (u16 i = 0x100; i < end; i += 1) {
         u8 byte = mem[i];
-        Op op = byte & 0x3f;
+        Op op = byte & 0x1f;
         mode_keep   = (byte & 0x80) >> 7;
         u8 mode_ret = (byte & 0x40) >> 6;
         mode_16     = (byte & 0x20) >> 5;
 
         if (mode_ret) s_ret(); else s_param();
 
-        if (mode_16) {
-            unreachable;
+        if (mode_16) switch(op) {
+            case op_push:  i += 1; push2(*(u16 *)(mem + i)); i += 1; break;
+            case op_add:   { u16 left = get2(2), right = get2(1); pop2(); pop2(); push2(left + right); } break;
+            case op_stash: { u16 val = pop2(); s_ret(); push2(val); s_param(); } break;
+            default: errf("TODO { k:%d r:%d 2:%d op:#%02x }", mode_keep, mode_ret, mode_16, op); return;
         } else switch(op) {
-            case op_push:   push8(mem[++i]); break;
-            case op_drop:   discard(pop8()); break;
+            case op_push:   push(mem[++i]); break;
+            case op_drop:   discard(pop()); break;
             case op_nip:    *get(2) = *get(1); *sp -= 1; break;
             case op_swap:   u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; break;
             case op_rot:    u8 temp3 = *get(3); *get(3) = *get(2); *get(2) = *get(1); *get(1) = temp3; break;
-            case op_dup:    push8(*get(1)); break;
-            case op_over:   push8(*get(2)); break;
-            case op_eq:     push8(pop8() == pop8()); break;
-            case op_neq:    push8(pop8() != pop8()); break;
-            case op_gt:     { u8 right = pop8(), left = pop8(); push8(left > right); } break; 
-            case op_lt:     { u8 right = pop8(), left = pop8(); push8(left < right); } break; 
-            case op_add:    push8(pop8() + pop8()); break;
-            case op_sub:    { u8 right = pop8(), left = pop8(); push8(left - right); } break; 
-            case op_mul:    push8(pop8() * pop8()); break;
-            case op_div:    { u8 right = pop8(), left = pop8(); push8(left / right); } break; 
+            case op_dup:    push(*get(1)); break;
+            case op_over:   push(*get(2)); break;
+            case op_eq:     push(pop() == pop()); break;
+            case op_neq:    push(pop() != pop()); break;
+            case op_gt:     { u8 right = pop(), left = pop(); push(left > right); } break; 
+            case op_lt:     { u8 right = pop(), left = pop(); push(left < right); } break; 
+            case op_add:    push(pop() + pop()); break;
+            case op_sub:    { u8 right = pop(), left = pop(); push(left - right); } break; 
+            case op_mul:    push(pop() * pop()); break;
+            case op_div:    { u8 right = pop(), left = pop(); push(left / right); } break; 
             case op_inc:    *get(1) += 1; break;
-            case op_and:    push8(pop8() & pop8()); break;
-            case op_or:     push8(pop8() | pop8()); break;
-            case op_xor:    push8(pop8() ^ pop8()); break; 
-            case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push8(pop8() << l >> r); } break;
-            case op_jmp:    i += pop8(); break;
+            case op_and:    push(pop() & pop()); break;
+            case op_or:     push(pop() | pop()); break;
+            case op_xor:    push(pop() ^ pop()); break; 
+            case op_shift:  { u8 shift = pop(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push(pop() << l >> r); } break;
+            case op_jmp:    i += pop(); break;
             case op_jmi:    i += mem[i + 1]; break;
-            case op_jeq:    u8 rel_addr = pop8(); if (pop8()) i += rel_addr; break;
-            case op_jei:    i += 1; if (pop8()) i += mem[i]; break;
-            case op_jst:    s_ret(); push16(i); s_param(); i += pop8(); break;
-            case op_jsi:    i += 1; s_ret(); push16(i); i += mem[i]; break;
-            case op_stash:  u8 val = pop8(); s_ret(); push8(val); s_param(); break; 
-            case op_load:   push8(mem[pop8()]); break;
-            case op_loadr:  push8(mem[i + pop8()]); break;
-            case op_store:  mem[pop8()] = pop8(); break;
-            case op_storer: mem[i + pop8()] = pop8(); break;
-            case op_read:   push8(device_table[pop8()]); break;
-            case op_write:  device_table[pop8()] = pop8(); break;
+            case op_jeq:    u8 rel_addr = pop(); if (pop()) i += rel_addr; break;
+            case op_jei:    i += 1; if (pop()) i += mem[i]; break;
+            case op_jst:    s_ret(); push2(i); s_param(); i += pop(); break;
+            case op_jsi:    i += 1; s_ret(); push2(i); i += mem[i]; break;
+            case op_stash:  { u8 val = pop(); s_ret(); push(val); s_param(); } break; 
+            case op_load:   push(mem[pop()]); break;
+            case op_loadr:  push(mem[i + pop()]); break;
+            case op_store:  mem[pop()] = pop(); break;
+            case op_storer: mem[i + pop()] = pop(); break;
+            case op_read:   push(device_table[pop()]); break;
+            case op_write:  device_table[pop()] = pop(); break;
             default: unreachable;
         }
     }
 
-    printf("\nRUN ===\n");
-    for (u8 i = 0; i < *sp; i += 1) printf("%02x ", s[i]);
+    printf("p: "); for (u8 i = 0; i < param_sp; i += 1) printf("%02x ", param_s[i]);
+    printf("\nr: "); for (u8 i = 0; i < ret_sp; i += 1) printf("%02x ", ret_s[i]);
     putchar('\n');
 }
 
@@ -152,11 +158,9 @@ int main(int argc, char **argv) {
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
-        compile(&arena, max_asm_filesize, argv[2], argv[3]);
-        run(argv[3]);
-        return 0;
+        if (compile(&arena, max_asm_filesize, argv[2], argv[3])) run(argv[3]);
     } else {
-        errf("no such command '%.*s'\n%s", cmd, usage);
+        errf("no such command '%.*s'\n%s", string_fmt(cmd), usage);
         return 1;
     }
 

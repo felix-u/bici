@@ -1,1 +1,2 @@
-#02 jmp #03 #04
+#0002 stash;2k  #0003 stash;2k  add;2kr
+

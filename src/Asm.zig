@@ -26,6 +26,13 @@ pub fn compile(allocator: std.mem.Allocator, _path_asm_file: []const u8) ![]cons
         var mode_2: u8 = 0;
 
         switch (assembly[i]) {
+            '/' => if (i + 1 < assembly.len and assembly[i + 1] == '/') {
+                i += 2;
+                while (i < assembly.len and assembly[i] != '\n') {
+                    i += 1;
+                }
+                continue;
+            },
             '|' => {
                 i += 1;
                 const hex = try parseHex();

@@ -1,5 +1,10 @@
 |100
 
-#00 write {# "Hello, _20 "World! } #02 #04 +
+// TODO
+// &number load;2 #00 write
+
+#00 write {# "Hello, _20 "World! } #04 #02 /
 
 break
+
+// :number {# "99 "bottles '  "of '  "beer '  "on '  "the '  "wall }

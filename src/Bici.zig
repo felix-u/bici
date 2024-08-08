@@ -72,9 +72,13 @@ var stack_ptr = &stacks.param_ptr;
 
 var keep = false;
 
-pub fn run(memory: []const u8) !void {
+var memory = [_]u8{0} ** 0x10000;
+
+pub fn run(bytecode: []const u8) !void {
+    @memcpy(memory[0..bytecode.len], bytecode);
+
     std.debug.print("MEMORY ===\n", .{});
-    for (memory[0x100..], 0x100..) |byte, i| std.debug.print(
+    for (memory[0x100..bytecode.len], 0x100..) |byte, i| std.debug.print(
         "[{x:4}]\t'{c}'\t#{x:02}\t{s}\n",
         .{ i, byte, byte, @tagName(@as(Op, @enumFromInt(byte & 0x1f))) },
     );
@@ -109,6 +113,11 @@ pub fn run(memory: []const u8) !void {
                     push(memory[i]);
                 },
                 .@"+" => push(pop() + pop()),
+                .@"/" => {
+                    const right = pop();
+                    const left = pop();
+                    push(left / right);
+                },
                 .write => {
                     // TODO: device table in memory[0x00..0x100] (special-cased for now)
                     std.debug.assert(pop() == 0x00);
@@ -125,7 +134,7 @@ pub fn run(memory: []const u8) !void {
             .short => switch (instruction.op) {
                 .push => {
                     i +%= 1;
-                    push2(u16LittleEndianAt(memory, i));
+                    push2(u16LittleEndianAt(&memory, i));
                     i +%= 1;
                 },
                 .@"+" => push2(pop2() + pop2()),

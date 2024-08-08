@@ -68,33 +68,6 @@ static Instruction instruction_from_byte(u8 byte) {
     } };
 }
 
-#define print_arena_cap 256
-static u8 print_arena_mem[print_arena_cap];
-static Arena print_arena = { .mem = print_arena_mem, .cap = print_arena_cap };
-static String8 instruction_print(Instruction instruction) {
-    Arena_Temp print_temp = arena_temp_begin(&print_arena);
-
-    u8 byte = byte_from_instruction(instruction);
-    usize advance = string8_printf(&print_arena, print_arena_cap, "<0x%02x>{ op: ", byte).len;
-
-    switch (byte) {
-        case op_jmi: case op_jei: case op_jsi: case op_break: {
-            advance += string8_printf(&print_arena, print_arena_cap - advance, "%s", op_name[byte]).len;
-        } break;
-        default: {
-            advance += string8_printf(&print_arena, print_arena_cap - advance,
-                "%s, mode: { keep: %d, stack: %d, size: %d }",
-                op_name[instruction.op], instruction.mode.keep, instruction.mode.stack, instruction.mode.size
-            ).len;
-        } break;
-    }
-    
-    string8_printf(&print_arena, print_arena_cap - advance, "}");
-    String8 result = { .ptr = print_arena.mem, .len = print_arena.offset };
-    arena_temp_end(print_temp);
-    return result;
-}
-
 structdef(Stacks) {
     u8 param[0x100], param_ptr;
     u8 ret[0x100], ret_ptr;
@@ -136,6 +109,8 @@ static void run(char *path_biciasm) {
         }
 
         Instruction instruction = instruction_from_byte(byte);
+        keep = instruction.mode.keep;
+
         switch (instruction.mode.stack) {
             case stack_param: stacks_set_param(); break;
             case stack_ret: stacks_set_ret(); break;
@@ -178,14 +153,14 @@ static void run(char *path_biciasm) {
                 case op_storer: memory[(u16)(i + pop())] = pop(); break;
                 case op_read:   panic("TODO"); break;
                 case op_write:  panic("TODO"); break;
-                default: panicf("TODO %.*s", instruction_print(instruction));
+                default: panicf("TODO %s{#%02x}", op_name[instruction.op], byte);
             } break;
             case size_short: switch (instruction.op) {
                 case op_push:  i += 1; push2(*(u16 *)(memory + i)); i += 1; break;
                 case op_add:   { u16 left = get2(2), right = get2(1); pop2(); pop2(); push2(left + right); } break;
                 case op_not:   push2(~pop2()); break;
                 case op_stash: { u16 val = pop2(); stacks_set_ret(); push2(val); stacks_set_param(); } break;
-                default: panicf("TODO %.*s", instruction_print(instruction));
+                default: panicf("TODO %s{#%02x}", op_name[instruction.op], byte);
             } break;
             default: unreachable;
         }

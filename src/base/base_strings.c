@@ -39,6 +39,7 @@ static String8 string8_from_int_base(Arena *arena, usize _num, u8 base) {
 }
 
 static String8 string8_printf(Arena *arena, usize alloc_size, char *fmt, ...) {
+    printf("ok\n");
     assume(alloc_size > 1);
 
     va_list args;

@@ -41,14 +41,42 @@ enumdef(Op, u8) {
     op_max_value_plus_one
 };
 
-const char *op_name[op_max_value_plus_one] = {
+const char *op_name_table[op_max_value_plus_one] = {
     #define op_set_name(name, val) [val] = #name,
     for_op(op_set_name)
 };
 
+static bool instruction_is_special(u8 instruction) {
+    switch (instruction) {
+        case op_jmi: case op_jei: case op_jsi: case op_break: return true;
+        default: return false;
+    }
+}
+
+static const char *op_name(u8 instruction) {
+    return op_name_table[instruction_is_special(instruction) ? instruction : (instruction & 0x1f)];
+}
+
 enumdef(Stack, u8) { stack_param = 0, stack_ret = 1 };
 enumdef(Size, u8)  { size_byte = 0, size_short = 1 };
 structdef(Mode) { b8 keep; Stack stack; Size size; };
+
+static const char *mode_name(u8 instruction) {
+    if (instruction_is_special(instruction)) return ""; 
+    switch ((instruction & 0xe0) >> 5) {
+        case 0x0: return "";
+        case 0x1: return ";2";
+        case 0x2: return ";r";
+        case 0x3: return ";r2";
+        case 0x4: return ";k";
+        case 0x5: return ";k2";
+        case 0x6: return ";kr";
+        case 0x7: return ";kr2";
+    }
+    unreachable;
+    return 0;
+}
+
 structdef(Instruction) { Op op; Mode mode; };
 
 static u8 byte_from_instruction(Instruction instruction) {
@@ -93,10 +121,15 @@ static void push2(u16 byte2) { push(byte2 >> 8); push((u8)byte2); }
 static u16 pop2(void) { u16 val = (u16)s(*stack_ptr - 1) | (u16)(s(*stack_ptr - 2) << 8); if (!keep) *stack_ptr -= 2; return val; }
 
 static void run(char *path_biciasm) {
-    printf("\nRUN ===\n");
+    Arena bici_mem = { .mem = memory, .cap = 0x10000 };
+    String8 program = file_read(&bici_mem, path_biciasm, "rb", 0x10000);
 
-    Arena arena = { .mem = memory, .cap = 0x10000 };
-    file_read(&arena, path_biciasm, "rb", 0x10000);
+    printf("MEMORY ===\n");
+    for (usize i = 0x100; i < program.len; i += 1) {
+        u8 byte = memory[i];
+        printf("[%4zx]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, op_name(byte), mode_name(byte));
+    }
+    printf("\nRUN ===\n");
 
     for (u16 i = 0x100; true; i += 1) {
         u8 byte = mem(i);
@@ -153,14 +186,14 @@ static void run(char *path_biciasm) {
                 case op_storer: memory[(u16)(i + pop())] = pop(); break;
                 case op_read:   panic("TODO"); break;
                 case op_write:  panic("TODO"); break;
-                default: panicf("TODO %s{#%02x}", op_name[instruction.op], byte);
+                default: panicf("TODO %s{#%02x}", op_name(byte), byte);
             } break;
             case size_short: switch (instruction.op) {
                 case op_push:  i += 1; push2(*(u16 *)(memory + i)); i += 1; break;
                 case op_add:   { u16 left = get2(2), right = get2(1); pop2(); pop2(); push2(left + right); } break;
                 case op_not:   push2(~pop2()); break;
                 case op_stash: { u16 val = pop2(); stacks_set_ret(); push2(val); stacks_set_param(); } break;
-                default: panicf("TODO %s{#%02x}", op_name[instruction.op], byte);
+                default: panicf("TODO %s{#%02x}", op_name(byte), byte);
             } break;
             default: unreachable;
         }

@@ -7,7 +7,7 @@ static u32 pc;
     pc += 1;\
 } 
 
-#define write2(byte2) { write(((byte2) & 0xff00) >> 16); write((byte2) & 0x00ff); }
+#define write2(byte2) { write(((byte2) & 0xff00) >> 8); write((byte2) & 0x00ff); }
 
 static void compile_op(u8 mode_k, u8 mode_r, u8 mode_2, Op op) {
     write(op | (mode_2 << 5) | (mode_r << 6) | (mode_k << 7));
@@ -26,13 +26,13 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
         u8 mode_k = 0, mode_r = 0, mode_2 = 0;
 
         if (isalpha(asm[i])) {
-            usize beg_i = i, end_i = i;
+            usize beg_i = i, end_i = beg_i;
             for (; i < len && !is_whitespace(asm[i]); i += 1) {
                 if ('a' <= asm[i] && asm[i] <= 'z') continue;
                 end_i = i;
-                if (asm[i] == ';') {
-                    i += 1;
-                    for (; i < len && !is_whitespace(asm[i]); i += 1) switch (asm[i]) {
+                if (asm[i] == ';') for (i += 1; i < len;) {
+                    if (is_whitespace(asm[i])) goto done;
+                    switch (asm[i]) {
                         case 'k': mode_k = 1; break;
                         case 'r': mode_r = 1; break;
                         case '2': mode_2 = 1; break;
@@ -41,8 +41,11 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
                             return false;
                         } break;
                     }
+                    i += 1;
                 }
             }
+            done:
+            if (end_i == beg_i) end_i = i;
             String8 lexeme = string8_range(asm_file, beg_i, end_i);
 
             if (false) {}

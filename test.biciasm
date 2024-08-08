@@ -3,8 +3,7 @@
 // TODO
 // &number load;2 #00 write
 
-#00 write {# "Hello, _20 "World! } #04 #02 div
-
+#00 write {# "Hello, _20 "World! _0a } #04 #02 div
 break
 
 // :number {# "99 "bottles '  "of '  "beer '  "on '  "the '  "wall }

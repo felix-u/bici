@@ -185,7 +185,14 @@ static void run(char *path_biciasm) {
                 case op_store:  memory[pop()] = pop(); break;
                 case op_storer: memory[(u16)(i + pop())] = pop(); break;
                 case op_read:   panic("TODO"); break;
-                case op_write:  panic("TODO"); break;
+                case op_write: { // TODO: actual implementation (special-cased for now)
+                    assume(pop() == 0x00);
+                    i += 1;
+                    u8 str_len = mem(i);
+                    String8 str = { .ptr = memory + i + 1, .len = str_len };
+                    printf("%.*s", string_fmt(str));
+                    i += str_len;
+                }  break;
                 default: panicf("TODO %s{#%02x}", op_name(byte), byte);
             } break;
             case size_short: switch (instruction.op) {

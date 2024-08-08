@@ -143,7 +143,7 @@ fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const u8 
                 i += 1;
                 forward_res_idx -= 1;
                 const res_pc = forward_res[forward_res_idx];
-                out[res_pc] = @intCast(pc - res_pc);
+                out[res_pc] = @intCast(pc - 1 - res_pc);
                 continue;
             },
             '"' => {
@@ -157,6 +157,16 @@ fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const u8 
                     try write(assembly[i]);
                 }
                 add = 0;
+                continue;
+            },
+            '\'' => {
+                i += 1;
+                if (i == assembly.len) {
+                    std.log.err("expected byte, found EOF at '{s}'[{d}]", .{ path_asm_file, i });
+                    return error.InvalidSyntax;
+                }
+
+                try write(assembly[i]);
                 continue;
             },
             else => {},
@@ -190,7 +200,7 @@ fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const u8 
         }
 
         const lexeme = assembly[beg_i..end_i];
-        inline for (std.meta.tags(Op)) |tag| {
+        for (std.meta.tags(Op)) |tag| {
             if (std.mem.eql(u8, lexeme, @tagName(tag))) {
                 try compileOp(mode_k, mode_r, mode_2, @intFromEnum(tag));
                 break;
@@ -244,11 +254,10 @@ fn sParam() void {
 fn run(bytecode: []const u8) !void {
     std.debug.print("BYTECODE ===\n", .{});
     for (bytecode, 0..) |byte, i| {
-        std.debug.print("[{d:2}]\t'{c}'\t#{x:02}\t{d}\n", .{ i, byte, byte, byte });
+        std.debug.print("[{d:2}]\t'{c}'\t#{x:02}\t{s}\n", .{ i, byte, byte, @tagName(@as(Op, @enumFromInt(byte & 0x1f))) });
     }
-    std.debug.print("\n", .{});
-    // std.debug.print("BYTECODE: {x:02}\n", .{bytecode});
-    defer std.debug.print("\nRUN ===\nparam:\t{x:02}\nreturn:\t{x:02}\n", .{ ps[0..psp], rs[0..rsp] });
+    std.debug.print("\nRUN ===\n", .{});
+    defer std.debug.print("\nSTACKS ===\nparam:\t{x:02}\nreturn:\t{x:02}\n", .{ ps[0..psp], rs[0..rsp] });
 
     var i: u16 = 0;
     while (i < bytecode.len) : (i += 1) {
@@ -280,6 +289,15 @@ fn run(bytecode: []const u8) !void {
                 push(s, sp, bytecode[i]);
             },
             .@"+" => push(s, sp, pop(s, sp, mode_k) + pop(s, sp, mode_k)),
+            .write => {
+                // TODO: device table in memory[0x00..0x100] (special-cased for now)
+                std.debug.assert(pop(s, sp, mode_k) == 0x00);
+                i +%= 1;
+                const strlen = bytecode[i];
+                i +%= 1;
+                std.debug.print("{s}", .{bytecode[i..][0..strlen]});
+                i +%= strlen;
+            },
             else => {
                 std.log.err("todo: {}", .{op});
                 return error.Todo;

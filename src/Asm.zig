@@ -3,15 +3,19 @@ const std = @import("std");
 
 pub const max_filesize = 8 * 1024 * 1024;
 
-var out = [_]u8{0} ** (0x10000 - 0x100);
+var out = [_]u8{0} ** 0x10000;
 var pc: u16 = 0;
 
 var forward_res = [_]u16{0} ** 0x100;
 var forward_res_idx: u8 = 0;
 
-pub fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const u8 {
-    const assembly = try std.fs.cwd().readFileAlloc(allocator, path_asm_file, max_filesize);
-    var i: usize = 0;
+var path_asm_file: []const u8 = undefined;
+var assembly: []const u8 = undefined;
+var i: usize = 0;
+
+pub fn compile(allocator: std.mem.Allocator, _path_asm_file: []const u8) ![]const u8 {
+    path_asm_file = _path_asm_file;
+    assembly = try std.fs.cwd().readFileAlloc(allocator, path_asm_file, max_filesize);
     var add: usize = 1;
     while (i < assembly.len) : (i += add) {
         add = 1;
@@ -22,42 +26,29 @@ pub fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const
         var mode_2: u8 = 0;
 
         switch (assembly[i]) {
+            '|' => {
+                i += 1;
+                const hex = try parseHex();
+                pc = switch (hex.num_digits) {
+                    1, 2 => hex.result.int8,
+                    3, 4 => hex.result.int16,
+                    else => unreachable,
+                };
+                continue;
+            },
             '#' => {
                 i += 1;
-                if (i == assembly.len) {
-                    std.log.err("expected hex digit, found EOF at '{s}'[{d}]", .{ path_asm_file, i });
-                    return error.InvalidSyntax;
-                }
-
-                const beg_i = i;
-                if (!std.ascii.isHex(assembly[i])) {
-                    std.log.err(
-                        "expected hex digit, found byte '{c}'/{d}/#{x} at '{s}'[{d}]",
-                        .{ assembly[i], assembly[i], assembly[i], path_asm_file, i },
-                    );
-                    return error.InvalidSyntax;
-                }
-
-                while (i < assembly.len and std.ascii.isHex(assembly[i])) {
-                    i += 1;
-                }
-                const end_i = i;
-                switch (end_i - beg_i) {
+                const hex = try parseHex();
+                switch (hex.num_digits) {
                     2 => {
                         try compileOp(0, 0, 0, @intFromEnum(Bici.Op.push));
-                        try write(try std.fmt.parseUnsigned(u8, assembly[beg_i..end_i], 16));
+                        try write(hex.result.int8);
                     },
                     4 => {
                         try compileOp(0, 0, 1, @intFromEnum(Bici.Op.push));
-                        try write2(try std.fmt.parseUnsigned(u16, assembly[beg_i..end_i], 16));
+                        try write2(hex.result.int16);
                     },
-                    else => {
-                        std.log.err(
-                            "expected 2 digits (byte) or 4 digits (short), found {d} digits in number at '{s}'[{d}..{d}]",
-                            .{ end_i - beg_i, path_asm_file, beg_i - 1, end_i },
-                        );
-                        return error.InvalidNumber;
-                    },
+                    else => unreachable,
                 }
                 continue;
             },
@@ -76,6 +67,26 @@ pub fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const
                 out[res_pc] = @intCast(pc - 1 - res_pc);
                 continue;
             },
+            '_' => {
+                i += 1;
+                const hex = try parseHex();
+                switch (hex.num_digits) {
+                    2 => try write(hex.result.int8),
+                    4 => try write2(hex.result.int16),
+                    else => unreachable,
+                }
+                continue;
+            },
+            '\'' => {
+                i += 1;
+                if (i == assembly.len) {
+                    std.log.err("expected byte, found EOF at '{s}'[{d}]", .{ path_asm_file, i });
+                    return error.InvalidSyntax;
+                }
+
+                try write(assembly[i]);
+                continue;
+            },
             '"' => {
                 i += 1;
                 if (i == assembly.len) {
@@ -87,16 +98,6 @@ pub fn compile(allocator: std.mem.Allocator, path_asm_file: []const u8) ![]const
                     try write(assembly[i]);
                 }
                 add = 0;
-                continue;
-            },
-            '\'' => {
-                i += 1;
-                if (i == assembly.len) {
-                    std.log.err("expected byte, found EOF at '{s}'[{d}]", .{ path_asm_file, i });
-                    return error.InvalidSyntax;
-                }
-
-                try write(assembly[i]);
                 continue;
             },
             else => {},
@@ -166,4 +167,44 @@ fn write(byte: u8) !void {
 fn write2(short: u16) !void {
     try write(@truncate((short & 0xff00) >> 8));
     try write(@truncate(short));
+}
+
+fn parseHex() !struct { num_digits: u3, result: union { int8: u8, int16: u16 } } {
+    if (i == assembly.len) {
+        std.log.err("expected hex digit, found EOF at '{s}'[{d}]", .{ path_asm_file, i });
+        return error.InvalidSyntax;
+    }
+
+    const beg_i = i;
+    if (!std.ascii.isHex(assembly[i])) {
+        std.log.err(
+            "expected hex digit, found byte '{c}'/{d}/#{x} at '{s}'[{d}]",
+            .{ assembly[i], assembly[i], assembly[i], path_asm_file, i },
+        );
+        return error.InvalidSyntax;
+    }
+
+    while (i < assembly.len and std.ascii.isHex(assembly[i])) {
+        i += 1;
+    }
+    const end_i = i;
+
+    const num_digits = end_i - beg_i;
+    return switch (num_digits) {
+        1, 2 => .{
+            .num_digits = @intCast(num_digits),
+            .result = .{ .int8 = try std.fmt.parseUnsigned(u8, assembly[beg_i..end_i], 16) },
+        },
+        3, 4 => .{
+            .num_digits = @intCast(num_digits),
+            .result = .{ .int16 = try std.fmt.parseUnsigned(u16, assembly[beg_i..end_i], 16) },
+        },
+        else => {
+            std.log.err(
+                "expected 1-2 digits (byte) or 3-4 digits (short), found {d} digits in number at '{s}'[{d}..{d}]",
+                .{ end_i - beg_i, path_asm_file, beg_i - 1, end_i },
+            );
+            return error.InvalidNumber;
+        },
+    };
 }

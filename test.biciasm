@@ -1,2 +1,5 @@
-#00 write {# "Hello, '  "World! } #02 #04 +
+|100
+
+#00 write {# "Hello, _20 "World! } #02 #04 +
+
 break

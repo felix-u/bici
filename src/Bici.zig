@@ -50,8 +50,6 @@ pub const Instruction = packed struct {
     };
 };
 
-var memory = [_]u8{0} ** 0x10000;
-
 var stacks: struct {
     param: [0x100]u8 = [_]u8{0} ** 0x100,
     param_ptr: u8 = 0,
@@ -68,15 +66,16 @@ var stacks: struct {
         stack_ptr = &self.ret_ptr;
     }
 } = .{};
+
 var stack = &stacks.param;
 var stack_ptr = &stacks.param_ptr;
 
 var keep = false;
 
-pub fn run(bytecode: []const u8) !void {
-    std.debug.print("BYTECODE ===\n", .{});
-    for (bytecode, 0..) |byte, i| std.debug.print(
-        "[{d:2}]\t'{c}'\t#{x:02}\t{s}\n",
+pub fn run(memory: []const u8) !void {
+    std.debug.print("MEMORY ===\n", .{});
+    for (memory[0x100..], 0x100..) |byte, i| std.debug.print(
+        "[{x:4}]\t'{c}'\t#{x:02}\t{s}\n",
         .{ i, byte, byte, @tagName(@as(Op, @enumFromInt(byte & 0x1f))) },
     );
     std.debug.print("\nRUN ===\n", .{});
@@ -85,9 +84,7 @@ pub fn run(bytecode: []const u8) !void {
         .{ stacks.param[0..stacks.param_ptr], stacks.ret[0..stacks.ret_ptr] },
     );
 
-    @memcpy(memory[0x100..][0..bytecode.len], bytecode);
     var i: u16 = 0x100;
-
     while (i < 0x10000) : (i += 1) {
         switch (memory[i]) {
             Instruction.special.jmi => return error.Todo,
@@ -128,7 +125,7 @@ pub fn run(bytecode: []const u8) !void {
             .short => switch (instruction.op) {
                 .push => {
                     i +%= 1;
-                    push2(u16LittleEndianAt(&memory, i));
+                    push2(u16LittleEndianAt(memory, i));
                     i +%= 1;
                 },
                 .@"+" => push2(pop2() + pop2()),

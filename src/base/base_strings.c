@@ -64,7 +64,7 @@ static String8 string8_range(String8 s, usize beg, usize end) {
 static usize decimal_from_hex_string8(String8 s) {
     usize result = 0, magnitude = s.len;
     for (usize i = 0; i < s.len; i += 1, magnitude -= 1) {
-        usize hex_digit = decimal_from_hex_char_table[s.ptr[i]];
+        usize hex_digit = decimal_from_hex_digit_table[s.ptr[i]];
         for (usize j = 1; j < magnitude; j += 1) hex_digit *= 16;
         result += hex_digit;
     }

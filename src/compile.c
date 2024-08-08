@@ -1,5 +1,41 @@
+static char *path_biciasm;
+static u8 *assembly;
+static u16 len, i;
+
 static u8 out[0x10000];
 static u32 pc = 0x100;
+
+structdef(Hex) {
+    bool ok;
+    u8 num_digits;
+    union { u8 int8; u16 int16; } result;
+};
+
+static Hex parse_hex(void) {
+    u16 beg_i = i;
+    while (i < len && is_hex_digit_table[assembly[i]]) i += 1;
+    u16 end_i = i;
+    u8 num_digits = (u8)(end_i - beg_i);
+    String8 hex_string = { .ptr = assembly + beg_i, .len = num_digits };
+
+    switch (num_digits) {
+        case 2: return (Hex){
+            .ok = true,
+            .num_digits = num_digits,
+            .result.int8 = (u8)decimal_from_hex_string8(hex_string),
+        };
+        case 4: return (Hex){
+            .ok = true,
+            .num_digits = num_digits,
+            .result.int16 = (u16)decimal_from_hex_string8(hex_string),
+        };
+        default: {
+            errf("expected 2 digits (byte) or 4 digits (short), found %d digits in number at '%s'[%d..%d]",
+                num_digits, path_biciasm, beg_i, end_i);
+            return (Hex){0};
+        } break;
+    }
+}
 
 #define write(byte) {\
     if (pc == 655356 - 0x100) { err("exceeded maximum program size"); abort(); }\
@@ -17,87 +53,83 @@ static bool is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c
 
 static bool is_alpha(u8 c) { return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'); }
 
-static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, char *path_bici) {
+static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, char *path_bici) {
+    path_biciasm = _path_biciasm;
     String8 asm_file = file_read(arena, path_biciasm, "rb", max_asm_filesize);
-    u8 *assembly = asm_file.ptr;
-    usize len = asm_file.len;
+    assembly = asm_file.ptr;
+    len = (u16)asm_file.len;
 
-    for (usize i = 0; i < len; i += 1) {
+    for (i = 0; i < len; i += 1) {
         if (is_whitespace(assembly[i])) continue;
 
         u8 mode_k = 0, mode_r = 0, mode_2 = 0;
 
-        if (is_alpha(assembly[i])) {
-            usize beg_i = i, end_i = beg_i;
-            for (; i < len && !is_whitespace(assembly[i]); i += 1) {
-                if ('a' <= assembly[i] && assembly[i] <= 'z') continue;
-                end_i = i;
-                if (assembly[i] == ';') for (i += 1; i < len;) {
-                    if (is_whitespace(assembly[i])) goto done;
-                    switch (assembly[i]) {
-                        case 'k': mode_k = 1; break;
-                        case 'r': mode_r = 1; break;
-                        case '2': mode_2 = 1; break;
-                        default: {
-                            errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", assembly[i], assembly[i], assembly[i], path_biciasm, i);
-                            return false;
-                        } break;
-                    }
-                    i += 1;
-                }
-            }
-            done:
-            if (end_i == beg_i) end_i = i;
-            String8 lexeme = string8_range(asm_file, beg_i, end_i);
-
-            if (false) {}
-            #define compile_if_op_string(name, val)\
-                else if (string8_eql(lexeme, string8(#name))) compile_op(mode_k, mode_r, mode_2, val);
-            for_op(compile_if_op_string)
-            else {
-                errf("invalid token '%.*s' at '%s'[%zu..%zu]", string_fmt(lexeme), path_biciasm, beg_i, end_i);
-                return false;
-            };
-
-            continue;
-        }
-
         switch (assembly[i]) {
+            case '/': if (i + 1 < len && assembly[i + 1] == '/') {
+                for (i += 2; i < len && assembly[i] != '\n';) i += 1;
+                continue;
+            } break;
+            case '|': {
+                i += 1;
+                Hex new_pc = parse_hex();
+                if (!new_pc.ok) return false;
+                pc = new_pc.result.int16;
+                continue;
+            } break;
             case '#': {
-                usize beg_i = i;
                 i += 1; 
-                u8 digit_num = 0;
-                for (; i < len && !is_whitespace(assembly[i]); i += 1, digit_num += 1) {
-                    if (!((assembly[i] >= '0' && assembly[i] <= '9') || (assembly[i] >= 'a' && assembly[i] <= 'f'))) {
-                        errf("expected hex digit [0-9|a-f], found byte '%c'/%d/#%x at '%s'[%zu]", assembly[i], assembly[i], assembly[i], path_biciasm, i);
-                        return false;
-                    }
-                }
-                if (digit_num != 2 && digit_num != 4) {
-                    errf("expected 2 digits (byte) or 4 digits (short), found %zu digits in number at '%s'[%zu]", digit_num, path_biciasm, beg_i);
-                    return false;
-                }
-                const u8 *x = decimal_from_hex_char_table;
-                switch (digit_num) {
-                    case 2: {
-                        u8 num = (x[assembly[beg_i + 1]] * 0x10) | x[assembly[beg_i + 2]];
-                        compile_op(0, 0, 0, op_push);
-                        write(num);
-                    } break;
-                    case 4: {
-                        u16 num = (x[assembly[beg_i + 1]] * 0x1000) | (x[assembly[beg_i + 2]] * 0x100) | (x[assembly[beg_i + 3]] * 0x10) | x[assembly[beg_i + 4]];
-                        compile_op(0, 0, 1, op_push);
-                        write2(num);
-                    } break;
+                Hex num = parse_hex();
+                if (!num.ok) return false;
+                switch (num.num_digits) {
+                    case 2: compile_op(0, 0, 0, op_push); write(num.result.int8); break;
+                    case 4: compile_op(0, 0, 1, op_push); write2(num.result.int16); break;
                     default: unreachable;
                 }
+                continue;
             } break;
-            default: {
-                errf("invalid byte '%c'/%d/#%x at '%s'[%zu]", assembly[i], assembly[i], assembly[i], path_biciasm, i);
-                return false;
-            } break;
+            default: break;
         }
+
+        if (!is_alpha(assembly[i])) {
+            errf("invalid byte '%c'/%d/#%x at '%s'[%zu]", assembly[i], assembly[i], assembly[i], path_biciasm, i);
+            return false;
+        }
+
+        usize beg_i = i, end_i = beg_i;
+        for (; i < len && !is_whitespace(assembly[i]); i += 1) {
+            if ('a' <= assembly[i] && assembly[i] <= 'z') continue;
+            end_i = i;
+            if (assembly[i] == ';') for (i += 1; i < len;) {
+                if (is_whitespace(assembly[i])) goto done;
+                switch (assembly[i]) {
+                    case 'k': mode_k = 1; break;
+                    case 'r': mode_r = 1; break;
+                    case '2': mode_2 = 1; break;
+                    default: {
+                        errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", assembly[i], assembly[i], assembly[i], path_biciasm, i);
+                        return false;
+                    } break;
+                }
+                i += 1;
+            }
+        }
+        done:
+        if (end_i == beg_i) end_i = i;
+        String8 lexeme = string8_range(asm_file, beg_i, end_i);
+
+        if (false) {}
+        #define compile_if_op_string(name, val)\
+            else if (string8_eql(lexeme, string8(#name))) compile_op(mode_k, mode_r, mode_2, val);
+        for_op(compile_if_op_string)
+        else {
+            errf("invalid token '%.*s' at '%s'[%zu..%zu]", string_fmt(lexeme), path_biciasm, beg_i, end_i);
+            return false;
+        };
+
+        continue;
     }
+
+    if (pc == 0) return false;
 
     FILE *rom_file = file_open(path_bici, "wb");
     if (rom_file == 0) return false;
@@ -106,7 +138,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
     fclose(rom_file);
 
     printf("ASM ===\n");
-    for (usize i = 0x100; i < pc; i += 1) printf("%02x ", out[i]);
+    for (usize idx = 0x100; idx < pc; idx += 1) printf("%02x ", out[idx]);
     putchar('\n');
     return true;
 }

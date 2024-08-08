@@ -64,9 +64,9 @@ static u8 *get(u8 i_back) { return active_s + (u8)(*sp - i_back); }
 static void push(u8 byte) { active_s[*sp] = byte; *sp += 1; }
 static u8 pop(void) { u8 val = s(*sp - 1); if (!mode_keep) *sp -= 1; return val; }
 
-static u16 get2(u8 i_back) { return s(*sp - 2 * i_back + 1) | (s(*sp - 2 * i_back) << 8); }
+static u16 get2(u8 i_back) { return (u16)s(*sp - 2 * i_back + 1) | (u16)(s(*sp - 2 * i_back) << 8); }
 static void push2(u16 byte2) { push(byte2 >> 8); push((u8)byte2); }
-static u16 pop2(void) { u16 val = s(*sp - 1) | (s(*sp - 2) << 8); if (!mode_keep) *sp -= 2; return val; }
+static u16 pop2(void) { u16 val = (u16)s(*sp - 1) | (u16)(s(*sp - 2) << 8); if (!mode_keep) *sp -= 2; return val; }
 
 static void run(char *path_biciasm) {
     printf("\nRUN ===\n");
@@ -104,8 +104,8 @@ static void run(char *path_biciasm) {
             case op_push:   push(mem(++i)); break;
             case op_drop:   discard(pop()); break;
             case op_nip:    *get(2) = *get(1); *sp -= 1; break;
-            case op_swap:   u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; break;
-            case op_rot:    u8 temp3 = *get(3); *get(3) = *get(2); *get(2) = *get(1); *get(1) = temp3; break;
+            case op_swap:   { u8 temp2 = *get(2); *get(2) = *get(1); *get(1) = temp2; } break;
+            case op_rot:    { u8 temp3 = *get(3); *get(3) = *get(2); *get(2) = *get(1); *get(1) = temp3; } break;
             case op_dup:    push(*get(1)); break;
             case op_over:   push(*get(2)); break;
             case op_eq:     push(pop() == pop()); break;
@@ -121,10 +121,10 @@ static void run(char *path_biciasm) {
             case op_and:    push(pop() & pop()); break;
             case op_or:     push(pop() | pop()); break;
             case op_xor:    push(pop() ^ pop()); break; 
-            case op_shift:  { u8 shift = pop(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push(pop() << l >> r); } break;
+            case op_shift:  { u8 shift = pop(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push((u8)(pop() << l >> r)); } break;
             case op_jmp:    i += pop(); break;
             case op_jmi:    i += mem(i + 1); break;
-            case op_jeq:    u8 rel_addr = pop(); if (pop()) i += rel_addr; break;
+            case op_jeq:    { u8 rel_addr = pop(); if (pop()) i += rel_addr; } break;
             case op_jei:    i += 1; if (pop()) i += mem(i); break;
             case op_jst:    s_ret(); push2(i); s_param(); i += pop(); break;
             case op_jsi:    i += 1; s_ret(); push2(i); i += mem(i); break;

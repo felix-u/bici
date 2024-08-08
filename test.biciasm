@@ -1,9 +1,9 @@
-|100
+|0100
 
 // TODO
 // &number load;2 #00 write
 
-#00 write {# "Hello, _20 "World! } #04 #02 /
+#00 write {# "Hello, _20 "World! } #04 #02 div
 
 break
 

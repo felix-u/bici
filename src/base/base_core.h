@@ -27,6 +27,13 @@
     #define builtin_unreachable assume(false)
     #define force_inline inline __forceinline
 
+#elif COMPILER_STD
+    #include <assert.h>
+    #define builtin_assume(expr) assert(expr)
+    #define breakpoint builtin_assume(false)
+    #define builtin_unreachable assume(false)
+    #define force_inline inline
+
 #endif // COMPILER_...
 
 
@@ -106,8 +113,11 @@ static void _log_internal(FILE *out, char *file, usize line, const char *func, c
 #define logf_internal(out, fmt, ...) _logf_internal(out, __FILE__, __LINE__, __func__, fmt, __VA_ARGS__)
 static void _logf_internal(FILE *out, char *file, usize line, const char *func, char *fmt, ...);
 
-#define panic(s) { err(s); breakpoint; abort(); }
-#define panicf(fmt, ...) { errf(fmt, __VA_ARGS__); breakpoint; abort(); }
+#define panic(s) { panicf("%s", s); }
+#define panicf(fmt, ...) {\
+    _logf_internal(stderr, __FILE__, __LINE__, __func__, "panic: " fmt, __VA_ARGS__);\
+    breakpoint; abort();\
+}
 
 #define slice_from_c_array(c_array) { .ptr = c_array, .len = array_count(c_array) }
 #define slice_from_array(a) { .ptr = (a).ptr, .len = (a).len }

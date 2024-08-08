@@ -20,7 +20,7 @@ static char   *cstring_from_string8(Arena *arena, String8 s);
 static bool    string8_eql(String8 s1, String8 s2); 
 static String8 string8_from_cstring(char *s); 
 static String8 string8_from_int_base(Arena *arena, usize _num, u8 base); 
-static String8 string8_printf(Arena *arena, char *fmt, ...);
+static String8 string8_printf(Arena *arena, usize alloc_size, char *fmt, ...);
 static String8 string8_range(String8 s, usize beg, usize end); 
 
 static usize decimal_from_hex_string8(String8 s); 

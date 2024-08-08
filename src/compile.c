@@ -1,5 +1,5 @@
-static u8 out[65536 - 0x100];
-static u32 pc;
+static u8 out[0x10000];
+static u32 pc = 0x100;
 
 #define write(byte) {\
     if (pc == 655356 - 0x100) { err("exceeded maximum program size"); abort(); }\
@@ -23,10 +23,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
     usize len = asm_file.len;
 
     for (usize i = 0; i < len; i += 1) {
-        if (
-            is_whitespace(
-                assembly[i])) 
-            continue;
+        if (is_whitespace(assembly[i])) continue;
 
         u8 mode_k = 0, mode_r = 0, mode_2 = 0;
 
@@ -109,7 +106,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *path_biciasm, ch
     fclose(rom_file);
 
     printf("ASM ===\n");
-    for (usize i = 0; i < pc; i += 1) printf("%02x ", out[i]);
+    for (usize i = 0x100; i < pc; i += 1) printf("%02x ", out[i]);
     putchar('\n');
     return true;
 }

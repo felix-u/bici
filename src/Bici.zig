@@ -37,9 +37,9 @@ pub const Op = enum(u5) {
 pub const Instruction = packed struct {
     op: Op,
     mode: packed struct {
-        keep: bool = false,
-        stack: enum(u1) { param, ret } = .param,
         size: enum(u1) { byte, short } = .byte,
+        stack: enum(u1) { param, ret } = .param,
+        keep: bool = false,
     } = .{},
 
     pub const special = struct {

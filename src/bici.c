@@ -72,9 +72,8 @@ static const char *mode_name(u8 instruction) {
         case 0x5: return ";k2";
         case 0x6: return ";kr";
         case 0x7: return ";kr2";
+        default: unreachable;
     }
-    unreachable;
-    return 0;
 }
 
 structdef(Instruction) { Op op; Mode mode; };

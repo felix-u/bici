@@ -35,9 +35,14 @@
     action(jsi,    0xc0)/* NO MODE (== push;kr) */\
     action(break,  0xe0)/* NO MODE (== push;kr2)*/\
 
+enumdef(Device, u8) {
+    device_console = 0x00,
+};
+
 // B = mode_bytes, b = mode_bits
 #define op_cases(B, bi)\
-    case op_push:   push##bi(load##bi(++i)); break;\
+    case op_jmi: case op_jei: case op_jsi: case op_break: unreachable;\
+    case op_push:   push##bi(load##bi(i + 1)); i += B; break;\
     case op_drop:   discard(pop##bi()); break;\
     case op_nip:    { u##bi c = pop##bi(); pop##bi(); u##bi a = pop##bi(); push##bi(a); push##bi(c); } break;\
     case op_swap:   { u##bi c = pop##bi(), b = pop##bi(); push##bi(c); push##bi(b); } break;\
@@ -51,7 +56,7 @@
     case op_add:    push##bi(pop##bi() + pop##bi()); break;\
     case op_sub:    { u##bi right = pop##bi(), left = pop##bi(); push##bi(left - right); } break; \
     case op_mul:    push##bi(pop##bi() * pop##bi()); break;\
-    case op_div:    { u##bi right = pop##bi(), left = pop##bi(); push##bi(left / right); } break; \
+    case op_div:    { u##bi right = pop##bi(), left = pop##bi(); push##bi(right == 0 ? 0 : (left / right)); } break; \
     case op_inc:    push##bi(pop##bi() + 1); break;\
     case op_not:    push##bi(~pop##bi()); break;\
     case op_and:    push##bi(pop##bi() & pop##bi()); break;\
@@ -59,23 +64,28 @@
     case op_xor:    push##bi(pop##bi() ^ pop##bi()); break; \
     case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##bi((u##bi)(pop##bi() << l >> r)); } break;\
     case op_jmp:    i += pop##bi(); break;\
-    case op_jmi:    i += mem(i + 1); break;\
     case op_jeq:    { u16 addr = pop16(); if (pop##bi()) i = addr; } break;\
-    case op_jei:    i += 1; if (pop##bi()) i += mem(i); break;\
     case op_jst:    stacks_set_ret(); push16(i); stacks_set_param(); i += pop##bi(); break;\
-    case op_jsi:    i += 1; stacks_set_ret(); push16(i); i += mem(i); break;\
     case op_stash:  { u##bi val = pop##bi(); stacks_set_ret(); push##bi(val); stacks_set_param(); } break;\
-    case op_load:   push##bi(mem(pop16())); break;\
+    case op_load:   push##bi(load##bi(pop16())); break;\
     case op_store:  store##bi(pop16(), pop##bi()); break;\
     case op_read:   panic("TODO"); break;\
     case op_write: {\
-        assume(pop##bi() == 0x00);\
-        i += 1;\
-        u8 str_len = mem(i);\
-        String8 str = { .ptr = memory + i + 1, .len = str_len };\
-        printf("%.*s", string_fmt(str));\
-        i += str_len;\
-    }  break;\
+        u8 device_and_action = mem(s(--(*stack_ptr)));\
+        Device device = device_and_action & 0xf0;\
+        u8 action = device_and_action & 0x0f;\
+        switch (device) {\
+            case device_console: switch (action) {\
+                case 0x0: {\
+                    u16 str_addr = pop16();\
+                    u8 str_len = load8(str_addr);\
+                    String8 str = { .ptr = memory + str_addr + 1, .len = str_len };\
+                    printf("%.*s", string_fmt(str));\
+                } break;\
+            } break;\
+            default: unreachable;\
+        }\
+    } break;\
     default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
 
 enumdef(Op, u8) {
@@ -197,8 +207,8 @@ static void run(char *path_biciasm) {
 
         Mode m = instruction.mode;
         switch (instruction.mode.size) {
-            case size_byte: switch (instruction.op) { op_cases(1, 8) }
-            case size_short: switch (instruction.op) { op_cases(2, 16) }
+            case size_byte: switch (instruction.op) { op_cases(1, 8) } break;
+            case size_short: switch (instruction.op) { op_cases(2, 16) } break;
             default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
         }
     }

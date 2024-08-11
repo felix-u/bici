@@ -37,7 +37,7 @@
 
 // B = mode_bytes, b = mode_bits
 #define op_cases(B, bi)\
-    case op_push:   push##bi(load##bi(++i)); printf("ok\n"); break;\
+    case op_push:   push##bi(load##bi(++i)); break;\
     case op_drop:   discard(pop##bi()); break;\
     case op_nip:    { u##bi c = pop##bi(); pop##bi(); u##bi a = pop##bi(); push##bi(a); push##bi(c); } break;\
     case op_swap:   { u##bi c = pop##bi(), b = pop##bi(); push##bi(c); push##bi(b); } break;\

@@ -25,60 +25,58 @@
     action(jst,    0x17)\
     action(stash,  0x18)\
     action(load,   0x19)\
-    action(loadr,  0x1a)\
-    action(store,  0x1b)\
-    action(storer, 0x1c)\
-    action(read,   0x1d)\
-    action(write,  0x1e)\
+    action(store,  0x1a)\
+    action(read,   0x1b)\
+    action(write,  0x1c)\
+    /* UNUSED      0x1d */\
+    /* UNUSED      0x1e */\
     action(jmi,    0x80)/* NO MODE (== push;k)  */\
     action(jei,    0xa0)/* NO MODE (== push;k2) */\
     action(jsi,    0xc0)/* NO MODE (== push;kr) */\
     action(break,  0xe0)/* NO MODE (== push;kr2)*/\
 
 // B = mode_bytes, b = mode_bits
-#define op_cases(B, b)\
-    case op_push:   push##b(mem(++i)); break;\
-    case op_drop:   discard(pop##b()); break;\
-    case op_nip:    *get##b(2) = *get##b(1); *stack_ptr -= 1; break;\
-    case op_swap:   { u8 temp2 = *get##b(2); *get##b(2) = *get##b(1); *get##b(1) = temp2; } break;\
-    case op_rot:    { u8 temp3 = *get##b(3); *get##b(3) = *get##b(2); *get##b(2) = *get##b(1); *get##b(1) = temp3; } break;\
-    case op_dup:    push##b(*get##b(1)); break;\
-    case op_over:   push##b(*get##b(2)); break;\
-    case op_eq:     push##b(pop##b() == pop##b()); break;\
-    case op_neq:    push##b(pop##b() != pop##b()); break;\
-    case op_gt:     { u8 right = pop##b(), left = pop##b(); push##b(left > right); } break; \
-    case op_lt:     { u8 right = pop##b(), left = pop##b(); push##b(left < right); } break; \
-    case op_add:    push##b(pop##b() + pop##b()); break;\
-    case op_sub:    { u8 right = pop##b(), left = pop##b(); push##b(left - right); } break; \
-    case op_mul:    push##b(pop##b() * pop##b()); break;\
-    case op_div:    { u8 right = pop##b(), left = pop##b(); push##b(left / right); } break; \
-    case op_inc:    *get##b(1) += 1; break;\
-    case op_not:    push##b(~pop##b()); break;\
-    case op_and:    push##b(pop##b() & pop##b()); break;\
-    case op_or:     push##b(pop##b() | pop##b()); break;\
-    case op_xor:    push##b(pop##b() ^ pop##b()); break; \
-    case op_shift:  { u8 shift = pop##b(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##b((u8)(pop##b() << l >> r)); } break;\
-    case op_jmp:    i += pop##b(); break;\
+#define op_cases(B, bi)\
+    case op_push:   push##bi(load##bi(++i)); printf("ok\n"); break;\
+    case op_drop:   discard(pop##bi()); break;\
+    case op_nip:    { u##bi c = pop##bi(); pop##bi(); u##bi a = pop##bi(); push##bi(a); push##bi(c); } break;\
+    case op_swap:   { u##bi c = pop##bi(), b = pop##bi(); push##bi(c); push##bi(b); } break;\
+    case op_rot:    { u##bi c = pop##bi(), b = pop##bi(), a = pop##bi(); push##bi(b); push##bi(c); push##bi(a); } break;\
+    case op_dup:    assume(!m.keep); push##bi(get##bi(1)); break;\
+    case op_over:   assume(!m.keep); push##bi(get##bi(2)); break;\
+    case op_eq:     push##bi(pop##bi() == pop##bi()); break;\
+    case op_neq:    push##bi(pop##bi() != pop##bi()); break;\
+    case op_gt:     { u##bi right = pop##bi(), left = pop##bi(); push##bi(left > right); } break; \
+    case op_lt:     { u##bi right = pop##bi(), left = pop##bi(); push##bi(left < right); } break; \
+    case op_add:    push##bi(pop##bi() + pop##bi()); break;\
+    case op_sub:    { u##bi right = pop##bi(), left = pop##bi(); push##bi(left - right); } break; \
+    case op_mul:    push##bi(pop##bi() * pop##bi()); break;\
+    case op_div:    { u##bi right = pop##bi(), left = pop##bi(); push##bi(left / right); } break; \
+    case op_inc:    push##bi(pop##bi() + 1); break;\
+    case op_not:    push##bi(~pop##bi()); break;\
+    case op_and:    push##bi(pop##bi() & pop##bi()); break;\
+    case op_or:     push##bi(pop##bi() | pop##bi()); break;\
+    case op_xor:    push##bi(pop##bi() ^ pop##bi()); break; \
+    case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##bi((u##bi)(pop##bi() << l >> r)); } break;\
+    case op_jmp:    i += pop##bi(); break;\
     case op_jmi:    i += mem(i + 1); break;\
-    case op_jeq:    { u8 rel_addr = pop##b(); if (pop##b()) i += rel_addr; } break;\
-    case op_jei:    i += 1; if (pop##b()) i += mem(i); break;\
-    case op_jst:    stacks_set_ret(); push16(i); stacks_set_param(); i += pop##b(); break;\
+    case op_jeq:    { u16 addr = pop16(); if (pop##bi()) i = addr; } break;\
+    case op_jei:    i += 1; if (pop##bi()) i += mem(i); break;\
+    case op_jst:    stacks_set_ret(); push16(i); stacks_set_param(); i += pop##bi(); break;\
     case op_jsi:    i += 1; stacks_set_ret(); push16(i); i += mem(i); break;\
-    case op_stash:  { u8 val = pop##b(); stacks_set_ret(); push##b(val); stacks_set_param(); } break; \
-    case op_load:   push##b(mem(pop##b())); break;\
-    case op_loadr:  push##b(mem(i + pop##b())); break;\
-    case op_store:  memory[pop##b()] = pop##b(); break;\
-    case op_storer: memory[(u16)(i + pop##b())] = pop##b(); break;\
+    case op_stash:  { u##bi val = pop##bi(); stacks_set_ret(); push##bi(val); stacks_set_param(); } break;\
+    case op_load:   push##bi(mem(pop16())); break;\
+    case op_store:  store##bi(pop16(), pop##bi()); break;\
     case op_read:   panic("TODO"); break;\
-    case op_write: { // TODO: actual implementation (special-cased for now)\
-        assume(pop##b() == 0x00);\
+    case op_write: {\
+        assume(pop##bi() == 0x00);\
         i += 1;\
         u8 str_len = mem(i);\
         String8 str = { .ptr = memory + i + 1, .len = str_len };\
         printf("%.*s", string_fmt(str));\
         i += str_len;\
     }  break;\
-    default: panicf("TODO %s{#%02x}", op_name(byte), byte);
+    default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
 
 enumdef(Op, u8) {
     #define op_def_enum(name, val) op_##name = val,
@@ -109,7 +107,6 @@ structdef(Mode) { b8 keep; Stack stack; Size size; };
 static const char *mode_name(u8 instruction) {
     if (instruction_is_special(instruction)) return ""; 
     switch ((instruction & 0xe0) >> 5) {
-        case 0x0: return "";
         case 0x1: return ";2";
         case 0x2: return ";r";
         case 0x3: return ";r2";
@@ -117,8 +114,8 @@ static const char *mode_name(u8 instruction) {
         case 0x5: return ";k2";
         case 0x6: return ";kr";
         case 0x7: return ";kr2";
-        default: unreachable;
     }
+    return "";
 }
 
 structdef(Instruction) { Op op; Mode mode; };
@@ -156,13 +153,17 @@ static u8 memory[0x10000];
 #define s(ptr) stack[(u8)(ptr)]
 #define mem(ptr) memory[(u16)(ptr)]
 
-static u8 *get8(u8 i_back) { return stack + (u8)(*stack_ptr - i_back); }
+static u8 get8(u8 i_back) { return *(stack + (u8)(*stack_ptr - i_back)); }
 static void push8(u8 byte) { stack[*stack_ptr] = byte; *stack_ptr += 1; }
 static u8 pop8(void) { u8 val = s(*stack_ptr - 1); if (!keep) *stack_ptr -= 1; return val; }
+static u8 load8(u16 addr) { return mem(addr); }
+static void store8(u16 addr, u8 val) { mem(addr) = val; }
 
 static u16 get16(u8 i_back) { return (u16)s(*stack_ptr - 2 * i_back + 1) | (u16)(s(*stack_ptr - 2 * i_back) << 8); }
 static void push16(u16 byte2) { push8(byte2 >> 8); push8((u8)byte2); }
 static u16 pop16(void) { u16 val = (u16)s(*stack_ptr - 1) | (u16)(s(*stack_ptr - 2) << 8); if (!keep) *stack_ptr -= 2; return val; }
+static u16 load16(u16 addr) { return (u16)(((u16)mem(addr) << 8) | (u16)mem(addr + 1)); }
+static void store16(u16 addr, u16 val) { mem(addr) = (u8)(val >> 8); mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
 static void run(char *path_biciasm) {
     Arena bici_mem = { .mem = memory, .cap = 0x10000 };
@@ -194,17 +195,11 @@ static void run(char *path_biciasm) {
             default: unreachable;
         }
 
+        Mode m = instruction.mode;
         switch (instruction.mode.size) {
             case size_byte: switch (instruction.op) { op_cases(1, 8) }
             case size_short: switch (instruction.op) { op_cases(2, 16) }
-            // case size_short: switch (instruction.op) {
-            //     case op_push:  i += 1; push16(*(u16 *)(memory + i)); i += 1; break;
-            //     case op_add:   { u16 left = get16(2), right = get16(1); pop16(); pop16(); push16(left + right); } break;
-            //     case op_not:   push16(~pop16()); break;
-            //     case op_stash: { u16 val = pop16(); stacks_set_ret(); push16(val); stacks_set_param(); } break;
-            //     default: panicf("TODO %s{#%02x}", op_name(byte), byte);
-            // } break;
-            default: unreachable;
+            default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
         }
     }
     break_run:

@@ -60,6 +60,8 @@ static bool is_alpha(u8 c) { return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 
 static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, char *path_bici) {
     path_biciasm = _path_biciasm;
     String8 asm_file = file_read(arena, path_biciasm, "rb", max_asm_filesize);
+    if (asm_file.len == 0) return false;
+
     assembly = asm_file.ptr;
     len = (u16)asm_file.len;
 

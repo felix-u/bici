@@ -3,9 +3,9 @@
 |0100
 
 #00 :while dup #0a lt jni {
-    jsi !update_num_string
+    jsi @update_num_string
     &num_string *console_print write
-    inc jmi !while
+    inc jmi @while
 }
 
 &newline *console_print write

@@ -124,7 +124,8 @@ static void forward_res_resolve_last(void) {
     }
 }
 
-static void compile_op(Mode mode, Op op) {
+static void compile_op(Mode mode, u8 op) {
+    if (instruction_is_special(op)) { write(op); return; }
     write(op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
@@ -153,7 +154,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                 if (!new_pc.ok) return false;
                 pc = new_pc.result.int16;
             } continue;
-            case '!': {
+            case '@': {
                 i += 1;
                 String8 name = parse_alpha();
                 label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc, .size = size_short };

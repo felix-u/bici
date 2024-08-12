@@ -1,6 +1,9 @@
 #include "base/base_include.h"
 #include "base/base_include.c"
 
+#include "SDL.h"
+
+#include "screen.c"
 #include "bici.c"
 #include "compile.c"
 

@@ -38,6 +38,7 @@
 
 enumdef(Device, u8) {
     device_console = 0x00,
+    device_screen = 0x10,
 };
 
 // B = mode_bytes, b = mode_bits
@@ -69,10 +70,18 @@ enumdef(Device, u8) {
     case op_jst:    stacks_set_ret(); push16(i + 1); stacks_set_param(); i = pop16(); add = 0; break;\
     case op_stash:  { u##bi val = pop##bi(); stacks_set_ret(); push##bi(val); stacks_set_param(); } break;\
     case op_load:   push##bi(load##bi(pop16())); break;\
-    case op_store:  store##bi(pop16(), pop##bi()); break;\
-    case op_read:   panic("TODO op_read"); break;\
-    case op_write: {\
-        u8 device_and_action = mem(s(--(*stack_ptr)));\
+    case op_store:  { u16 addr = pop16(); u##bi val = pop##bi(); store##bi(addr, val); } break;\
+    case op_read:   {\
+        u8 device_and_action = pop8();\
+        Device device = device_and_action & 0xf0;\
+        u8 action = device_and_action & 0x0f;\
+        discard(action);\
+        switch (device) {\
+            default: panicf("invalid device #%x for operation 'read'", device);\
+        }\
+    } break;\
+    case op_write:  {\
+        u8 device_and_action = pop8();\
         Device device = device_and_action & 0xf0;\
         u8 action = device_and_action & 0x0f;\
         switch (device) {\
@@ -84,8 +93,14 @@ enumdef(Device, u8) {
                     String8 str = { .ptr = memory + str_addr + 1, .len = str_len };\
                     printf("%.*s", string_fmt(str));\
                 } break;\
+                default: panicf("invalid action #%x for console device", action);\
             } break;\
-            default: panic("no such device");\
+            case device_screen: switch (action) {\
+                case 0x1: screen_init(); break;\
+                case 0x3: screen_quit(); break;\
+                default: panicf("invalid action #%x for screen device", action);\
+            } break;\
+            default: panicf("invalid device #%x for operation 'write'", device);\
         }\
     } break;\
     default: panicf("unreachable %s{#%02x}", op_name(byte), byte);

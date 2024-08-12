@@ -1,16 +1,10 @@
 |00 :console_print
+|10 :screen |11 :screen_init |12 :screen_update |13 :screen_quit
 
 |0100
 
-#00 :while dup #0a lt jni {
-    jsi @update_num_string
-    &num_string *console_print write
-    inc jmi @while
-}
+*screen_init write
+*screen read
+*screen_quit write
 
-&newline *console_print write
 break
-
-:newline {# _0a }
-:num_string {# "0 _20 }
-:update_num_string dup #30 add &num_string #01 add store jmp;r

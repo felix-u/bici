@@ -1,5 +1,4 @@
 @echo off
-REM zig build
 
 setlocal
 set name=bici
@@ -9,11 +8,12 @@ if not "%msvc%"=="1" if not "%clang%"=="1" set msvc=1
 if not "%release%"=="1"                    set debug=1
 
 set dir_deps=..\deps
-set include_paths=-I%dir_deps%
+set dir_sdl=%dir_deps%\SDL2-2.30.6-win32
+set include_paths=-I%dir_sdl%\include
 
 set cl_common=cl -nologo -std:c11 %include_paths% 
 set clang_common=clang -std=c11 %include_paths%
-set cl_link=-link -incremental:no
+set cl_link=-link -incremental:no -subsystem:windows %dir_sdl%\lib\x64\SDL2main.lib %dir_sdl%\lib\x64\SDL2.lib shell32.lib
 set clang_link=
 set cl_debug=%cl_common% -W4 -WX -Z7 -DBUILD_DEBUG=1 -fsanitize=address
 set clang_debug=%clang_common% -pedantic ^

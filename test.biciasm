@@ -2,12 +2,14 @@
 
 |0100
 
-// #00 &hey *console_print write break
-
-#00 dup :while #0a lt jni {
-    &hey *console_print write 
+#00 :while dup #0a lt jni {
+    &update_num_string jst
+    &num_string *console_print write
     inc &while jmp
 }
+&newline *console_print write
 break
 
-:hey {# "hey _0a }
+:num_string {# "0 _20 }
+:update_num_string dup #30 add &num_string #01 add store jmp;r
+:newline {# _0a }

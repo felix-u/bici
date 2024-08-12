@@ -5,9 +5,6 @@ static u16 len, i;
 static u8 out[0x10000];
 static u16 pc = 0x100;
 
-static u16 forward_res[0x100];
-static u8 forward_res_idx;
-
 structdef(Label) { String8 name; u16 addr; };
 static Label labels[0x100];
 static u8 label_idx;
@@ -15,6 +12,7 @@ static u8 label_idx;
     if (label_idx == 0x0ff) {\
         errf("cannot add label '%.*s': maximum number of labels reached", string_fmt(name));\
         pc = 0;\
+        return false;\
     }\
     labels[label_idx++] = (Label){ name, addr };\
 }
@@ -93,6 +91,39 @@ static String8 parse_alpha(void) {
 
 #define write2(byte2) { write(((byte2) & 0xff00) >> 8); write((byte2) & 0x00ff); }
 
+enumdef(Res_Mode, u8) { res_num, res_addr };
+structdef(Res) { u16 pc; Res_Mode mode; };
+static Res forward_res[0x100];
+static u8 forward_res_idx;
+static void forward_res_push(Res_Mode res_mode) {
+    if (forward_res_idx == 0x0ff) {
+        errf("cannot resolve address at '%s'[%d]: maximum number of resolutions reached", path_biciasm, i);
+        pc = 0;
+        return;
+    }
+    forward_res[forward_res_idx] = (Res){ .pc = pc, .mode = res_mode };
+    forward_res_idx += 1;
+}
+static void forward_res_resolve_last(void) {
+    if (forward_res_idx == 0) {
+        errf("forward resolution marker at '%s'[%d] matches no opening marker", path_biciasm, i);
+        pc = 0;
+        return;
+    }
+    forward_res_idx -= 1;
+    Res res = forward_res[forward_res_idx];
+    switch (res.mode) {
+        case res_num: out[res.pc] = (u8)(pc - 1 - res.pc); break;
+        case res_addr: {
+            u16 pc_bak = pc;
+            pc = res.pc;
+            write2(pc_bak);
+            pc = pc_bak;
+        } break;
+        default: unreachable;
+    }
+}
+
 static void compile_op(Mode mode, Op op) {
     write(op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
@@ -154,17 +185,20 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                 label_push(name, pc);
             } continue;
             case '{': {
-                forward_res[forward_res_idx] = pc;
-                forward_res_idx += 1;
-                pc += 1;
-                add = 2; // TODO: handle more forward resolution modes than just '#', which we're skipping over here
-            } continue;
-            case '}': { // TODO: more forward resolution modes
                 i += 1;
-                forward_res_idx -= 1;
-                u16 res_pc = forward_res[forward_res_idx];
-                out[res_pc] = (u8)(pc - 1 - res_pc);
+                switch (assembly[i]) {
+                    case '#': {
+                        forward_res_push(res_num);
+                        pc += 1;
+                    } continue;
+                    default: {
+                        forward_res_push(res_addr);
+                        pc += 2;
+                        add = 0;
+                    } continue;
+                }
             } continue;
+            case '}': forward_res_resolve_last(); continue;
             case '_': {
                 i += 1;
                 Hex num = parse_hex();

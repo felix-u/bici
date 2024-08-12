@@ -23,13 +23,13 @@
     action(jmp,    0x15)\
     action(jeq,    0x16)\
     action(jst,    0x17)\
-    action(stash,  0x18)\
-    action(load,   0x19)\
-    action(store,  0x1a)\
-    action(read,   0x1b)\
-    action(write,  0x1c)\
-    /* UNUSED      0x1d */\
-    /* UNUSED      0x1e */\
+    action(jnq,    0x18)\
+    action(jni,    0x19)\
+    action(stash,  0x1a)\
+    action(load,   0x1b)\
+    action(store,  0x1c)\
+    action(read,   0x1d)\
+    action(write,  0x1e)\
     action(jmi,    0x80)/* NO MODE (== push;k)  */\
     action(jei,    0xa0)/* NO MODE (== push;k2) */\
     action(jsi,    0xc0)/* NO MODE (== push;kr) */\
@@ -41,8 +41,8 @@ enumdef(Device, u8) {
 
 // B = mode_bytes, b = mode_bits
 #define op_cases(B, bi)\
-    case op_jmi: case op_jei: case op_jsi: case op_break: unreachable;\
-    case op_push:   push##bi(load##bi(i + 1)); i += B; break;\
+    case op_jmi: case op_jei: case op_jni: case op_jsi: case op_break: panic("reached full-byte opcodes in generic switch case");\
+    case op_push:   push##bi(load##bi(i + 1)); add = B + 1; break;\
     case op_drop:   discard(pop##bi()); break;\
     case op_nip:    { u##bi c = pop##bi(); pop##bi(); u##bi a = pop##bi(); push##bi(a); push##bi(c); } break;\
     case op_swap:   { u##bi c = pop##bi(), b = pop##bi(); push##bi(c); push##bi(b); } break;\
@@ -63,9 +63,9 @@ enumdef(Device, u8) {
     case op_or:     push##bi(pop##bi() | pop##bi()); break;\
     case op_xor:    push##bi(pop##bi() ^ pop##bi()); break; \
     case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##bi((u##bi)(pop##bi() << l >> r)); } break;\
-    case op_jmp:    i += pop##bi(); break;\
+    case op_jmp:    assume(m.size == size_short); i = pop16(); add = 0; break;\
     case op_jeq:    { u16 addr = pop16(); if (pop##bi()) i = addr; } break;\
-    case op_jst:    stacks_set_ret(); push16(i); stacks_set_param(); i += pop##bi(); break;\
+    case op_jst:    stacks_set_ret(); push16(i); stacks_set_param(); add = pop##bi() + 1; break;\
     case op_stash:  { u##bi val = pop##bi(); stacks_set_ret(); push##bi(val); stacks_set_param(); } break;\
     case op_load:   push##bi(load##bi(pop16())); break;\
     case op_store:  store##bi(pop16(), pop##bi()); break;\
@@ -84,7 +84,7 @@ enumdef(Device, u8) {
                     printf("%.*s", string_fmt(str));\
                 } break;\
             } break;\
-            default: unreachable;\
+            default: panic("no such device");\
         }\
     } break;\
     default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
@@ -102,7 +102,7 @@ const char *op_name_table[op_max_value_plus_one] = {
 
 static bool instruction_is_special(u8 instruction) {
     switch (instruction) {
-        case op_jmi: case op_jei: case op_jsi: case op_break: return true;
+        case op_jmi: case op_jei: case op_jni: case op_jsi: case op_break: return true;
         default: return false;
     }
 }
@@ -181,24 +181,19 @@ static void run(char *path_biciasm) {
     String8 program = file_read(&bici_mem, path_biciasm, "rb", 0x10000);
 
     printf("MEMORY ===\n");
-    for (usize i = 0x100; i < program.len; i += 1) {
+    for (u16 i = 0x100; i < program.len; i += 1) {
         u8 byte = memory[i];
-        printf("[%4zx]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, op_name(byte), mode_name(byte));
+        printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, op_name(byte), mode_name(byte));
     }
     printf("\nRUN ===\n");
 
-    for (u16 i = 0x100; true; i += 1) {
+    u16 add = 1;
+    for (u16 i = 0x100; true; i += add) {
+        add = 1;
         u8 byte = mem(i);
-        switch (byte) {
-            case op_jmi:   i += mem(i + 1); continue;
-            case op_jei:   panic("TODO");
-            case op_jsi:   panic("TODO");
-            case op_break: goto break_run; break;
-            default: break;
-        }
-
         Instruction instruction = instruction_from_byte(byte);
         keep = instruction.mode.keep;
+        Mode m = instruction.mode;
 
         switch (instruction.mode.stack) {
             case stack_param: stacks_set_param(); break;
@@ -206,7 +201,15 @@ static void run(char *path_biciasm) {
             default: unreachable;
         }
 
-        Mode m = instruction.mode;
+        switch (byte) {
+            case op_jmi:   panic("TODO");
+            case op_jei:   panic("TODO");
+            case op_jni:   if (!pop8()) { i = load16(i + 1); add = 0; } else add = 2; continue;
+            case op_jsi:   panic("TODO");
+            case op_break: goto break_run; break;
+            default: break;
+        }
+
         switch (instruction.mode.size) {
             case size_byte: switch (instruction.op) { op_cases(1, 8) } break;
             case size_short: switch (instruction.op) { op_cases(2, 16) } break;

@@ -2,7 +2,12 @@
 
 |0100
 
-&hey *console_print write
+// #00 &hey *console_print write break
+
+#00 dup :while #0a lt jni {
+    &hey *console_print write 
+    inc &while jmp
+}
 break
 
 :hey {# "hey _0a }

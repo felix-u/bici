@@ -65,12 +65,12 @@ enumdef(Device, u8) {
     case op_xor:    push##bi(pop##bi() ^ pop##bi()); break; \
     case op_shift:  { u8 shift = pop8(), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##bi((u##bi)(pop##bi() << l >> r)); } break;\
     case op_jmp:    i = pop16(); add = 0; break;\
-    case op_jeq:    { u16 addr = pop16(); if (pop##bi()) i = addr; } break;\
+    case op_jeq:    { u16 addr = pop16(); if (pop##bi()) { i = addr; add = 0; } } break;\
     case op_jst:    stacks_set_ret(); push16(i + 1); stacks_set_param(); i = pop16(); add = 0; break;\
     case op_stash:  { u##bi val = pop##bi(); stacks_set_ret(); push##bi(val); stacks_set_param(); } break;\
     case op_load:   push##bi(load##bi(pop16())); break;\
     case op_store:  store##bi(pop16(), pop##bi()); break;\
-    case op_read:   panic("TODO"); break;\
+    case op_read:   panic("TODO op_read"); break;\
     case op_write: {\
         u8 device_and_action = mem(s(--(*stack_ptr)));\
         Device device = device_and_action & 0xf0;\
@@ -203,10 +203,10 @@ static void run(char *path_biciasm) {
         }
 
         switch (byte) {
-            case op_jmi:   panic("TODO");
-            case op_jei:   panic("TODO");
+            case op_jmi:   i = load16(i + 1); add = 0; continue;
+            case op_jei:   if ( pop8()) { i = load16(i + 1); add = 0; } else add = 3; continue;
             case op_jni:   if (!pop8()) { i = load16(i + 1); add = 0; } else add = 3; continue;
-            case op_jsi:   panic("TODO");
+            case op_jsi:   stacks_set_ret(); push16(i + 3); stacks_set_param(); i = load16(i + 1); add = 0; continue;
             case op_break: goto break_run; break;
             default: break;
         }

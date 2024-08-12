@@ -153,6 +153,13 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                 if (!new_pc.ok) return false;
                 pc = new_pc.result.int16;
             } continue;
+            case '!': {
+                i += 1;
+                String8 name = parse_alpha();
+                label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc, .size = size_short };
+                label_ref_idx += 1;
+                pc += 2;
+            } continue;
             case '#': {
                 i += 1; 
                 Hex num = parse_hex();

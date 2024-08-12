@@ -3,13 +3,14 @@
 |0100
 
 #00 :while dup #0a lt jni {
-    &update_num_string jst
+    jsi !update_num_string
     &num_string *console_print write
-    inc &while jmp
+    inc jmi !while
 }
+
 &newline *console_print write
 break
 
+:newline {# _0a }
 :num_string {# "0 _20 }
 :update_num_string dup #30 add &num_string #01 add store jmp;r
-:newline {# _0a }

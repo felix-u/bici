@@ -1,6 +1,8 @@
+|00 :console_print
+
 |0100
 
-#0110 #00 write #04 #02 div
+&hey &console_print write
 break
 
-|0110 {# "Hello, _20 "World! _0a }
+:hey {# "hey _0a }

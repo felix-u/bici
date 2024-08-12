@@ -8,6 +8,29 @@ static u16 pc = 0x100;
 static u16 forward_res[0x100];
 static u8 forward_res_idx;
 
+structdef(Label) { String8 name; u16 addr; };
+static Label labels[0x100];
+static u8 label_idx;
+#define label_push(name, addr) {\
+    if (label_idx == 0x99) {\
+        errf("cannot add label '%.*s': maximum number of labels reached", string_fmt(name));\
+        pc = 0;\
+    }\
+    labels[label_idx++] = (Label){ name, addr };\
+}
+static u16 label_get_addr_of(String8 name) {
+    for (u8 idx = 0; idx < label_idx; idx += 1) {
+        if (!string8_eql(labels[idx].name, name)) continue;
+        return labels[idx].addr;
+    }
+    errf("no such label '%.*s'", string_fmt(name));
+    return 0;
+}
+ 
+structdef(Label_Ref) { String8 name; u16 loc; };
+static Label_Ref label_refs[0x100];
+static u8 label_ref_idx;
+
 structdef(Hex) {
     bool ok;
     u8 num_digits;
@@ -41,6 +64,27 @@ static Hex parse_hex(void) {
     }
 }
 
+static bool is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+static bool is_alpha(u8 c) { return ('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || (c == '_'); }
+
+static String8 parse_alpha(void) {
+    u16 beg_i = i;
+    if (!is_alpha(assembly[i])) {
+        errf(
+            "expected alphabetic character or underscore, found byte '%c'/%d/#%x at '%s'[%zu]", 
+            assembly[i], assembly[i], assembly[i], path_biciasm, i
+        );
+        return (String8){0};
+    }
+
+    i += 1;
+    while (i < len && (is_alpha(assembly[i]))) i += 1;
+    u16 end_i = i;
+    i -= 1;
+    return (String8){ .ptr = assembly + beg_i, .len = end_i - beg_i };
+}
+
 #define write(byte) {\
     out[pc] = (byte);\
     pc += 1;\
@@ -52,10 +96,6 @@ static Hex parse_hex(void) {
 static void compile_op(Mode mode, Op op) {
     write(op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
-
-static bool is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
-
-static bool is_alpha(u8 c) { return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'); }
 
 static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, char *path_bici) {
     path_biciasm = _path_biciasm;
@@ -91,6 +131,19 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                     case 4: compile_op((Mode){ .size = size_short }, op_push); write2(num.result.int16); break;
                     default: unreachable;
                 }
+            } continue;
+            case '&': {
+                compile_op((Mode){ .size = size_short }, op_push);
+                i += 1;
+                String8 name = parse_alpha();
+                label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc };
+                label_ref_idx += 1;
+                pc += 2;
+            } continue;
+            case ':': {
+                i += 1;
+                String8 name = parse_alpha();
+                label_push(name, pc);
             } continue;
             case '{': {
                 forward_res[forward_res_idx] = pc;
@@ -161,17 +214,23 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
 
         continue;
     }
-
     if (pc == 0) return false;
+    String8 rom = { .ptr = out, .len = pc };
+
+    for (u8 idx = 0; idx < label_ref_idx; idx += 1) {
+        Label_Ref ref = label_refs[idx];
+        if (ref.name.len == 0) return false;
+        pc = ref.loc;
+        write2(label_get_addr_of(ref.name));
+    }
 
     FILE *rom_file = file_open(path_bici, "wb");
     if (rom_file == 0) return false;
-    String8 rom = { .ptr = out, .len = pc };
     file_write(rom_file, rom);
     fclose(rom_file);
 
     printf("ASM ===\n");
-    for (usize idx = 0x100; idx < pc; idx += 1) printf("%02x ", out[idx]);
+    for (usize idx = 0x100; idx < rom.len; idx += 1) printf("%02x ", out[idx]);
     putchar('\n');
     return true;
 }

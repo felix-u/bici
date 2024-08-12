@@ -71,7 +71,7 @@ enumdef(Device, u8) {
     case op_store:  store##bi(pop16(), pop##bi()); break;\
     case op_read:   panic("TODO"); break;\
     case op_write: {\
-        u8 device_and_action = mem(s(--(*stack_ptr)));\
+        u8 device_and_action = mem(s(--(*stack_ptr))); *stack_ptr -= 1;\
         Device device = device_and_action & 0xf0;\
         u8 action = device_and_action & 0x0f;\
         switch (device) {\
@@ -214,10 +214,10 @@ static void run(char *path_biciasm) {
     }
     break_run:
 
-    printf("param  stack (bot->top): "); 
+    printf("param  stack (bot->top): { "); 
     for (u8 i = 0; i < stacks.param_ptr; i += 1) printf("%02x ", stacks.param[i]);
-    printf("\nreturn stack (bot->top): "); 
+    printf("}\nreturn stack (bot->top): { "); 
     for (u8 i = 0; i < stacks.ret_ptr; i += 1) printf("%02x ", stacks.ret[i]);
-    putchar('\n');
+    printf("}\n");
 }
 

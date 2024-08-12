@@ -2,7 +2,7 @@
 
 |0100
 
-&hey &console_print write
+&hey *console_print write
 break
 
 :hey {# "hey _0a }

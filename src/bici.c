@@ -71,12 +71,13 @@ enumdef(Device, u8) {
     case op_store:  store##bi(pop16(), pop##bi()); break;\
     case op_read:   panic("TODO"); break;\
     case op_write: {\
-        u8 device_and_action = mem(s(--(*stack_ptr))); *stack_ptr -= 1;\
+        u8 device_and_action = mem(s(--(*stack_ptr)));\
         Device device = device_and_action & 0xf0;\
         u8 action = device_and_action & 0x0f;\
         switch (device) {\
             case device_console: switch (action) {\
                 case 0x0: {\
+                    assume(m.size == size_byte);\
                     u16 str_addr = pop16();\
                     u8 str_len = load8(str_addr);\
                     String8 str = { .ptr = memory + str_addr + 1, .len = str_len };\

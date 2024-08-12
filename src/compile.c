@@ -12,7 +12,7 @@ structdef(Label) { String8 name; u16 addr; };
 static Label labels[0x100];
 static u8 label_idx;
 #define label_push(name, addr) {\
-    if (label_idx == 0x99) {\
+    if (label_idx == 0x0ff) {\
         errf("cannot add label '%.*s': maximum number of labels reached", string_fmt(name));\
         pc = 0;\
     }\
@@ -27,7 +27,7 @@ static u16 label_get_addr_of(String8 name) {
     return 0;
 }
  
-structdef(Label_Ref) { String8 name; u16 loc; };
+structdef(Label_Ref) { String8 name; u16 loc; Size size; };
 static Label_Ref label_refs[0x100];
 static u8 label_ref_idx;
 
@@ -132,11 +132,19 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                     default: unreachable;
                 }
             } continue;
+            case '*': {
+                compile_op((Mode){ .size = size_byte }, op_push);
+                i += 1;
+                String8 name = parse_alpha();
+                label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc, .size = size_byte };
+                label_ref_idx += 1;
+                pc += 1;
+            } continue;
             case '&': {
                 compile_op((Mode){ .size = size_short }, op_push);
                 i += 1;
                 String8 name = parse_alpha();
-                label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc };
+                label_refs[label_ref_idx] = (Label_Ref){ .name = name, .loc = pc, .size = size_short };
                 label_ref_idx += 1;
                 pc += 2;
             } continue;
@@ -221,7 +229,11 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
         Label_Ref ref = label_refs[idx];
         if (ref.name.len == 0) return false;
         pc = ref.loc;
-        write2(label_get_addr_of(ref.name));
+        switch (ref.size) {
+            case size_byte: write((u8)label_get_addr_of(ref.name)); break;
+            case size_short: write2(label_get_addr_of(ref.name)); break;
+            default: unreachable;
+        }
     }
 
     FILE *rom_file = file_open(path_bici, "wb");

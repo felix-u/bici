@@ -33,6 +33,8 @@ if "%clang%"=="1" set compile_out=%clang_out%
 if not exist build mkdir build
 pushd build
 
+REM TODO copy SDL2.dll to build folder
+
 if exist %name%.pdb del %name%.pdb
 %compile_debug% ..\src\main.c %compile_link% %compile_out%%name%.exe
 

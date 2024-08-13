@@ -5,10 +5,10 @@
     *screen_init write
     *screen read
 
-    #0000 :while dup;2 #0180 lt;2 jni {
+    #00 :while dup #ff lt jni {
         *screen_update write
-        inc;2 jmi @while
-    } drop;2
+        inc jmi @while
+    } drop
 
     *screen_quit write
 

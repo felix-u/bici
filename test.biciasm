@@ -2,9 +2,14 @@
 |10 :screen |11 :screen_init |12 :screen_update |13 :screen_quit
 
 |0100
+    *screen_init write
+    *screen read
 
-*screen_init write
-*screen read
-*screen_quit write
+    #0000 :while dup;2 #0180 lt;2 jni {
+        *screen_update write
+        inc;2 jmi @while
+    } drop;2
 
-break
+    *screen_quit write
+
+    break

@@ -97,12 +97,13 @@ enumdef(Device, u8) {
                     String8 str = { .ptr = memory + str_addr + 1, .len = str_len };\
                     printf("%.*s", string_fmt(str));\
                 } break;\
-                default: panicf("invalid action #%x for console device", action);\
+                default: panicf("[write] invalid action #%x for console device", action);\
             } break;\
             case device_screen: switch (action) {\
                 case 0x1: screen_init(); break;\
+                case 0x2: screen_update(); break;\
                 case 0x3: screen_quit(); break;\
-                default: panicf("invalid action #%x for screen device", action);\
+                default: panicf("[write] invalid action #%x for screen device", action);\
             } break;\
             default: panicf("invalid device #%x for operation 'write'", device);\
         }\

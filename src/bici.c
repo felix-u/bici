@@ -77,6 +77,10 @@ enumdef(Device, u8) {
         u8 action = device_and_action & 0x0f;\
         discard(action);\
         switch (device) {\
+            case device_screen: {\
+                /* TODO */\
+                push16(0x0200); push16(0x0200);\
+            } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
         }\
     } break;\

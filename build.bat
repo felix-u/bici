@@ -13,7 +13,7 @@ set include_paths=-I%dir_sdl%\include
 
 set cl_common=cl -nologo -std:c11 %include_paths% 
 set clang_common=clang -std=c11 %include_paths%
-set cl_link=-link -incremental:no -subsystem:windows %dir_sdl%\lib\x64\SDL2main.lib %dir_sdl%\lib\x64\SDL2.lib shell32.lib
+set cl_link=-link -incremental:no -subsystem:console %dir_sdl%\lib\x64\SDL2main.lib %dir_sdl%\lib\x64\SDL2.lib shell32.lib
 set clang_link=
 set cl_debug=%cl_common% -W4 -WX -Z7 -DBUILD_DEBUG=1 -fsanitize=address
 set clang_debug=%clang_common% -pedantic ^
@@ -33,8 +33,7 @@ if "%clang%"=="1" set compile_out=%clang_out%
 if not exist build mkdir build
 pushd build
 
-REM TODO copy SDL2.dll to build folder
-
+if not exist SDL2.dll copy %dir_sdl%\lib\x64\SDL2.dll .
 if exist %name%.pdb del %name%.pdb
 %compile_debug% ..\src\main.c %compile_link% %compile_out%%name%.exe
 

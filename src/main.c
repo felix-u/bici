@@ -4,8 +4,8 @@
 #include "SDL.h"
 
 #include "screen.c"
-#include "bici.c"
-#include "compile.c"
+#include "vm.c"
+#include "asm.c"
 
 #define usage "usage: bici <com|run|script> <file...>"
 

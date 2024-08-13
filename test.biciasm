@@ -2,14 +2,7 @@
 |10 :screen |11 :screen_init |12 :screen_update |13 :screen_quit
 
 |0100
-    *screen_init write
-    *screen read
-
-    #00 :while dup #ff lt jni {
-        *screen_update write
-        inc jmi @while
-    } drop
-
-    *screen_quit write
-
+    &test_str *console_print write 
     break
+
+:test_str {# "hey _0a }

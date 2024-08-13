@@ -39,8 +39,14 @@ static void screen_quit(void) {
 }
 
 static void screen_update(void) {
+    static bool fullscreen;
     SDL_Event event = {0};
     while (SDL_PollEvent(&event) != 0) switch (event.type) {
+        case SDL_KEYDOWN: {
+            if (event.key.keysym.sym != SDLK_F11) break;
+            fullscreen = !fullscreen;
+            SDL_SetWindowFullscreen(screen_window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        } break;
         case SDL_QUIT: screen_quit(); break;
         default: break;
     }
@@ -50,3 +56,5 @@ static void screen_update(void) {
     SDL_RenderCopy(screen_renderer, screen_texture, 0, 0);
     SDL_RenderPresent(screen_renderer);
 }
+
+static void screen_get_width_height(u16 *width, u16 *height) { SDL_GetWindowSize(screen_window, (int *)width, (int *)height); }

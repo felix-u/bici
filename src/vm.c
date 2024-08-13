@@ -78,8 +78,8 @@ enumdef(Device, u8) {
         discard(action);\
         switch (device) {\
             case device_screen: {\
-                /* TODO */\
-                push16(0x0200); push16(0x0200);\
+                u16 width = 0, height = 0; screen_get_width_height(&width, &height);\
+                push16(width); push16(height);\
             } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
         }\

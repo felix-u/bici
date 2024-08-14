@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
         file_open_write_close(argv[3], "wb", rom);
     } else if (string8_eql(cmd, string8("run"))) {
         arena = arena_init(0x10000);
-        run(file_read(&arena, argv[2], "rb", 0x10000));
+        vm_run(&(Vm){0}, file_read(&arena, argv[2], "rb", 0x10000));
         return 0;
     } else if (string8_eql(cmd, string8("script"))) {
         if (argc != 3) {
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
-        run(asm_compile(&arena, max_asm_filesize, argv[2]));
+        vm_run(&(Vm){0}, asm_compile(&arena, max_asm_filesize, argv[2]));
     } else {
         errf("no such command '%.*s'\n%s", string_fmt(cmd), usage);
         return 1;

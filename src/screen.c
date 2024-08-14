@@ -1,19 +1,24 @@
 static SDL_Window *screen_window;
 static SDL_Renderer *screen_renderer;
 static SDL_Texture *screen_texture;
-
-#define screen_width 320
-#define screen_height 180
-u32 pixels[screen_width * screen_height];
+// TODO
+static u16 screen_width, screen_height;
+static u32 *screen_pixels;
 
 static void screen_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO) == -1) panic("SDL_Init failed");
+
+    SDL_DisplayMode display_mode;
+    int display_idx = 0;
+    if (SDL_GetCurrentDisplayMode(display_idx, &display_mode) == 0) panic("SDL_GetCurrentDisplayMode failed");
+    screen_width = (u16)display_mode.w;
+    screen_height = (u16)display_mode.h;
 
     screen_window = SDL_CreateWindow(
         "bici", 
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
         screen_width, screen_height, 
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
     );
     if (screen_window == 0) panic("SDL_CreateWindow failed");
 
@@ -27,7 +32,7 @@ static void screen_init(void) {
     if (screen_texture == 0) panic("SDL_CreateTexture failed");
 
     for (u32 y = 0; y < screen_height; y += 1) for (u32 x = 0; x < screen_width; x += 1) {
-        pixels[y * screen_width + x] = 0xff0000ff;
+        screen_pixels[y * screen_width + x] = 0xff0000ff;
     }
 }
 
@@ -39,7 +44,7 @@ static void screen_quit(void) {
 }
 
 static bool screen_update(void) {
-    static bool fullscreen;
+    static bool fullscreen = false;
     SDL_Event event = {0};
     while (SDL_PollEvent(&event) != 0) switch (event.type) {
         case SDL_KEYDOWN: {
@@ -51,7 +56,7 @@ static bool screen_update(void) {
         default: break;
     }
 
-    SDL_UpdateTexture(screen_texture, 0, pixels, screen_width * sizeof(u32));
+    SDL_UpdateTexture(screen_texture, 0, screen_pixels, screen_width * sizeof(u32));
     SDL_RenderClear(screen_renderer);
     SDL_RenderCopy(screen_renderer, screen_texture, 0, 0);
     SDL_RenderPresent(screen_renderer);

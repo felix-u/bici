@@ -5,7 +5,7 @@
 |0100 
 
 :screen_init &init_str *console_print write break
-:screen_update &update_str *console_print write break
+// :screen_update &update_str *console_print write break
 :screen_quit &quit_str *console_print write break
 
 :init_str {# "hello_init _0a }

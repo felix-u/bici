@@ -5,36 +5,33 @@ structdef(Label_Ref) { String8 name; u16 loc; Size size; };
 enumdef(Res_Mode, u8) { res_num, res_addr };
 structdef(Res) { u16 pc; Res_Mode mode; };
 
+typedef Array(u8) Array_u8;
+
 structdef(Asm) {
     char *path_biciasm;
-    u8 *assembly;
-    u16 len, i;
-    u8 out[0x10000];
-    u16 pc;
+    String8 infile;
+    u16 i;
 
-    Label labels[0x100];
-    u8 label_idx;
+    Array_Label labels;
+    Array_Label_Ref label_refs;
+    Array_Res forward_res;
 
-    Label_Ref label_refs[0x100];
-    u8 label_ref_idx;
-
-    Res forward_res[0x100];
-    u8 forward_res_idx;
+    Array_u8 rom;
 };
 
-static void label_push(Asm *ctx, String8 name, u16 addr) {
-    if (ctx->label_idx == UINT8_MAX) {
+static void asm_label_push(Asm *ctx, String8 name, u16 addr) {
+    if (ctx->labels.len == ctx->labels.cap) {
         errf("cannot add label '%.*s': maximum number of labels reached", string_fmt(name));
         abort();
     }
-    ctx->labels[ctx->label_idx] = (Label){ .name = name, .addr = addr }; 
-    ctx->label_idx += 1;
+    ctx->labels.ptr[ctx->labels.len] = (Label){ .name = name, .addr = addr }; 
+    ctx->labels.len += 1;
 }
 
-static u16 label_get_addr_of(Asm *ctx, String8 name) {
-    for (u8 idx = 0; idx < ctx->label_idx; idx += 1) {
-        if (!string8_eql(ctx->labels[idx].name, name)) continue;
-        return ctx->labels[idx].addr;
+static u16 asm_label_get_addr_of(Asm *ctx, String8 name) {
+    for (u8 i = 0; i < ctx->labels.len; i += 1) {
+        if (!string8_eql(ctx->labels.ptr[i].name, name)) continue;
+        return ctx->labels.ptr[i].addr;
     }
     errf("no such label '%.*s'", string_fmt(name));
     return 0;
@@ -46,13 +43,13 @@ structdef(Hex) {
     union { u8 int8; u16 int16; } result;
 };
 
-static Hex parse_hex(Asm *ctx) {
+static Hex asm_parse_hex(Asm *ctx) {
     u16 beg_i = ctx->i;
-    while (ctx->i < ctx->len && is_hex_digit_table[ctx->assembly[ctx->i]]) ctx->i += 1;
+    while (ctx->i < ctx->infile.len && is_hex_digit_table[ctx->infile.ptr[ctx->i]]) ctx->i += 1;
     u16 end_i = ctx->i;
     ctx->i -= 1;
     u8 num_digits = (u8)(end_i - beg_i);
-    String8 hex_string = { .ptr = ctx->assembly + beg_i, .len = num_digits };
+    String8 hex_string = { .ptr = ctx->infile.ptr + beg_i, .len = num_digits };
 
     switch (num_digits) {
         case 2: return (Hex){
@@ -77,142 +74,151 @@ static bool is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c
 
 static bool is_alpha(u8 c) { return ('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || (c == '_'); }
 
-static String8 parse_alpha(Asm *ctx) {
+static String8 asm_parse_alpha(Asm *ctx) {
     u16 beg_i = ctx->i;
-    if (!is_alpha(ctx->assembly[ctx->i])) {
+    if (!is_alpha(ctx->infile.ptr[ctx->i])) {
         errf(
             "expected alphabetic character or underscore, found byte '%c'/%d/#%x at '%s'[%zu]", 
-            ctx->assembly[ctx->i], ctx->assembly[ctx->i], ctx->assembly[ctx->i], ctx->path_biciasm, ctx->i
+            ctx->infile.ptr[ctx->i], ctx->infile.ptr[ctx->i], ctx->infile.ptr[ctx->i], ctx->path_biciasm, ctx->i
         );
         return (String8){0};
     }
 
     ctx->i += 1;
-    while (ctx->i < ctx->len && (is_alpha(ctx->assembly[ctx->i]))) ctx->i += 1;
+    while (ctx->i < ctx->infile.len && (is_alpha(ctx->infile.ptr[ctx->i]))) ctx->i += 1;
     u16 end_i = ctx->i;
     ctx->i -= 1;
-    return (String8){ .ptr = ctx->assembly + beg_i, .len = end_i - beg_i };
+    return (String8){ .ptr = ctx->infile.ptr + beg_i, .len = end_i - beg_i };
 }
 
-static void write(Asm *ctx, u8 byte) {
-    if (ctx->pc == UINT16_MAX) { 
-        err("exceeded maximum program size"); 
-        abort(); 
+static void asm_rom_write(Asm *ctx, u8 byte) {
+    if (ctx->rom.len == ctx->rom.cap) {
+        err("reached maximum rom size");
+        abort();
     }
-    ctx->out[ctx->pc] = byte;
-    ctx->pc += 1;
+    array_push_assume_capacity(&ctx->rom, &byte);
 } 
 
-static void write2(Asm *ctx, u16 byte2) {
-    write(ctx, (byte2 & 0xff00) >> 8); 
-    write(ctx, byte2 & 0x00ff); 
+static void asm_rom_write2(Asm *ctx, u16 byte2) {
+    asm_rom_write(ctx, (byte2 & 0xff00) >> 8); 
+    asm_rom_write(ctx, byte2 & 0x00ff); 
 }
 
 static void forward_res_push(Asm *ctx, Res_Mode res_mode) {
-    if (ctx->forward_res_idx == 0x0ff) {
+    if (ctx->forward_res.len == 0x0ff) {
         errf("cannot resolve address at '%s'[%d]: maximum number of resolutions reached", ctx->path_biciasm, ctx->i);
-        ctx->pc = 0;
+        ctx->rom.len = 0;
         return;
     }
-    ctx->forward_res[ctx->forward_res_idx] = (Res){ .pc = ctx->pc, .mode = res_mode };
-    ctx->forward_res_idx += 1;
+    ctx->forward_res.ptr[ctx->forward_res.len] = (Res){ .pc = (u16)ctx->rom.len, .mode = res_mode };
+    ctx->forward_res.len += 1;
 }
 static void forward_res_resolve_last(Asm *ctx) {
-    if (ctx->forward_res_idx == 0) {
+    if (ctx->forward_res.len == 0) {
         errf("forward resolution marker at '%s'[%d] matches no opening marker", ctx->path_biciasm, ctx->i);
-        ctx->pc = 0;
+        ctx->rom.len = 0;
         return;
     }
-    ctx->forward_res_idx -= 1;
-    Res res = ctx->forward_res[ctx->forward_res_idx];
+    ctx->forward_res.len -= 1;
+    Res res = ctx->forward_res.ptr[ctx->forward_res.len];
     switch (res.mode) {
-        case res_num: ctx->out[res.pc] = (u8)(ctx->pc - 1 - res.pc); break;
+        case res_num: ctx->rom.ptr[res.pc] = (u8)(ctx->rom.len - 1 - res.pc); break;
         case res_addr: {
-            u16 pc_bak = ctx->pc;
-            ctx->pc = res.pc;
-            write2(ctx, pc_bak);
-            ctx->pc = pc_bak;
+            u16 pc_bak = (u16)ctx->rom.len;
+            ctx->rom.len = res.pc;
+            asm_rom_write2(ctx, pc_bak);
+            ctx->rom.len = pc_bak;
         } break;
         default: unreachable;
     }
 }
 
 static void compile_op(Asm *ctx, Mode mode, u8 op) {
-    if (instruction_is_special(op)) { write(ctx, op); return; }
-    write(ctx, op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
+    if (instruction_is_special(op)) { asm_rom_write(ctx, op); return; }
+    asm_rom_write(ctx, op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
 static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, char *path_bici) {
-    String8 asm_file = file_read(arena, _path_biciasm, "rb", max_asm_filesize);
-    if (asm_file.len == 0) return false;
+    static u8 rom_mem[0x10000];
+    static Label labels_mem[0x100];
+    static Label_Ref label_refs_mem[0x100];
+    static Res forward_res_mem[0x100];
 
-    Asm ctx = { .path_biciasm = _path_biciasm, .assembly = asm_file.ptr, .len = (u16)asm_file.len, .pc = 0x100 };
+    Asm ctx = { 
+        .path_biciasm = _path_biciasm, 
+        .infile = file_read(arena, _path_biciasm, "rb", max_asm_filesize),
+        .labels = { .ptr = labels_mem, .cap = 0x100 },
+        .label_refs = { .ptr = label_refs_mem, .cap = 0x100 },
+        .forward_res = { .ptr = forward_res_mem, .cap = 0x100 },
+        .rom = { .ptr = rom_mem, .len = 0x100, .cap = 0x10000 },
+    };
+    if (ctx.infile.len == 0) return false;
 
     u16 add = 1;
-    for (ctx.i = 0; ctx.i < ctx.len; ctx.i += add) {
+    for (ctx.i = 0; ctx.i < ctx.infile.len; ctx.i += add) {
         add = 1;
-        if (is_whitespace(ctx.assembly[ctx.i])) continue;
+        if (is_whitespace(ctx.infile.ptr[ctx.i])) continue;
 
         Mode mode = {0};
 
-        switch (ctx.assembly[ctx.i]) {
-            case '/': if (ctx.i + 1 < ctx.len && ctx.assembly[ctx.i + 1] == '/') {
-                for (ctx.i += 2; ctx.i < ctx.len && ctx.assembly[ctx.i] != '\n';) ctx.i += 1;
+        switch (ctx.infile.ptr[ctx.i]) {
+            case '/': if (ctx.i + 1 < ctx.infile.len && ctx.infile.ptr[ctx.i + 1] == '/') {
+                for (ctx.i += 2; ctx.i < ctx.infile.len && ctx.infile.ptr[ctx.i] != '\n';) ctx.i += 1;
             } continue;
             case '|': {
                 ctx.i += 1;
-                Hex new_pc = parse_hex(&ctx);
+                Hex new_pc = asm_parse_hex(&ctx);
                 if (!new_pc.ok) return false;
-                ctx.pc = new_pc.result.int16;
+                ctx.rom.len = new_pc.result.int16;
             } continue;
             case '@': {
                 ctx.i += 1;
-                String8 name = parse_alpha(&ctx);
-                ctx.label_refs[ctx.label_ref_idx] = (Label_Ref){ .name = name, .loc = ctx.pc, .size = size_short };
-                ctx.label_ref_idx += 1;
-                ctx.pc += 2;
+                String8 name = asm_parse_alpha(&ctx);
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_short };
+                ctx.label_refs.len += 1;
+                ctx.rom.len += 2;
             } continue;
             case '#': {
                 ctx.i += 1; 
-                Hex num = parse_hex(&ctx);
+                Hex num = asm_parse_hex(&ctx);
                 if (!num.ok) return false;
                 switch (num.num_digits) {
-                    case 2: compile_op(&ctx, (Mode){ .size = size_byte }, op_push); write(&ctx, num.result.int8); break;
-                    case 4: compile_op(&ctx, (Mode){ .size = size_short }, op_push); write2(&ctx, num.result.int16); break;
+                    case 2: compile_op(&ctx, (Mode){ .size = size_byte }, op_push); asm_rom_write(&ctx, num.result.int8); break;
+                    case 4: compile_op(&ctx, (Mode){ .size = size_short }, op_push); asm_rom_write2(&ctx, num.result.int16); break;
                     default: unreachable;
                 }
             } continue;
             case '*': {
                 compile_op(&ctx, (Mode){ .size = size_byte }, op_push);
                 ctx.i += 1;
-                String8 name = parse_alpha(&ctx);
-                ctx.label_refs[ctx.label_ref_idx] = (Label_Ref){ .name = name, .loc = ctx.pc, .size = size_byte };
-                ctx.label_ref_idx += 1;
-                ctx.pc += 1;
+                String8 name = asm_parse_alpha(&ctx);
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_byte };
+                ctx.label_refs.len += 1;
+                ctx.rom.len += 1;
             } continue;
             case '&': {
                 compile_op(&ctx, (Mode){ .size = size_short }, op_push);
                 ctx.i += 1;
-                String8 name = parse_alpha(&ctx);
-                ctx.label_refs[ctx.label_ref_idx] = (Label_Ref){ .name = name, .loc = ctx.pc, .size = size_short };
-                ctx.label_ref_idx += 1;
-                ctx.pc += 2;
+                String8 name = asm_parse_alpha(&ctx);
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_short };
+                ctx.label_refs.len += 1;
+                ctx.rom.len += 2;
             } continue;
             case ':': {
                 ctx.i += 1;
-                String8 name = parse_alpha(&ctx);
-                label_push(&ctx, name, ctx.pc);
+                String8 name = asm_parse_alpha(&ctx);
+                asm_label_push(&ctx, name, (u16)ctx.rom.len);
             } continue;
             case '{': {
                 ctx.i += 1;
-                switch (ctx.assembly[ctx.i]) {
+                switch (ctx.infile.ptr[ctx.i]) {
                     case '#': {
                         forward_res_push(&ctx, res_num);
-                        ctx.pc += 1;
+                        ctx.rom.len += 1;
                     } continue;
                     default: {
                         forward_res_push(&ctx, res_addr);
-                        ctx.pc += 2;
+                        ctx.rom.len += 2;
                         add = 0;
                     } continue;
                 }
@@ -220,40 +226,40 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
             case '}': forward_res_resolve_last(&ctx); continue;
             case '_': {
                 ctx.i += 1;
-                Hex num = parse_hex(&ctx);
+                Hex num = asm_parse_hex(&ctx);
                 if (!num.ok) return false;
                 switch (num.num_digits) {
-                    case 2: write(&ctx, num.result.int8); break;
-                    case 4: write2(&ctx, num.result.int16); break;
+                    case 2: asm_rom_write(&ctx, num.result.int8); break;
+                    case 4: asm_rom_write2(&ctx, num.result.int16); break;
                     default: unreachable;
                 }
             } continue;
             case '"': {
-                for (ctx.i += 1; ctx.i < ctx.len && !is_whitespace(ctx.assembly[ctx.i]); ctx.i += 1) {
-                    write(&ctx, ctx.assembly[ctx.i]);
+                for (ctx.i += 1; ctx.i < ctx.infile.len && !is_whitespace(ctx.infile.ptr[ctx.i]); ctx.i += 1) {
+                    asm_rom_write(&ctx, ctx.infile.ptr[ctx.i]);
                 }
                 add = 0;
             } continue;
             default: break;
         }
 
-        if (!is_alpha(ctx.assembly[ctx.i])) {
-            errf("invalid byte '%c'/%d/#%x at '%s'[%zu]", ctx.assembly[ctx.i], ctx.assembly[ctx.i], ctx.assembly[ctx.i], ctx.path_biciasm, ctx.i);
+        if (!is_alpha(ctx.infile.ptr[ctx.i])) {
+            errf("invalid byte '%c'/%d/#%x at '%s'[%zu]", ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.path_biciasm, ctx.i);
             return false;
         }
 
         usize beg_i = ctx.i, end_i = beg_i;
-        for (; ctx.i < ctx.len && !is_whitespace(ctx.assembly[ctx.i]); ctx.i += 1) {
-            if ('a' <= ctx.assembly[ctx.i] && ctx.assembly[ctx.i] <= 'z') continue;
+        for (; ctx.i < ctx.infile.len && !is_whitespace(ctx.infile.ptr[ctx.i]); ctx.i += 1) {
+            if ('a' <= ctx.infile.ptr[ctx.i] && ctx.infile.ptr[ctx.i] <= 'z') continue;
             end_i = ctx.i;
-            if (ctx.assembly[ctx.i] == ';') for (ctx.i += 1; ctx.i < ctx.len;) {
-                if (is_whitespace(ctx.assembly[ctx.i])) goto done;
-                switch (ctx.assembly[ctx.i]) {
+            if (ctx.infile.ptr[ctx.i] == ';') for (ctx.i += 1; ctx.i < ctx.infile.len;) {
+                if (is_whitespace(ctx.infile.ptr[ctx.i])) goto done;
+                switch (ctx.infile.ptr[ctx.i]) {
                     case 'k': mode.keep = true; break;
                     case 'r': mode.stack = stack_ret; break;
                     case '2': mode.size = size_short; break;
                     default: {
-                        errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", ctx.assembly[ctx.i], ctx.assembly[ctx.i], ctx.assembly[ctx.i], ctx.path_biciasm, ctx.i);
+                        errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.path_biciasm, ctx.i);
                         return false;
                     } break;
                 }
@@ -262,7 +268,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
         }
         done:
         if (end_i == beg_i) end_i = ctx.i;
-        String8 lexeme = string8_range(asm_file, beg_i, end_i);
+        String8 lexeme = string8_range(ctx.infile, beg_i, end_i);
 
         if (false) {}
         #define compile_if_op_string(name, val)\
@@ -275,27 +281,24 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
 
         continue;
     }
-    if (ctx.pc == 0) return false;
-    String8 rom = { .ptr = ctx.out, .len = ctx.pc };
+    if (ctx.rom.len == 0) return false;
+    String8 rom = slice_from_array(ctx.rom);
 
-    for (u8 idx = 0; idx < ctx.label_ref_idx; idx += 1) {
-        Label_Ref ref = ctx.label_refs[idx];
+    for (u8 i = 0; i < ctx.label_refs.len; i += 1) {
+        Label_Ref ref = ctx.label_refs.ptr[i];
         if (ref.name.len == 0) return false;
-        ctx.pc = ref.loc;
+        ctx.rom.len = ref.loc;
         switch (ref.size) {
-            case size_byte: write(&ctx, (u8)label_get_addr_of(&ctx, ref.name)); break;
-            case size_short: write2(&ctx, label_get_addr_of(&ctx, ref.name)); break;
+            case size_byte: asm_rom_write(&ctx, (u8)asm_label_get_addr_of(&ctx, ref.name)); break;
+            case size_short: asm_rom_write2(&ctx, asm_label_get_addr_of(&ctx, ref.name)); break;
             default: unreachable;
         }
     }
 
-    FILE *rom_file = file_open(path_bici, "wb");
-    if (rom_file == 0) return false;
-    file_write(rom_file, rom);
-    fclose(rom_file);
-
     printf("ASM ===\n");
-    for (usize idx = 0x100; idx < rom.len; idx += 1) printf("%02x ", ctx.out[idx]);
+    for (usize i = 0x100; i < rom.len; i += 1) printf("%02x ", ctx.rom.ptr[i]);
     putchar('\n');
+
+    file_open_write_close(path_bici, "wb", rom);
     return true;
 }

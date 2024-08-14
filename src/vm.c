@@ -1,40 +1,40 @@
 #define for_op(action)\
-    action(push,   0x00)/* NO k MODE */\
-    action(drop,   0x01)\
-    action(nip,    0x02)\
-    action(swap,   0x03)\
-    action(rot,    0x04)\
-    action(dup,    0x05)\
-    action(over,   0x06)\
-    action(eq,     0x07)\
-    action(neq,    0x08)\
-    action(gt,     0x09)\
-    action(lt,     0x0a)\
-    action(add,    0x0b)\
-    action(sub,    0x0c)\
-    action(mul,    0x0d)\
-    action(div,    0x0e)\
-    action(inc,    0x0f)\
-    action(not,    0x10)\
-    action(and,    0x11)\
-    action(or,     0x12)\
-    action(xor,    0x13)\
-    action(shift,  0x14)\
-    action(jmp,    0x15)\
-    action(jeq,    0x16)\
-    action(jst,    0x17)\
-    action(jnq,    0x18)\
-    action(jni,    0x19)\
-    action(stash,  0x1a)\
-    action(load,   0x1b)\
-    action(store,  0x1c)\
-    action(read,   0x1d)\
-    action(write,  0x1e)\
-    /*    UNUSED   0x1f */\
+    action(break,  0x00)/* NO MODE */\
+    action(push,   0x01)/* NO k MODE */\
+    action(drop,   0x02)\
+    action(nip,    0x03)\
+    action(swap,   0x04)\
+    action(rot,    0x05)\
+    action(dup,    0x06)\
+    action(over,   0x07)\
+    action(eq,     0x08)\
+    action(neq,    0x09)\
+    action(gt,     0x0a)\
+    action(lt,     0x0b)\
+    action(add,    0x0c)\
+    action(sub,    0x0d)\
+    action(mul,    0x0e)\
+    action(div,    0x0f)\
+    action(inc,    0x10)\
+    action(not,    0x11)\
+    action(and,    0x12)\
+    action(or,     0x13)\
+    action(xor,    0x14)\
+    action(shift,  0x15)\
+    action(jmp,    0x16)\
+    action(jeq,    0x17)\
+    action(jst,    0x18)\
+    action(jnq,    0x19)\
+    action(jni,    0x1a)\
+    action(stash,  0x1b)\
+    action(load,   0x1c)\
+    action(store,  0x1d)\
+    action(read,   0x1e)\
+    action(write,  0x1f)\
     action(jmi,    0x80)/* NO MODE (== push;k)  */\
     action(jei,    0xa0)/* NO MODE (== push;k2) */\
     action(jsi,    0xc0)/* NO MODE (== push;kr) */\
-    action(break,  0xe0)/* NO MODE (== push;kr2)*/\
+    /* UNUSED      0xe0)   NO MODE (== push;kr2)*/\
 
 enumdef(Device, u8) {
     device_console = 0x00,
@@ -197,12 +197,11 @@ static u16 pop16(void) { u16 val = (u16)s(*stack_ptr - 1) | (u16)(s(*stack_ptr -
 static u16 load16(u16 addr) { return (u16)(((u16)mem(addr) << 8) | (u16)mem(addr + 1)); }
 static void store16(u16 addr, u16 val) { mem(addr) = (u8)(val >> 8); mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
-static void run(char *path_biciasm) {
-    Arena bici_mem = { .mem = memory, .cap = 0x10000 };
-    String8 program = file_read(&bici_mem, path_biciasm, "rb", 0x10000);
+static void run(String8 rom) {
+    memcpy(memory, rom.ptr, rom.len);
 
     printf("MEMORY ===\n");
-    for (u16 i = 0x100; i < program.len; i += 1) {
+    for (u16 i = 0x100; i < rom.len; i += 1) {
         u8 byte = memory[i];
         printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, op_name(byte), mode_name(byte));
     }

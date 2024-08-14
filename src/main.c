@@ -25,18 +25,20 @@ int main(int argc, char **argv) {
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
-        compile(&arena, max_asm_filesize, argv[2], argv[3]);
+        String8 rom = asm_compile(&arena, max_asm_filesize, argv[2]);
+        file_open_write_close(argv[3], "wb", rom);
     } else if (string8_eql(cmd, string8("run"))) {
-        run(argv[2]);
+        arena = arena_init(0x10000);
+        run(file_read(&arena, argv[2], "rb", 0x10000));
         return 0;
     } else if (string8_eql(cmd, string8("script"))) {
-        if (argc != 4) {
-            err("usage: bici script <file.biciasm> <file.bici>");
+        if (argc != 3) {
+            err("usage: bici script <file.biciasm>");
             return 1;
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
-        if (compile(&arena, max_asm_filesize, argv[2], argv[3])) run(argv[3]);
+        run(asm_compile(&arena, max_asm_filesize, argv[2]));
     } else {
         errf("no such command '%.*s'\n%s", string_fmt(cmd), usage);
         return 1;

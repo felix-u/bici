@@ -138,7 +138,7 @@ static void compile_op(Asm *ctx, Mode mode, u8 op) {
     asm_rom_write(ctx, op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
-static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, char *path_bici) {
+static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm) {
     static u8 rom_mem[0x10000];
     static Label labels_mem[0x100];
     static Label_Ref label_refs_mem[0x100];
@@ -152,7 +152,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
         .forward_res = { .ptr = forward_res_mem, .cap = 0x100 },
         .rom = { .ptr = rom_mem, .len = 0x100, .cap = 0x10000 },
     };
-    if (ctx.infile.len == 0) return false;
+    if (ctx.infile.len == 0) return (String8){0};
 
     u16 add = 1;
     for (ctx.i = 0; ctx.i < ctx.infile.len; ctx.i += add) {
@@ -168,7 +168,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
             case '|': {
                 ctx.i += 1;
                 Hex new_pc = asm_parse_hex(&ctx);
-                if (!new_pc.ok) return false;
+                if (!new_pc.ok) return (String8){0};
                 ctx.rom.len = new_pc.result.int16;
             } continue;
             case '@': {
@@ -181,7 +181,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
             case '#': {
                 ctx.i += 1; 
                 Hex num = asm_parse_hex(&ctx);
-                if (!num.ok) return false;
+                if (!num.ok) return (String8){0};
                 switch (num.num_digits) {
                     case 2: compile_op(&ctx, (Mode){ .size = size_byte }, op_push); asm_rom_write(&ctx, num.result.int8); break;
                     case 4: compile_op(&ctx, (Mode){ .size = size_short }, op_push); asm_rom_write2(&ctx, num.result.int16); break;
@@ -227,7 +227,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
             case '_': {
                 ctx.i += 1;
                 Hex num = asm_parse_hex(&ctx);
-                if (!num.ok) return false;
+                if (!num.ok) return (String8){0};
                 switch (num.num_digits) {
                     case 2: asm_rom_write(&ctx, num.result.int8); break;
                     case 4: asm_rom_write2(&ctx, num.result.int16); break;
@@ -245,7 +245,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
 
         if (!is_alpha(ctx.infile.ptr[ctx.i])) {
             errf("invalid byte '%c'/%d/#%x at '%s'[%zu]", ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.path_biciasm, ctx.i);
-            return false;
+            return (String8){0};
         }
 
         usize beg_i = ctx.i, end_i = beg_i;
@@ -260,7 +260,7 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
                     case '2': mode.size = size_short; break;
                     default: {
                         errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.path_biciasm, ctx.i);
-                        return false;
+                        return (String8){0};
                     } break;
                 }
                 ctx.i += 1;
@@ -276,17 +276,17 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
         for_op(compile_if_op_string)
         else {
             errf("invalid token '%.*s' at '%s'[%zu..%zu]", string_fmt(lexeme), ctx.path_biciasm, beg_i, end_i);
-            return false;
+            return (String8){0};
         };
 
         continue;
     }
-    if (ctx.rom.len == 0) return false;
+    if (ctx.rom.len == 0) return (String8){0};
     String8 rom = slice_from_array(ctx.rom);
 
     for (u8 i = 0; i < ctx.label_refs.len; i += 1) {
         Label_Ref ref = ctx.label_refs.ptr[i];
-        if (ref.name.len == 0) return false;
+        if (ref.name.len == 0) return (String8){0};
         ctx.rom.len = ref.loc;
         switch (ref.size) {
             case size_byte: asm_rom_write(&ctx, (u8)asm_label_get_addr_of(&ctx, ref.name)); break;
@@ -296,9 +296,8 @@ static bool compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm, c
     }
 
     printf("ASM ===\n");
-    for (usize i = 0x100; i < rom.len; i += 1) printf("%02x ", ctx.rom.ptr[i]);
+    for (usize i = 0x100; i < rom.len; i += 1) printf("%02x ", rom.ptr[i]);
     putchar('\n');
 
-    file_open_write_close(path_bici, "wb", rom);
-    return true;
+    return rom;
 }

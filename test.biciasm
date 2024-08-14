@@ -1,8 +1,13 @@
 |00 :console_print
-|10 :screen |11 :screen_init |12 :screen_update |13 :screen_quit
+|10 :screen
+    |10 @screen_init |12 @screen_update |14 @screen_quit
 
-|0100
-    &test_str *console_print write 
-    break
+|0100 
 
-:test_str {# "hey _0a }
+:screen_init &init_str *console_print write break
+:screen_update &update_str *console_print write break
+:screen_quit &quit_str *console_print write break
+
+:init_str {# "hello_init _0a }
+:update_str {# "hello_update _0a }
+:quit_str {# "hello_quit _0a }

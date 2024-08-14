@@ -197,18 +197,7 @@ static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
-static void vm_run(Vm *vm, String8 rom) {
-    memcpy(vm->memory, rom.ptr, rom.len);
-
-    if (rom.len != 0) {
-        printf("MEMORY ===\n");
-        for (u16 i = 0x100; i < rom.len; i += 1) {
-            u8 byte = vm->memory[i];
-            printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, vm_op_name(byte), mode_name(byte));
-        }
-        printf("\nRUN ===\n");
-    }
-
+static void vm_run_to_break(Vm *vm) {
     u16 add = 1;
     for (; true; vm->pc += add) {
         add = 1;
@@ -219,11 +208,11 @@ static void vm_run(Vm *vm, String8 rom) {
         vm->stack_active = instruction.mode.stack;
 
         switch (byte) {
+            case vm_op_break: return;
             case vm_op_jmi: vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
             case vm_op_jei: if ( vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
             case vm_op_jni: if (!vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
             case vm_op_jsi: vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 3); vm->stack_active = stack_param; vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
-            case vm_op_break: goto break_run; break;
             default: break;
         }
 
@@ -233,12 +222,40 @@ static void vm_run(Vm *vm, String8 rom) {
             default: panicf("unreachable %s{#%02x}", vm_op_name(byte), byte);
         }
     }
-    break_run:
+}
+
+static void vm_run(String8 rom) {
     if (rom.len == 0) return;
+
+    Vm vm = { .pc = 0x100 };
+    memcpy(vm.memory, rom.ptr, rom.len);
+
+    printf("MEMORY ===\n");
+    for (u16 i = 0x100; i < rom.len; i += 1) {
+        u8 byte = vm.memory[i];
+        printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, vm_op_name(byte), mode_name(byte));
+    }
+    printf("\nRUN ===\n");
+
+    screen_init(); 
+    u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
+    vm.pc = vm_on_screen_init_pc;
+    vm_run_to_break(&vm);
+
+    u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | 0x02);
+    while (screen_update()) {
+        vm.pc = vm_on_screen_update_pc;
+        vm_run_to_break(&vm);
+    }
+
+    u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | 0x04);
+    vm.pc = vm_on_screen_quit_pc;
+    vm_run_to_break(&vm);
+
     printf("param  stack (bot->top): { "); 
-    for (u8 i = 0; i < vm->stacks[stack_param].ptr; i += 1) printf("%02x ", vm->stacks[stack_param].memory[i]);
+    for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) printf("%02x ", vm.stacks[stack_param].memory[i]);
     printf("}\nreturn stack (bot->top): { "); 
-    for (u8 i = 0; i < vm->stacks[stack_ret].ptr; i += 1) printf("%02x ", vm->stacks[stack_ret].memory[i]);
+    for (u8 i = 0; i < vm.stacks[stack_ret].ptr; i += 1) printf("%02x ", vm.stacks[stack_ret].memory[i]);
     printf("}\n");
 }
 

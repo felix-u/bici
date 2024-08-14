@@ -1,4 +1,4 @@
-#define for_op(action)\
+#define vm_for_op(action)\
     action(break,  0x00)/* NO MODE */\
     action(push,   0x01)/* NO k MODE */\
     action(drop,   0x02)\
@@ -36,70 +36,71 @@
     action(jsi,    0xc0)/* NO MODE (== push;kr) */\
     /* UNUSED      0xe0)   NO MODE (== push;kr2)*/\
 
-enumdef(Device, u8) {
-    device_console = 0x00,
-    device_screen = 0x10,
+enumdef(Vm_Device, u8) {
+    vm_device_console = 0x00,
+    vm_device_screen = 0x10,
 };
 
 // B = mode_bytes, b = mode_bits
-#define op_cases(B, bi)\
-    case op_jmi: case op_jei: case op_jni: case op_jsi: case op_break: panic("reached full-byte opcodes in generic switch case");\
-    case op_push:   push##bi(vm, load##bi(vm, i + 1)); add = B + 1; break;\
-    case op_drop:   discard(pop##bi(vm)); break;\
-    case op_nip:    { u##bi c = pop##bi(vm); pop##bi(vm); u##bi a = pop##bi(vm); push##bi(vm, a); push##bi(vm, c); } break;\
-    case op_swap:   { u##bi c = pop##bi(vm), b = pop##bi(vm); push##bi(vm, c); push##bi(vm, b); } break;\
-    case op_rot:    { u##bi c = pop##bi(vm), b = pop##bi(vm), a = pop##bi(vm); push##bi(vm, b); push##bi(vm, c); push##bi(vm, a); } break;\
-    case op_dup:    assume(!m.keep); push##bi(vm, get##bi(vm, 1)); break;\
-    case op_over:   assume(!m.keep); push##bi(vm, get##bi(vm, 2)); break;\
-    case op_eq:     push##bi(vm, pop##bi(vm) == pop##bi(vm)); break;\
-    case op_neq:    push##bi(vm, pop##bi(vm) != pop##bi(vm)); break;\
-    case op_gt:     { u##bi right = pop##bi(vm), left = pop##bi(vm); push##bi(vm, left > right); } break; \
-    case op_lt:     { u##bi right = pop##bi(vm), left = pop##bi(vm); push##bi(vm, left < right); } break; \
-    case op_add:    push##bi(vm, pop##bi(vm) + pop##bi(vm)); break;\
-    case op_sub:    { u##bi right = pop##bi(vm), left = pop##bi(vm); push##bi(vm, left - right); } break; \
-    case op_mul:    push##bi(vm, pop##bi(vm) * pop##bi(vm)); break;\
-    case op_div:    { u##bi right = pop##bi(vm), left = pop##bi(vm); push##bi(vm, right == 0 ? 0 : (left / right)); } break; \
-    case op_inc:    push##bi(vm, pop##bi(vm) + 1); break;\
-    case op_not:    push##bi(vm, ~pop##bi(vm)); break;\
-    case op_and:    push##bi(vm, pop##bi(vm) & pop##bi(vm)); break;\
-    case op_or:     push##bi(vm, pop##bi(vm) | pop##bi(vm)); break;\
-    case op_xor:    push##bi(vm, pop##bi(vm) ^ pop##bi(vm)); break; \
-    case op_shift:  { u8 shift = pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; push##bi(vm, (u##bi)(pop##bi(vm) << l >> r)); } break;\
-    case op_jmp:    i = pop16(vm); add = 0; break;\
-    case op_jeq:    { u16 addr = pop16(vm); if (pop##bi(vm)) { i = addr; add = 0; } } break;\
-    case op_jst:    stacks_set_ret(vm); push16(vm, i + 1); stacks_set_param(vm); i = pop16(vm); add = 0; break;\
-    case op_stash:  { u##bi val = pop##bi(vm); stacks_set_ret(vm); push##bi(vm, val); stacks_set_param(vm); } break;\
-    case op_load:   push##bi(vm, load##bi(vm, pop16(vm))); break;\
-    case op_store:  { u16 addr = pop16(vm); u##bi val = pop##bi(vm); store##bi(vm, addr, val); } break;\
-    case op_read:   {\
-        u8 device_and_action = pop8(vm);\
-        Device device = device_and_action & 0xf0;\
-        u8 action = device_and_action & 0x0f;\
+#define vm_op_cases(B, bi)\
+    /* TODO: for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */\
+    case vm_op_jmi: case vm_op_jei: case vm_op_jni: case vm_op_jsi: case vm_op_break: panic("reached full-byte opcodes in generic switch case");\
+    case vm_op_push:   vm_push##bi(vm, vm_load##bi(vm, vm->pc + 1)); add = B + 1; break;\
+    case vm_op_drop:   discard(vm_pop##bi(vm)); break;\
+    case vm_op_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
+    case vm_op_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
+    case vm_op_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
+    case vm_op_dup:    assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
+    case vm_op_over:   assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
+    case vm_op_eq:     vm_push##bi(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
+    case vm_op_neq:    vm_push##bi(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
+    case vm_op_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left > right); } break;\
+    case vm_op_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left < right); } break;\
+    case vm_op_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
+    case vm_op_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
+    case vm_op_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
+    case vm_op_div:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
+    case vm_op_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
+    case vm_op_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
+    case vm_op_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\
+    case vm_op_or:     vm_push##bi(vm, vm_pop##bi(vm) | vm_pop##bi(vm)); break;\
+    case vm_op_xor:    vm_push##bi(vm, vm_pop##bi(vm) ^ vm_pop##bi(vm)); break;\
+    case vm_op_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push##bi(vm, (u##bi)(vm_pop##bi(vm) << l >> r)); } break;\
+    case vm_op_jmp:    vm->pc = vm_pop16(vm); add = 0; break;\
+    case vm_op_jeq:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->pc = addr; add = 0; } } break;\
+    case vm_op_jst:    vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 1); vm->stack_active = stack_param; vm->pc = vm_pop16(vm); add = 0; break;\
+    case vm_op_stash:  { u##bi val = vm_pop##bi(vm); vm->stack_active = stack_ret; vm_push##bi(vm, val); vm->stack_active = stack_param; } break;\
+    case vm_op_load:   vm_push##bi(vm, vm_load##bi(vm, vm_pop16(vm))); break;\
+    case vm_op_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
+    case vm_op_read:   {\
+        u8 vm_device_and_action = vm_pop8(vm);\
+        Vm_Device device = vm_device_and_action & 0xf0;\
+        u8 action = vm_device_and_action & 0x0f;\
         discard(action);\
         switch (device) {\
-            case device_screen: {\
+            case vm_device_screen: {\
                 u16 width = 0, height = 0; screen_get_width_height(&width, &height);\
-                push16(vm, width); push16(vm, height);\
+                vm_push16(vm, width); vm_push16(vm, height);\
             } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
         }\
     } break;\
-    case op_write:  {\
-        u8 device_and_action = pop8(vm);\
-        Device device = device_and_action & 0xf0;\
-        u8 action = device_and_action & 0x0f;\
+    case vm_op_write:  {\
+        u8 vm_device_and_action = vm_pop8(vm);\
+        Vm_Device device = vm_device_and_action & 0xf0;\
+        u8 action = vm_device_and_action & 0x0f;\
         switch (device) {\
-            case device_console: switch (action) {\
+            case vm_device_console: switch (action) {\
                 case 0x0: {\
-                    assume(m.size == size_byte);\
-                    u16 str_addr = pop16(vm);\
-                    u8 str_len = load8(vm, str_addr);\
+                    assume(vm->op_mode.size == vm_op_size_byte);\
+                    u16 str_addr = vm_pop16(vm);\
+                    u8 str_len = vm_load8(vm, str_addr);\
                     String8 str = { .ptr = vm->memory + str_addr + 1, .len = str_len };\
                     printf("%.*s", string_fmt(str));\
                 } break;\
                 default: panicf("[write] invalid action #%x for console device", action);\
             } break;\
-            case device_screen: switch (action) {\
+            case vm_device_screen: switch (action) {\
                 case 0x1: screen_init(); break;\
                 case 0x2: screen_update(); break;\
                 case 0x3: screen_quit(); break;\
@@ -108,36 +109,37 @@ enumdef(Device, u8) {
             default: panicf("invalid device #%x for operation 'write'", device);\
         }\
     } break;\
-    default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
+    default: panicf("unreachable %s{#%02x}", vm_op_name(byte), byte);
 
-enumdef(Op, u8) {
-    #define op_def_enum(name, val) op_##name = val,
-    for_op(op_def_enum)
-    op_max_value_plus_one
+enumdef(Vm_Op, u8) {
+    #define vm_op_def_enum(name, val) vm_op_##name = val,
+    vm_for_op(vm_op_def_enum)
+    vm_op_max_value_plus_one
 };
 
-const char *op_name_table[op_max_value_plus_one] = {
-    #define op_set_name(name, val) [val] = #name,
-    for_op(op_set_name)
+const char *vm_op_name_table[vm_op_max_value_plus_one] = {
+    #define vm_op_set_name(name, val) [val] = #name,
+    vm_for_op(vm_op_set_name)
 };
 
-static bool instruction_is_special(u8 instruction) {
+static bool vm_instruction_is_special(u8 instruction) {
     switch (instruction) {
-        case op_jmi: case op_jei: case op_jni: case op_jsi: case op_break: return true;
+        case vm_op_jmi: case vm_op_jei: case vm_op_jni: case vm_op_jsi: case vm_op_break: return true;
         default: return false;
     }
 }
 
-static const char *op_name(u8 instruction) {
-    return op_name_table[instruction_is_special(instruction) ? instruction : (instruction & 0x1f)];
+static const char *vm_op_name(u8 instruction) {
+    return vm_op_name_table[vm_instruction_is_special(instruction) ? instruction : (instruction & 0x1f)];
 }
 
-enumdef(Stack, u8) { stack_param = 0, stack_ret = 1 };
-enumdef(Size, u8)  { size_byte = 0, size_short = 1 };
-structdef(Mode) { b8 keep; Stack stack; Size size; };
+structdef(Vm_Stack) { u8 memory[0x100], ptr; };
+enumdef(Vm_Stack_Active, u8) { stack_param = 0, stack_ret = 1 };
+enumdef(Vm_Op_Size, u8)  { vm_op_size_byte = 0, vm_op_size_short = 1 };
+structdef(Vm_Op_Mode) { b8 keep; Vm_Stack_Active stack; Vm_Op_Size size; };
 
 static const char *mode_name(u8 instruction) {
-    if (instruction_is_special(instruction)) return ""; 
+    if (vm_instruction_is_special(instruction)) return ""; 
     switch ((instruction & 0xe0) >> 5) {
         case 0x1: return ";2";
         case 0x2: return ";r";
@@ -150,9 +152,9 @@ static const char *mode_name(u8 instruction) {
     return "";
 }
 
-structdef(Instruction) { Op op; Mode mode; };
+structdef(Vm_Instruction) { Vm_Op op; Vm_Op_Mode mode; };
 
-static u8 byte_from_instruction(Instruction instruction) {
+static u8 vm_byte_from_instruction(Vm_Instruction instruction) {
     return (u8)(
         instruction.op | 
         (instruction.mode.keep << 7) | 
@@ -161,8 +163,8 @@ static u8 byte_from_instruction(Instruction instruction) {
     );
 }
 
-static Instruction instruction_from_byte(u8 byte) {
-    return (Instruction){ .op = byte & 0x1f, .mode = {
+static Vm_Instruction vm_instruction_from_byte(u8 byte) {
+    return (Vm_Instruction){ .op = byte & 0x1f, .mode = {
         .keep =  (byte & 0x80) >> 7,
         .stack = (byte & 0x40) >> 6,
         .size =  (byte & 0x20) >> 5,
@@ -171,80 +173,72 @@ static Instruction instruction_from_byte(u8 byte) {
 
 structdef(Vm) {
     u8 memory[0x10000];
-    u8 param_stack[0x100], param_stack_ptr;
-    u8 ret_stack[0x100], ret_stack_ptr;
-    u8 *stack, *stack_ptr;
-
-    b8 keep;
+    Vm_Stack stacks[2];
+    Vm_Stack_Active stack_active;
+    u16 pc;
+    Vm_Op_Mode op_mode;
 };
 
-static void stacks_set_param(Vm *vm) { vm->stack = vm->param_stack; vm->stack_ptr = &vm->param_stack_ptr; }
-static void stacks_set_ret(Vm *vm) { vm->stack = vm->ret_stack; vm->stack_ptr = &vm->ret_stack_ptr; }
+#define vm_stack vm->stacks[vm->stack_active].memory
+#define vm_sp vm->stacks[vm->stack_active].ptr
 
-#define s(ptr) vm->stack[(u8)(ptr)]
-#define mem(ptr) vm->memory[(u16)(ptr)]
+#define vm_s(ptr) vm_stack[(u8)(ptr)]
+#define vm_mem(ptr) vm->memory[(u16)(ptr)]
 
-static u8 get8(Vm *vm, u8 i_back) { return *(vm->stack + (u8)(*(vm->stack_ptr) - i_back)); }
-static void push8(Vm *vm, u8 byte) { vm->stack[*(vm->stack_ptr)] = byte; *(vm->stack_ptr) += 1; }
-static u8 pop8(Vm *vm) { u8 val = s(*(vm->stack_ptr) - 1); if (!vm->keep) *(vm->stack_ptr) -= 1; return val; }
-static u8 load8(Vm *vm, u16 addr) { return mem(addr); }
-static void store8(Vm *vm, u16 addr, u8 val) { mem(addr) = val; }
+static u8   vm_get8(Vm *vm, u8 i_back) { return *(vm_stack + (u8)(vm_sp - i_back)); }
+static void vm_push8(Vm *vm, u8 byte) { vm_s(vm_sp) = byte; vm_sp += 1; }
+static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!vm->op_mode.keep) vm_sp -= 1; return val; }
+static u8   vm_load8(Vm *vm, u16 addr) { return vm_mem(addr); }
+static void vm_store8(Vm *vm, u16 addr, u8 val) { vm_mem(addr) = val; }
 
-static u16 get16(Vm *vm, u8 i_back) { return (u16)s(*(vm->stack_ptr) - 2 * i_back + 1) | (u16)(s(*(vm->stack_ptr) - 2 * i_back) << 8); }
-static void push16(Vm *vm, u16 byte2) { push8(vm, byte2 >> 8); push8(vm, (u8)byte2); }
-static u16 pop16(Vm *vm) { u16 val = (u16)s(*(vm->stack_ptr) - 1) | (u16)(s(*(vm->stack_ptr) - 2) << 8); if (!vm->keep) *(vm->stack_ptr) -= 2; return val; }
-static u16 load16(Vm *vm, u16 addr) { return (u16)(((u16)mem(addr) << 8) | (u16)mem(addr + 1)); }
-static void store16(Vm *vm, u16 addr, u16 val) { mem(addr) = (u8)(val >> 8); mem(addr + 1) = (u8)val; } // TODO: ensure correct
+static u16  vm_get16(Vm *vm, u8 i_back) { return (u16)vm_s(vm_sp - 2 * i_back + 1) | (u16)(vm_s(vm_sp - 2 * i_back) << 8); }
+static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm, (u8)byte2); }
+static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!vm->op_mode.keep) vm_sp -= 2; return val; }
+static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
+static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
 static void vm_run(Vm *vm, String8 rom) {
     memcpy(vm->memory, rom.ptr, rom.len);
 
-    // TODO
-    vm->stack = vm->param_stack;
-    vm->stack_ptr = &vm->param_stack_ptr;
-
-    printf("MEMORY ===\n");
-    for (u16 i = 0x100; i < rom.len; i += 1) {
-        u8 byte = vm->memory[i];
-        printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, op_name(byte), mode_name(byte));
+    if (rom.len != 0) {
+        printf("MEMORY ===\n");
+        for (u16 i = 0x100; i < rom.len; i += 1) {
+            u8 byte = vm->memory[i];
+            printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, vm_op_name(byte), mode_name(byte));
+        }
+        printf("\nRUN ===\n");
     }
-    printf("\nRUN ===\n");
 
     u16 add = 1;
-    for (u16 i = 0x100; true; i += add) {
+    for (; true; vm->pc += add) {
         add = 1;
-        u8 byte = mem(i);
-        Instruction instruction = instruction_from_byte(byte);
-        vm->keep = instruction.mode.keep;
-        Mode m = instruction.mode;
+        u8 byte = vm_mem(vm->pc);
+        Vm_Instruction instruction = vm_instruction_from_byte(byte);
+        vm->op_mode = instruction.mode;
 
-        switch (instruction.mode.stack) {
-            case stack_param: stacks_set_param(vm); break;
-            case stack_ret: stacks_set_ret(vm); break;
-            default: unreachable;
-        }
+        vm->stack_active = instruction.mode.stack;
 
         switch (byte) {
-            case op_jmi:   i = load16(vm, i + 1); add = 0; continue;
-            case op_jei:   if ( pop8(vm)) { i = load16(vm, i + 1); add = 0; } else add = 3; continue;
-            case op_jni:   if (!pop8(vm)) { i = load16(vm, i + 1); add = 0; } else add = 3; continue;
-            case op_jsi:   stacks_set_ret(vm); push16(vm, i + 3); stacks_set_param(vm); i = load16(vm, i + 1); add = 0; continue;
-            case op_break: goto break_run; break;
+            case vm_op_jmi: vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
+            case vm_op_jei: if ( vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
+            case vm_op_jni: if (!vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
+            case vm_op_jsi: vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 3); vm->stack_active = stack_param; vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
+            case vm_op_break: goto break_run; break;
             default: break;
         }
 
         switch (instruction.mode.size) {
-            case size_byte: switch (instruction.op) { op_cases(1, 8) } break;
-            case size_short: switch (instruction.op) { op_cases(2, 16) } break;
-            default: panicf("unreachable %s{#%02x}", op_name(byte), byte);
+            case vm_op_size_byte: switch (instruction.op) { vm_op_cases(1, 8) } break;
+            case vm_op_size_short: switch (instruction.op) { vm_op_cases(2, 16) } break;
+            default: panicf("unreachable %s{#%02x}", vm_op_name(byte), byte);
         }
     }
     break_run:
-
+    if (rom.len == 0) return;
     printf("param  stack (bot->top): { "); 
-    for (u8 i = 0; i < vm->param_stack_ptr; i += 1) printf("%02x ", vm->param_stack[i]);
+    for (u8 i = 0; i < vm->stacks[stack_param].ptr; i += 1) printf("%02x ", vm->stacks[stack_param].memory[i]);
     printf("}\nreturn stack (bot->top): { "); 
-    for (u8 i = 0; i < vm->ret_stack_ptr; i += 1) printf("%02x ", vm->ret_stack[i]);
+    for (u8 i = 0; i < vm->stacks[stack_ret].ptr; i += 1) printf("%02x ", vm->stacks[stack_ret].memory[i]);
     printf("}\n");
 }
 

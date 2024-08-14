@@ -1,9 +1,9 @@
 structdef(Label) { String8 name; u16 addr; };
 
-structdef(Label_Ref) { String8 name; u16 loc; Size size; };
+structdef(Label_Ref) { String8 name; u16 loc; Vm_Op_Size size; };
 
-enumdef(Res_Mode, u8) { res_num, res_addr };
-structdef(Res) { u16 pc; Res_Mode mode; };
+enumdef(Res_Vm_Op_Mode, u8) { res_num, res_addr };
+structdef(Res) { u16 pc; Res_Vm_Op_Mode mode; };
 
 typedef Array(u8) Array_u8;
 
@@ -104,7 +104,7 @@ static void asm_rom_write2(Asm *ctx, u16 byte2) {
     asm_rom_write(ctx, byte2 & 0x00ff); 
 }
 
-static void forward_res_push(Asm *ctx, Res_Mode res_mode) {
+static void forward_res_push(Asm *ctx, Res_Vm_Op_Mode res_mode) {
     if (ctx->forward_res.len == 0x0ff) {
         errf("cannot resolve address at '%s'[%d]: maximum number of resolutions reached", ctx->path_biciasm, ctx->i);
         ctx->rom.len = 0;
@@ -133,8 +133,8 @@ static void forward_res_resolve_last(Asm *ctx) {
     }
 }
 
-static void compile_op(Asm *ctx, Mode mode, u8 op) {
-    if (instruction_is_special(op)) { asm_rom_write(ctx, op); return; }
+static void compile_op(Asm *ctx, Vm_Op_Mode mode, u8 op) {
+    if (vm_instruction_is_special(op)) { asm_rom_write(ctx, op); return; }
     asm_rom_write(ctx, op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
@@ -159,7 +159,7 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
         add = 1;
         if (is_whitespace(ctx.infile.ptr[ctx.i])) continue;
 
-        Mode mode = {0};
+        Vm_Op_Mode mode = {0};
 
         switch (ctx.infile.ptr[ctx.i]) {
             case '/': if (ctx.i + 1 < ctx.infile.len && ctx.infile.ptr[ctx.i + 1] == '/') {
@@ -174,7 +174,7 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
             case '@': {
                 ctx.i += 1;
                 String8 name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_short };
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_short };
                 ctx.label_refs.len += 1;
                 ctx.rom.len += 2;
             } continue;
@@ -183,24 +183,24 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
                 Hex num = asm_parse_hex(&ctx);
                 if (!num.ok) return (String8){0};
                 switch (num.num_digits) {
-                    case 2: compile_op(&ctx, (Mode){ .size = size_byte }, op_push); asm_rom_write(&ctx, num.result.int8); break;
-                    case 4: compile_op(&ctx, (Mode){ .size = size_short }, op_push); asm_rom_write2(&ctx, num.result.int16); break;
+                    case 2: compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_byte }, vm_op_push); asm_rom_write(&ctx, num.result.int8); break;
+                    case 4: compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_short }, vm_op_push); asm_rom_write2(&ctx, num.result.int16); break;
                     default: unreachable;
                 }
             } continue;
             case '*': {
-                compile_op(&ctx, (Mode){ .size = size_byte }, op_push);
+                compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_byte }, vm_op_push);
                 ctx.i += 1;
                 String8 name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_byte };
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_byte };
                 ctx.label_refs.len += 1;
                 ctx.rom.len += 1;
             } continue;
             case '&': {
-                compile_op(&ctx, (Mode){ .size = size_short }, op_push);
+                compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_short }, vm_op_push);
                 ctx.i += 1;
                 String8 name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = size_short };
+                ctx.label_refs.ptr[ctx.label_refs.len] = (Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_short };
                 ctx.label_refs.len += 1;
                 ctx.rom.len += 2;
             } continue;
@@ -257,7 +257,7 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
                 switch (ctx.infile.ptr[ctx.i]) {
                     case 'k': mode.keep = true; break;
                     case 'r': mode.stack = stack_ret; break;
-                    case '2': mode.size = size_short; break;
+                    case '2': mode.size = vm_op_size_short; break;
                     default: {
                         errf("expected one of ['k', 'r', '2'], found byte '%c'/%d/#%x at '%s'[%zu]", ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.infile.ptr[ctx.i], ctx.path_biciasm, ctx.i);
                         return (String8){0};
@@ -273,7 +273,7 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
         if (false) {}
         #define compile_if_op_string(name, val)\
             else if (string8_eql(lexeme, string8(#name))) compile_op(&ctx, mode, val);
-        for_op(compile_if_op_string)
+        vm_for_op(compile_if_op_string)
         else {
             errf("invalid token '%.*s' at '%s'[%zu..%zu]", string_fmt(lexeme), ctx.path_biciasm, beg_i, end_i);
             return (String8){0};
@@ -289,8 +289,8 @@ static String8 asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bic
         if (ref.name.len == 0) return (String8){0};
         ctx.rom.len = ref.loc;
         switch (ref.size) {
-            case size_byte: asm_rom_write(&ctx, (u8)asm_label_get_addr_of(&ctx, ref.name)); break;
-            case size_short: asm_rom_write2(&ctx, asm_label_get_addr_of(&ctx, ref.name)); break;
+            case vm_op_size_byte: asm_rom_write(&ctx, (u8)asm_label_get_addr_of(&ctx, ref.name)); break;
+            case vm_op_size_short: asm_rom_write2(&ctx, asm_label_get_addr_of(&ctx, ref.name)); break;
             default: unreachable;
         }
     }

@@ -16,6 +16,7 @@ static String8 file_read(Arena *arena, char *path, char *mode, usize max_bytes) 
     if (path == 0 || mode == 0) return bytes;
 
     FILE *file = file_open(path, mode);
+    if (file == 0) return (String8){0};
 
     fseek(file, 0L, SEEK_END);
     usize filesize = ftell(file);

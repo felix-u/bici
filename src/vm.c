@@ -79,8 +79,7 @@ enumdef(Vm_Device, u8) {
         discard(action);\
         switch (device) {\
             case vm_device_screen: {\
-                u16 width = 0, height = 0; screen_get_width_height(&width, &height);\
-                vm_push16(vm, width); vm_push16(vm, height);\
+                vm_push16(vm, vm->screen.width); vm_push16(vm, vm->screen.height);\
             } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
         }\
@@ -101,9 +100,6 @@ enumdef(Vm_Device, u8) {
                 default: panicf("[write] invalid action #%x for console device", action);\
             } break;\
             case vm_device_screen: switch (action) {\
-                case 0x1: screen_init(); break;\
-                case 0x2: screen_update(); break;\
-                case 0x3: screen_quit(); break;\
                 default: panicf("[write] invalid action #%x for screen device", action);\
             } break;\
             default: panicf("invalid device #%x for operation 'write'", device);\
@@ -177,6 +173,7 @@ structdef(Vm) {
     Vm_Stack_Active stack_active;
     u16 pc;
     Vm_Op_Mode op_mode;
+    Screen screen;
 };
 
 #define vm_stack vm->stacks[vm->stack_active].memory
@@ -197,7 +194,8 @@ static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
-static void vm_run_to_break(Vm *vm) {
+static void vm_run_to_break(Vm *vm, u16 pc) {
+    vm->pc = pc;
     u16 add = 1;
     for (; true; vm->pc += add) {
         add = 1;
@@ -227,7 +225,7 @@ static void vm_run_to_break(Vm *vm) {
 static void vm_run(String8 rom) {
     if (rom.len == 0) return;
 
-    Vm vm = { .pc = 0x100 };
+    Vm vm = {0};
     memcpy(vm.memory, rom.ptr, rom.len);
 
     printf("MEMORY ===\n");
@@ -237,20 +235,20 @@ static void vm_run(String8 rom) {
     }
     printf("\nRUN ===\n");
 
-    screen_init(); 
+    vm.screen = screen_init(); 
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
-    vm.pc = vm_on_screen_init_pc;
-    vm_run_to_break(&vm);
+    vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | 0x02);
-    while (screen_update()) {
-        vm.pc = vm_on_screen_update_pc;
-        vm_run_to_break(&vm);
-    }
+    u16 vm_on_screen_resize_pc = vm_load16(&vm, vm_device_screen | 0x06);
+    do {
+        if (vm.screen.state == screen_state_resized) vm_run_to_break(&vm, vm_on_screen_resize_pc);
+        vm_run_to_break(&vm, vm_on_screen_update_pc);
+    } while (screen_update(&vm.screen));
 
     u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | 0x04);
-    vm.pc = vm_on_screen_quit_pc;
-    vm_run_to_break(&vm);
+    vm_run_to_break(&vm, vm_on_screen_quit_pc);
+    screen_quit(&vm.screen);
 
     printf("param  stack (bot->top): { "); 
     for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) printf("%02x ", vm.stacks[stack_param].memory[i]);

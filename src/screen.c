@@ -5,6 +5,8 @@ enumdef(Screen_State, u8) {
     screen_state_resized,
 };
 
+// TODO palette
+
 structdef(Screen) {
     SDL_Window *window;
     SDL_Renderer *renderer;

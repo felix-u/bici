@@ -135,7 +135,7 @@ enumdef(Vm_Op_Size, u8)  { vm_op_size_byte = 0, vm_op_size_short = 1 };
 structdef(Vm_Op_Mode) { b8 keep; Vm_Stack_Active stack; Vm_Op_Size size; };
 
 static const char *mode_name(u8 instruction) {
-    if (vm_instruction_is_special(instruction)) return ""; 
+    if (vm_instruction_is_special(instruction)) return "";
     switch ((instruction & 0xe0) >> 5) {
         case 0x1: return ";2";
         case 0x2: return ";r";
@@ -152,9 +152,9 @@ structdef(Vm_Instruction) { Vm_Op op; Vm_Op_Mode mode; };
 
 static u8 vm_byte_from_instruction(Vm_Instruction instruction) {
     return (u8)(
-        instruction.op | 
-        (instruction.mode.keep << 7) | 
-        (instruction.mode.stack << 6) | 
+        instruction.op |
+        (instruction.mode.keep << 7) |
+        (instruction.mode.stack << 6) |
         (instruction.mode.size << 5)
     );
 }
@@ -235,7 +235,7 @@ static void vm_run(String8 rom) {
     }
     printf("\nRUN ===\n");
 
-    vm.screen = screen_init(); 
+    vm.screen = screen_init();
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
@@ -250,9 +250,9 @@ static void vm_run(String8 rom) {
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
     screen_quit(&vm.screen);
 
-    printf("param  stack (bot->top): { "); 
+    printf("param  stack (bot->top): { ");
     for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) printf("%02x ", vm.stacks[stack_param].memory[i]);
-    printf("}\nreturn stack (bot->top): { "); 
+    printf("}\nreturn stack (bot->top): { ");
     for (u8 i = 0; i < vm.stacks[stack_ret].ptr; i += 1) printf("%02x ", vm.stacks[stack_ret].memory[i]);
     printf("}\n");
 }

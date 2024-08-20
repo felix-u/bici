@@ -41,6 +41,13 @@ enumdef(Vm_Device, u8) {
     vm_device_screen = 0x10,
 };
 
+enum Vm_Screen_Action {
+    vm_screen_init   = 0x00,
+    vm_screen_update = 0x02,
+    vm_screen_resize = 0x04,
+    vm_screen_quit   = 0x06,
+};
+
 // B = mode_bytes, b = mode_bits
 #define vm_op_cases(B, bi)\
     /* TODO: for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */\
@@ -74,12 +81,12 @@ enumdef(Vm_Device, u8) {
     case vm_op_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
     case vm_op_read:   {\
         u8 vm_device_and_action = vm_pop8(vm);\
-        Vm_Device device = vm_device_and_action & 0xf0;\
+        Vm_Device device = vm_device_and_action & 0xf0; printf("device %x\n", vm_device_and_action);\
         u8 action = vm_device_and_action & 0x0f;\
-        discard(action);\
         switch (device) {\
-            case vm_device_screen: {\
-                vm_push16(vm, vm->screen.width); vm_push16(vm, vm->screen.height);\
+            case vm_device_screen: switch (action) {\
+                case vm_screen_resize: vm_push16(vm, vm->screen.width); vm_push16(vm, vm->screen.height); break;\
+                default: panicf("[read] invalid action #%x for screen device", action);\
             } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
         }\

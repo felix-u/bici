@@ -81,7 +81,7 @@ enum Vm_Screen_Action {
     case vm_op_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
     case vm_op_read:   {\
         u8 vm_device_and_action = vm_pop8(vm);\
-        Vm_Device device = vm_device_and_action & 0xf0; printf("device %x\n", vm_device_and_action);\
+        Vm_Device device = vm_device_and_action & 0xf0;\
         u8 action = vm_device_and_action & 0x0f;\
         switch (device) {\
             case vm_device_screen: switch (action) {\

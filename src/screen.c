@@ -5,7 +5,20 @@ enumdef(Screen_State, u8) {
     screen_state_resized,
 };
 
-// TODO palette
+enum Screen_Colour {
+    screen_c0a = 0, screen_c0b = 1,
+    screen_c1a = 2, screen_c1b = 3,
+    screen_c2a = 4, screen_c2b = 5,
+    screen_c3a = 6, screen_c3b = 7,
+    screen_colour_count,
+};
+
+static u32 screen_palette[screen_colour_count] = {
+    [screen_c0a] = 0x000000ff, [screen_c0b] = 0x000000ff,
+    [screen_c1a] = 0x808080ff, [screen_c1b] = 0x808080ff,
+    [screen_c2a] = 0x2d7d9aff, [screen_c2b] = 0x2d7d9aff,
+    [screen_c3a] = 0xffffffff, [screen_c3b] = 0xffffffff,
+};
 
 structdef(Screen) {
     SDL_Window *window;

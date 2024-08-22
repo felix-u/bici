@@ -246,14 +246,14 @@ static void vm_run(String8 rom) {
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
-    u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | 0x02);
-    u16 vm_on_screen_resize_pc = vm_load16(&vm, vm_device_screen | 0x06);
+    u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
+    u16 vm_on_screen_resize_pc = vm_load16(&vm, vm_device_screen | vm_screen_resize);
     do {
         if (vm.screen.state == screen_state_resized) vm_run_to_break(&vm, vm_on_screen_resize_pc);
         vm_run_to_break(&vm, vm_on_screen_update_pc);
     } while (screen_update(&vm.screen));
 
-    u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | 0x04);
+    u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | vm_screen_quit);
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
     screen_quit(&vm.screen);
 

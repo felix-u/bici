@@ -3,16 +3,36 @@
     |10 @init |12 @update |14 @quit
     |11 :pixel
 
+|20 :smiley 
+    _03 _03
+    _09 _03
+    _03 _06
+    _04 _07
+    _05 _08
+    _06 _08
+    _07 _08
+    _08 _07
+    _09 _06
+:smiley_end
+
 |0100 
 
-:init break
+:update break :quit break
 
-:update 
-    #01 :while dup #f0 lt jni {
-        dup #00 swap dup;2 #06 
-        *pixel write // expects x(16) y(16) colour(8)
-        inc jmi @while
-    } drop
+:init 
+    *smiley :while dup *smiley_end lt jni {
+        dup jsi @load_coords_at_addr
+        #06 *pixel write
+    #02 add jmi @while } drop
     break
+    
+:cast_16_from_8 #00 swap jmp;r
 
-:quit break
+:load_coords_at_addr
+    dup jsi @load_coord_at_addr jsi @cast_16_from_8
+    rot inc jsi @load_coord_at_addr jsi @cast_16_from_8
+    jmp;r
+
+:load_coord_at_addr 
+    jsi @cast_16_from_8 load
+    jmp;r

@@ -77,7 +77,7 @@ enum Vm_Screen_Action {
     case vm_op_jeq:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->pc = addr; add = 0; } } break;\
     case vm_op_jst:    vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 1); vm->stack_active = stack_param; vm->pc = vm_pop16(vm); add = 0; break;\
     case vm_op_stash:  { u##bi val = vm_pop##bi(vm); vm->stack_active = stack_ret; vm_push##bi(vm, val); vm->stack_active = stack_param; } break;\
-    case vm_op_load:   vm_push##bi(vm, vm_load##bi(vm, vm_pop16(vm))); break;\
+    case vm_op_load:   { u16 addr = vm_pop16(vm); u##bi val = vm_load##bi(vm, addr); vm_push##bi(vm, val); } break;\
     case vm_op_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
     case vm_op_read:   {\
         u8 vm_device_and_action = vm_pop8(vm);\

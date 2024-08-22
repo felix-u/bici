@@ -59,10 +59,10 @@ enum Vm_Screen_Action {
     case vm_op_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
     case vm_op_dup:    assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
     case vm_op_over:   assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
-    case vm_op_eq:     vm_push##bi(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
-    case vm_op_neq:    vm_push##bi(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
-    case vm_op_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left > right); } break;\
-    case vm_op_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left < right); } break;\
+    case vm_op_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
+    case vm_op_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
+    case vm_op_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
+    case vm_op_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
     case vm_op_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
     case vm_op_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
     case vm_op_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\

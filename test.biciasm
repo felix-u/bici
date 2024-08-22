@@ -8,7 +8,7 @@
 :update break :quit break
 
 :init 
-    &smiley :while dup;2 &smiley_end lt;2 jni {
+    #0000 :while dup;2 &EOF lt;2 jni {
         dup;2 jsi @load_coords_at_addr
         #06 *pixel write
     #0002 add;2 jmi @while } drop;2
@@ -17,12 +17,22 @@
 :cast_16_from_8 #00 swap jmp;r
 
 :load_coords_at_addr
-    dup;2 load jsi @cast_16_from_8
-    swap;2 inc;2 load jsi @cast_16_from_8
+    dup;2 load #02 div jsi @cast_16_from_8
+    swap;2 inc;2 load #02 div jsi @cast_16_from_8
     jmp;r
 
 :smiley 
-    _0303 _0903
-    _0306 _0407 _0508 _0608 _0708 _0807 _0906
-:smiley_end
+    _0606 _1206
+    _060c _080e _0a10 _0c10 _0e10 _100e _120c
 
+:diagonal_line
+    _1020
+    _2040
+    _3060
+    _4080
+    _50a0
+    _60c0
+    _70e0
+    _80f0
+
+:EOF

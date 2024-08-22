@@ -42,10 +42,10 @@ enumdef(Vm_Device, u8) {
 };
 
 enum Vm_Screen_Action {
-    vm_screen_init   = 0x00,
-    vm_screen_update = 0x02,
-    vm_screen_resize = 0x04,
-    vm_screen_quit   = 0x06,
+    vm_screen_init   = 0x0,
+    vm_screen_pixel  = 0x1,
+    vm_screen_update = 0x2,
+    vm_screen_quit   = 0x4,
 };
 
 // B = mode_bytes, b = mode_bits
@@ -85,7 +85,6 @@ enum Vm_Screen_Action {
         u8 action = vm_device_and_action & 0x0f;\
         switch (device) {\
             case vm_device_screen: switch (action) {\
-                case vm_screen_resize: vm_push16(vm, vm->screen.width); vm_push16(vm, vm->screen.height); break;\
                 default: panicf("[read] invalid action #%x for screen device", action);\
             } break;\
             default: panicf("invalid device #%x for operation 'read'", device);\
@@ -107,6 +106,13 @@ enum Vm_Screen_Action {
                 default: panicf("[write] invalid action #%x for console device", action);\
             } break;\
             case vm_device_screen: switch (action) {\
+                case vm_screen_pixel: {\
+                    Screen_Colour colour = vm_pop8(vm);\
+                    if (colour >= screen_colour_count) panicf("[write:screen/pixel] colour #%d is invalid; there are only #%d palette colours", colour, screen_colour_count);\
+                    u16 y = vm_pop16(vm), x = vm_pop16(vm);\
+                    if (x >= screen_width || y >= screen_height) panicf("[write:screen/pixel] coordinate #%04xx#%04x is outside screen bounds #%04xx#%04x", x, y, screen_width, screen_height);\
+                    vm->screen.pixels[y * screen_width + x] = screen_palette[colour];\
+                } break;\
                 default: panicf("[write] invalid action #%x for screen device", action);\
             } break;\
             default: panicf("invalid device #%x for operation 'write'", device);\
@@ -247,9 +253,7 @@ static void vm_run(String8 rom) {
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
-    u16 vm_on_screen_resize_pc = vm_load16(&vm, vm_device_screen | vm_screen_resize);
     do {
-        if (vm.screen.state == screen_state_resized) vm_run_to_break(&vm, vm_on_screen_resize_pc);
         vm_run_to_break(&vm, vm_on_screen_update_pc);
     } while (screen_update(&vm.screen));
 

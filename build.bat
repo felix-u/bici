@@ -13,22 +13,19 @@ set include_paths=-I%dir_sdl%\include
 
 set cl_common=cl -nologo -FC -diagnostics:column -std:c11 %include_paths% 
 set clang_common=clang -std=c11 %include_paths%
-set cuik_common=C:\Users\Felix\Downloads\Cuik\bin\cuik -lang c11 %include_paths%
 
 set cl_link=-link -incremental:no -subsystem:console %dir_sdl%\lib\x64\SDL2main.lib %dir_sdl%\lib\x64\SDL2.lib shell32.lib
 set clang_link=
-set cuik_link=-subsystem console -L%dir_sdl%\lib\x64 -lSDL2main -lSDL2 shell32
 
-set cl_debug=%cl_common% -W4 -WX -Z7 -DBUILD_DEBUG=1 -fsanitize=address
+set cl_debug=%cl_common% -W4 -WX -Z7 -DBUILD_DEBUG=1 
+REM -fsanitize=address
 set clang_debug=%clang_common% -pedantic ^
     -Wall -Werror -Wextra -Wshadow -Wconversion -Wdouble-promotion ^
     -Wno-unused-function -Wno-sign-conversion -Wno-deprecated-declarations -fno-strict-aliasing ^
     -g3 -fsanitize=address,undefined -fsanitize-trap -DBUILD_DEBUG=1
-set cuik_debug=%cuik_common% -DBUILD_DEBUG=1 -g
 
 set cl_out=-out:
 set clang_out=-o
-set cuik_out=-o
 
 if "%msvc%"=="1"  set compile_debug=%cl_debug%
 if "%msvc%"=="1"  set compile_link=%cl_link%
@@ -37,10 +34,6 @@ if "%msvc%"=="1"  set compile_out=%cl_out%
 if "%clang%"=="1" set compile_debug=%clang_debug%
 if "%clang%"=="1" set compile_link=%clang_link%
 if "%clang%"=="1" set compile_out=%clang_out%
-
-if "%cuik%"=="1" set compile_debug=%cuik_debug%
-if "%cuik%"=="1" set compile_link=%cuik_link%
-if "%cuik%"=="1" set compile_out=%cuik_out%
 
 if not exist build mkdir build
 pushd build

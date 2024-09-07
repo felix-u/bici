@@ -32,10 +32,11 @@ static Screen screen_init(void) {
         "bici", 
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
         screen_width, screen_height, 
-        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI
+        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
     );
     if (screen.window == 0) panicf("SDL_CreateWindow failed: %s", SDL_GetError());
 
+    // TODO: SDL_CreateRenderer crashes with asan
     screen.renderer = SDL_CreateRenderer(screen.window, -1, SDL_RENDERER_ACCELERATED);
     if (screen.renderer == 0) panicf("SDL_CreateRenderer failed: %s", SDL_GetError());
 

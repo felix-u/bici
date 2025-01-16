@@ -1,5 +1,6 @@
 static Arena arena_init(usize size) {
-    Arena arena = { .mem = calloc(1, size) };
+    // TODO(felix): switch to reserve+commit with (virtually) no cap: reserve something like 64gb and commit pages as needed
+    Arena arena = { .mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size) };
     if (arena.mem == 0) panic("allocation failure");
     arena.cap = size;
     asan_poison_memory_region(arena.mem, arena.cap);
@@ -12,6 +13,8 @@ static void arena_align(Arena *arena, usize align) {
 }
 
 static void *arena_alloc(Arena *arena, usize cap, usize size) {
+    // TODO(felix): asan_poison alignment bytes
+
     usize num_bytes = cap * size;
     arena_align(arena, arena_default_alignment);
     if (arena->offset + num_bytes > arena->cap) panic("allocation failure");
@@ -50,7 +53,7 @@ static void _arena_realloc_array(Arena *arena, Array_void *array, usize cap, usi
 
 static void arena_deinit(Arena *arena) {
     asan_poison_memory_region(arena->mem, arena->cap);
-    free(arena->mem);
+    HeapFree(GetProcessHeap(), 0, arena->mem);
     arena->offset = 0;
     arena->cap = 0;
 }

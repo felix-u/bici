@@ -29,22 +29,22 @@ static Screen screen_init(void) {
     Screen screen = {0};
 
     screen.window = SDL_CreateWindow(
-        "bici", 
-        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
-        screen_width, screen_height, 
+        "bici",
+        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+        screen_width, screen_height,
         SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
     );
-    if (screen.window == 0) panicf("SDL_CreateWindow failed: %s", SDL_GetError());
+    if (screen.window == 0) panic("SDL_CreateWindow failed: %", fmt(cstring, (char *)SDL_GetError()));
 
     // TODO: SDL_CreateRenderer crashes with asan
     screen.renderer = SDL_CreateRenderer(screen.window, -1, SDL_RENDERER_ACCELERATED);
-    if (screen.renderer == 0) panicf("SDL_CreateRenderer failed: %s", SDL_GetError());
+    if (screen.renderer == 0) panic("SDL_CreateRenderer failed: %", fmt(cstring, (char *)SDL_GetError()));
 
     screen.texture = SDL_CreateTexture(
-        screen.renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, 
+        screen.renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
         screen_width, screen_height
     );
-    if (screen.texture == 0) panicf("SDL_CreateTexture failed", SDL_GetError());
+    if (screen.texture == 0) panic("SDL_CreateTexture failed: %", fmt(cstring, (char *)SDL_GetError()));
 
     return screen;
 }

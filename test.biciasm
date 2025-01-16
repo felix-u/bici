@@ -1,21 +1,15 @@
-// |00 :console_print
-// |10 :screen
-//     |10 @init
-
-// |0100
-
-// :init
-//     &hello_world *console_print write
-//     break
-
-// :hello_world {# "Hello, _20 "World! _0a }
-
 |00 :console_print
 |10 :screen
     |10 @init |12 @update |14 @quit
     |11 :pixel
 
 |0100
+
+// :init
+//     &hello_world *console_print write
+//     break
+
+// :hello_world {# "Hello, _20 "World! _0a }
 
 :update break :quit break
 

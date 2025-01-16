@@ -57,8 +57,8 @@ enum Vm_Screen_Action {
     case vm_op_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
     case vm_op_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
     case vm_op_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
-    case vm_op_dup:    assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
-    case vm_op_over:   assume(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
+    case vm_op_dup:    assert(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
+    case vm_op_over:   assert(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
     case vm_op_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
     case vm_op_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
     case vm_op_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
@@ -85,9 +85,9 @@ enum Vm_Screen_Action {
         u8 action = vm_device_and_action & 0x0f;\
         switch (device) {\
             case vm_device_screen: switch (action) {\
-                default: panicf("[read] invalid action #%x for screen device", action);\
+                default: panic("[read] invalid action #% for screen device", fmt(u64, action, .base = 16));\
             } break;\
-            default: panicf("invalid device #%x for operation 'read'", device);\
+            default: panic("invalid device #% for operation 'read'", fmt(u64, device, .base = 16));\
         }\
     } break;\
     case vm_op_write:  {\
@@ -97,28 +97,28 @@ enum Vm_Screen_Action {
         switch (device) {\
             case vm_device_console: switch (action) {\
                 case 0x0: {\
-                    assume(vm->op_mode.size == vm_op_size_byte);\
+                    assert(vm->op_mode.size == vm_op_size_byte);\
                     u16 str_addr = vm_pop16(vm);\
                     u8 str_len = vm_load8(vm, str_addr);\
-                    String8 str = { .ptr = vm->memory + str_addr + 1, .len = str_len };\
-                    printf("%.*s", string_fmt(str));\
+                    Str8 str = { .ptr = vm->memory + str_addr + 1, .len = str_len };\
+                    /* TODO(felix): check if this is print from SDL */ print("%", fmt(Str8, str));\
                 } break;\
-                default: panicf("[write] invalid action #%x for console device", action);\
+                default: panic("[write] invalid action #% for console device", fmt(u64, action, .base = 16));\
             } break;\
             case vm_device_screen: switch (action) {\
                 case vm_screen_pixel: {\
                     Screen_Colour colour = vm_pop8(vm);\
-                    if (colour >= screen_colour_count) panicf("[write:screen/pixel] colour #%d is invalid; there are only #%d palette colours", colour, screen_colour_count);\
+                    if (colour >= screen_colour_count) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, screen_colour_count));\
                     u16 y = vm_pop16(vm), x = vm_pop16(vm);\
-                    if (x >= screen_width || y >= screen_height) panicf("[write:screen/pixel] coordinate #%04xx#%04x is outside screen bounds #%04xx#%04x", x, y, screen_width, screen_height);\
+                    if (x >= screen_width || y >= screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, screen_width, .base = 16), fmt(u64, screen_height, .base = 16));\
                     vm->screen.pixels[y * screen_width + x] = screen_palette[colour];\
                 } break;\
-                default: panicf("[write] invalid action #%x for screen device", action);\
+                default: panic("[write] invalid action #% for screen device", fmt(u64, action, .base = 16));\
             } break;\
-            default: panicf("invalid device #%x for operation 'write'", device);\
+            default: panic("invalid device #% for operation 'write'", fmt(u64, device, .base = 16));\
         }\
     } break;\
-    default: panicf("unreachable %s{#%02x}", vm_op_name(byte), byte);
+    default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_op_name(byte)), fmt(u64, byte, .base = 16));
 
 enumdef(Vm_Op, u8) {
     #define vm_op_def_enum(name, val) vm_op_##name = val,
@@ -147,16 +147,17 @@ enumdef(Vm_Stack_Active, u8) { stack_param = 0, stack_ret = 1 };
 enumdef(Vm_Op_Size, u8)  { vm_op_size_byte = 0, vm_op_size_short = 1 };
 structdef(Vm_Op_Mode) { b8 keep; Vm_Stack_Active stack; Vm_Op_Size size; };
 
-static const char *mode_name(u8 instruction) {
+// TODO(felix): this is only used once, so inline
+static char *mode_name(u8 instruction) {
     if (vm_instruction_is_special(instruction)) return "";
     switch ((instruction & 0xe0) >> 5) {
-        case 0x1: return ";2";
-        case 0x2: return ";r";
-        case 0x3: return ";r2";
-        case 0x4: return ";k";
-        case 0x5: return ";k2";
-        case 0x6: return ";kr";
-        case 0x7: return ";kr2";
+        case 0x1: return "2";
+        case 0x2: return "r";
+        case 0x3: return "r2";
+        case 0x4: return "k";
+        case 0x5: return "k2";
+        case 0x6: return "kr";
+        case 0x7: return "kr2";
     }
     return "";
 }
@@ -230,23 +231,23 @@ static void vm_run_to_break(Vm *vm, u16 pc) {
         switch (instruction.mode.size) {
             case vm_op_size_byte: switch (instruction.op) { vm_op_cases(1, 8) } break;
             case vm_op_size_short: switch (instruction.op) { vm_op_cases(2, 16) } break;
-            default: panicf("unreachable %s{#%02x}", vm_op_name(byte), byte);
+            default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_op_name(byte)), fmt(u64, byte, .base = 16));
         }
     }
 }
 
-static void vm_run(String8 rom) {
+static void vm_run(Str8 rom) {
     if (rom.len == 0) return;
 
     Vm vm = {0};
     memcpy(vm.memory, rom.ptr, rom.len);
 
-    printf("MEMORY ===\n");
+    print("MEMORY ===\n");
     for (u16 i = 0x100; i < rom.len; i += 1) {
         u8 byte = vm.memory[i];
-        printf("[%4x]\t'%c'\t#%02x\t%s%s\n", i, byte, byte, vm_op_name(byte), mode_name(byte));
+        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_op_name(byte)), fmt(cstring, mode_name(byte)));
     }
-    printf("\nRUN ===\n");
+    print("\nRUN ===\n");
 
     vm.screen = screen_init();
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
@@ -261,10 +262,10 @@ static void vm_run(String8 rom) {
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
     screen_quit(&vm.screen);
 
-    printf("param  stack (bot->top): { ");
-    for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) printf("%02x ", vm.stacks[stack_param].memory[i]);
-    printf("}\nreturn stack (bot->top): { ");
-    for (u8 i = 0; i < vm.stacks[stack_ret].ptr; i += 1) printf("%02x ", vm.stacks[stack_ret].memory[i]);
-    printf("}\n");
+    print("param  stack (bot->top): { ");
+    for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));
+    print("}\nreturn stack (bot->top): { ");
+    for (u8 i = 0; i < vm.stacks[stack_ret].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_ret].memory[i], .base = 16));
+    print("}\n");
 }
 

@@ -1,8 +1,8 @@
-static Str8 file_read_bytes_relative_path(Arena *arena, char *path, usize max_bytes) {
+static String file_read_bytes_relative_path(Arena *arena, char *path, usize max_bytes) {
     // NOTE(felix): this is because of ReadFile() taking a DWORD to specify the number of bytes to read, which is a u32
     assert(max_bytes <= UINT32_MAX);
 
-    if (path == 0) return (Str8){0};
+    if (path == 0) return (String){0};
 
     // NOTE(felix): not sure about this. See https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
     DWORD share_mode = FILE_SHARE_READ;
@@ -10,7 +10,7 @@ static Str8 file_read_bytes_relative_path(Arena *arena, char *path, usize max_by
     HANDLE file = CreateFileA(path, GENERIC_READ, share_mode, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (file == INVALID_HANDLE_VALUE) {
         err("unable to open file '%'", fmt(cstring, path));
-        return (Str8){0};
+        return (String){0};
     }
 
     Array_u8 bytes = {0};
@@ -38,10 +38,10 @@ static Str8 file_read_bytes_relative_path(Arena *arena, char *path, usize max_by
 
     end:
     CloseHandle(file);
-    return (Str8)slice_from_array(bytes);
+    return (String)slice_from_array(bytes);
 }
 
-static void file_write_bytes_to_relative_path(char *path, Str8 bytes) {
+static void file_write_bytes_to_relative_path(char *path, String bytes) {
     discard(path);
     discard(bytes);
     panic("TODO");
@@ -74,11 +74,11 @@ static void print_var_args(char *format, va_list args) {
 
     Arena_Temp temp = arena_temp_begin(&arena);
 
-    Str8_Builder output = { .arena = &arena };
-    str8_builder_printf_var_args(&output, format, args);
+    String_Builder output = { .arena = &arena };
+    string_builder_printf_var_args(&output, format, args);
 
     // TODO(felix): this should be a union access now that we're using C11
-    Str8 str = str8_from_str8_builder(output);
+    String str = string_from_string_builder(output);
 
     #if OS_WINDOWS
         OutputDebugStringA((char *)str.ptr);

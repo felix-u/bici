@@ -1,7 +1,7 @@
-#include "SDL.h"
-
 #define BASE_GRAPHICS 0
 #include "base/base.c"
+
+#include "raylib.h"
 
 enumdef(Screen_Colour, u8) {
     screen_c0a = 0, screen_c0b = 1,
@@ -18,15 +18,8 @@ static u32 screen_palette[screen_colour_count] = {
     [screen_c3a] = 0xffffffff, [screen_c3b] = 0xffffffff,
 };
 
-#define screen_width 320
-#define screen_height 240
-
-structdef(Screen) {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    SDL_Texture *texture;
-    u32 pixels[screen_width * screen_height];
-};
+#define vm_screen_width 320
+#define vm_screen_height 240
 
 #define vm_for_opcode(action)\
     action(break,  0x00)/* NO MODE */\
@@ -147,8 +140,8 @@ enum Vm_Screen_Action {
                     Screen_Colour colour = vm_pop8(vm);\
                     if (colour >= screen_colour_count) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, screen_colour_count));\
                     u16 y = vm_pop16(vm), x = vm_pop16(vm);\
-                    if (x >= screen_width || y >= screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, screen_width, .base = 16), fmt(u64, screen_height, .base = 16));\
-                    vm->screen.pixels[y * screen_width + x] = screen_palette[colour];\
+                    if (x >= vm_screen_width || y >= vm_screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_width, .base = 16), fmt(u64, vm_screen_height, .base = 16));\
+                    vm->screen_pixels[y * vm_screen_width + x] = screen_palette[colour];\
                 } break;\
                 default: panic("[write] invalid action #% for screen device", fmt(u64, action, .base = 16));\
             } break;\
@@ -192,7 +185,8 @@ structdef(Vm) {
     Vm_Stack_Id active_stack;
     u16 program_counter;
     Vm_Instruction_Mode current_mode;
-    Screen screen;
+    Texture screen_texture;
+    u32 screen_pixels[vm_screen_width * vm_screen_height];
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -279,61 +273,48 @@ static void vm_run(String rom) {
     }
     print("\nRUN ===\n");
 
-    if (SDL_Init(SDL_INIT_VIDEO) == -1) panic("SDL_Init failed");
+    SetTraceLogLevel(LOG_WARNING);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI);
 
-    vm.screen.window = SDL_CreateWindow(
-        "bici",
-        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        screen_width, screen_height,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
-    );
-    if (vm.screen.window == 0) panic("SDL_CreateWindow failed: %", fmt(cstring, (char *)SDL_GetError()));
+    InitWindow(vm_screen_width, vm_screen_height, "bici");
+    SetTargetFPS(GetMonitorRefreshRate(GetCurrentMonitor()));
+    MaximizeWindow();
 
-    // TODO(felix): SDL_CreateRenderer crashes with asan
-    vm.screen.renderer = SDL_CreateRenderer(vm.screen.window, -1, SDL_RENDERER_ACCELERATED);
-    if (vm.screen.renderer == 0) panic("SDL_CreateRenderer failed: %", fmt(cstring, (char *)SDL_GetError()));
+    Image screen_image = {
+        .data = vm.screen_pixels,
+        .width = vm_screen_width,
+        .height = vm_screen_height,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+        .mipmaps = 1,
+    };
 
-    vm.screen.texture = SDL_CreateTexture(
-        vm.screen.renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
-        screen_width, screen_height
-    );
-    if (vm.screen.texture == 0) panic("SDL_CreateTexture failed: %", fmt(cstring, (char *)SDL_GetError()));
+    vm.screen_texture = LoadTextureFromImage(screen_image);
 
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
 
-    bool should_quit = false;
-    do {
+    while (!WindowShouldClose()) {
         vm_run_to_break(&vm, vm_on_screen_update_pc);
+        UpdateTexture(vm.screen_texture, vm.screen_pixels);
 
-        static bool fullscreen = false;
-
-        SDL_Event event = {0};
-        while (SDL_PollEvent(&event) != 0) switch (event.type) {
-            case SDL_KEYDOWN: {
-                if (event.key.keysym.sym != SDLK_F11) break;
-                fullscreen = !fullscreen;
-                SDL_SetWindowFullscreen(vm.screen.window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-            } break;
-            case SDL_QUIT: should_quit = true;
-            default: break;
+        BeginDrawing();
+        ClearBackground((Color){ .a = 255 });
+        {
+            Rectangle texture_area = { .width = vm_screen_width, .height = vm_screen_height };
+            Rectangle window_area = { .width = (f32)GetScreenWidth(), .height = (f32)GetScreenHeight() };
+            Color draw_mask = { 255, 255, 255, 255 };
+            DrawTexturePro(vm.screen_texture, texture_area, window_area, (Vector2){0}, 0, draw_mask);
         }
-
-        SDL_UpdateTexture(vm.screen.texture, 0, vm.screen.pixels, screen_width * sizeof(u32));
-        SDL_RenderClear(vm.screen.renderer);
-        SDL_RenderCopy(vm.screen.renderer, vm.screen.texture, 0, 0);
-        SDL_RenderPresent(vm.screen.renderer);
-    } while (!should_quit);
+        EndDrawing();
+    }
 
     u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | vm_screen_quit);
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
 
-    SDL_DestroyTexture(vm.screen.texture);
-    SDL_DestroyRenderer(vm.screen.renderer);
-    SDL_DestroyWindow(vm.screen.window);
-    SDL_Quit();
+    UnloadTexture(vm.screen_texture);
+    CloseWindow();
 
     print("param  stack (bot->top): { ");
     for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));

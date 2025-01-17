@@ -28,61 +28,6 @@ structdef(Screen) {
     u32 pixels[screen_width * screen_height];
 };
 
-static Screen screen_init(void) {
-    if (SDL_Init(SDL_INIT_VIDEO) == -1) panic("SDL_Init failed");
-
-    Screen screen = {0};
-
-    screen.window = SDL_CreateWindow(
-        "bici",
-        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        screen_width, screen_height,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
-    );
-    if (screen.window == 0) panic("SDL_CreateWindow failed: %", fmt(cstring, (char *)SDL_GetError()));
-
-    // TODO: SDL_CreateRenderer crashes with asan
-    screen.renderer = SDL_CreateRenderer(screen.window, -1, SDL_RENDERER_ACCELERATED);
-    if (screen.renderer == 0) panic("SDL_CreateRenderer failed: %", fmt(cstring, (char *)SDL_GetError()));
-
-    screen.texture = SDL_CreateTexture(
-        screen.renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
-        screen_width, screen_height
-    );
-    if (screen.texture == 0) panic("SDL_CreateTexture failed: %", fmt(cstring, (char *)SDL_GetError()));
-
-    return screen;
-}
-
-static void screen_quit(Screen *screen) {
-    SDL_DestroyTexture(screen->texture);
-    SDL_DestroyRenderer(screen->renderer);
-    SDL_DestroyWindow(screen->window);
-    SDL_Quit();
-}
-
-static bool screen_update(Screen *screen) {
-    static bool fullscreen = false;
-
-    SDL_Event event = {0};
-    while (SDL_PollEvent(&event) != 0) switch (event.type) {
-        case SDL_KEYDOWN: {
-            if (event.key.keysym.sym != SDLK_F11) break;
-            fullscreen = !fullscreen;
-            SDL_SetWindowFullscreen(screen->window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-        } break;
-        case SDL_QUIT: return false;
-        default: break;
-    }
-
-    SDL_UpdateTexture(screen->texture, 0, screen->pixels, screen_width * sizeof(u32));
-    SDL_RenderClear(screen->renderer);
-    SDL_RenderCopy(screen->renderer, screen->texture, 0, 0);
-    SDL_RenderPresent(screen->renderer);
-
-    return true;
-}
-
 #define vm_for_op(action)\
     action(break,  0x00)/* NO MODE */\
     action(push,   0x01)/* NO k MODE */\
@@ -232,39 +177,7 @@ enumdef(Vm_Stack_Active, u8) { stack_param = 0, stack_ret = 1 };
 enumdef(Vm_Op_Size, u8)  { vm_op_size_byte = 0, vm_op_size_short = 1 };
 structdef(Vm_Op_Mode) { b8 keep; Vm_Stack_Active stack; Vm_Op_Size size; };
 
-// TODO(felix): this is only used once, so inline
-static char *mode_name(u8 instruction) {
-    if (vm_instruction_is_special(instruction)) return "";
-    switch ((instruction & 0xe0) >> 5) {
-        case 0x1: return "2";
-        case 0x2: return "r";
-        case 0x3: return "r2";
-        case 0x4: return "k";
-        case 0x5: return "k2";
-        case 0x6: return "kr";
-        case 0x7: return "kr2";
-    }
-    return "";
-}
-
 structdef(Vm_Instruction) { Vm_Op op; Vm_Op_Mode mode; };
-
-static u8 vm_byte_from_instruction(Vm_Instruction instruction) {
-    return (u8)(
-        instruction.op |
-        (instruction.mode.keep << 7) |
-        (instruction.mode.stack << 6) |
-        (instruction.mode.size << 5)
-    );
-}
-
-static Vm_Instruction vm_instruction_from_byte(u8 byte) {
-    return (Vm_Instruction){ .op = byte & 0x1f, .mode = {
-        .keep =  (byte & 0x80) >> 7,
-        .stack = (byte & 0x40) >> 6,
-        .size =  (byte & 0x20) >> 5,
-    } };
-}
 
 structdef(Vm) {
     u8 memory[0x10000];
@@ -299,7 +212,13 @@ static void vm_run_to_break(Vm *vm, u16 pc) {
     for (; true; vm->pc += add) {
         add = 1;
         u8 byte = vm_mem(vm->pc);
-        Vm_Instruction instruction = vm_instruction_from_byte(byte);
+
+        Vm_Instruction instruction = { .op = byte & 0x1f, .mode = {
+            .keep =  (byte & 0x80) >> 7,
+            .stack = (byte & 0x40) >> 6,
+            .size =  (byte & 0x20) >> 5,
+        } };
+
         vm->op_mode = instruction.mode;
 
         vm->stack_active = instruction.mode.stack;
@@ -330,22 +249,77 @@ static void vm_run(String rom) {
     print("MEMORY ===\n");
     for (u16 i = 0x100; i < rom.len; i += 1) {
         u8 byte = vm.memory[i];
-        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_op_name(byte)), fmt(cstring, mode_name(byte)));
+
+        String mode_string = string("");
+        if (!vm_instruction_is_special(byte)) switch ((byte & 0xe0) >> 5) {
+            case 0x1: mode_string = string("2"); break;
+            case 0x2: mode_string = string("r"); break;
+            case 0x3: mode_string = string("r2"); break;
+            case 0x4: mode_string = string("k"); break;
+            case 0x5: mode_string = string("k2"); break;
+            case 0x6: mode_string = string("kr"); break;
+            case 0x7: mode_string = string("kr2"); break;
+        }
+
+        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_op_name(byte)), fmt(String, mode_string));
     }
     print("\nRUN ===\n");
 
-    vm.screen = screen_init();
+    if (SDL_Init(SDL_INIT_VIDEO) == -1) panic("SDL_Init failed");
+
+    vm.screen.window = SDL_CreateWindow(
+        "bici",
+        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+        screen_width, screen_height,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
+    );
+    if (vm.screen.window == 0) panic("SDL_CreateWindow failed: %", fmt(cstring, (char *)SDL_GetError()));
+
+    // TODO: SDL_CreateRenderer crashes with asan
+    vm.screen.renderer = SDL_CreateRenderer(vm.screen.window, -1, SDL_RENDERER_ACCELERATED);
+    if (vm.screen.renderer == 0) panic("SDL_CreateRenderer failed: %", fmt(cstring, (char *)SDL_GetError()));
+
+    vm.screen.texture = SDL_CreateTexture(
+        vm.screen.renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
+        screen_width, screen_height
+    );
+    if (vm.screen.texture == 0) panic("SDL_CreateTexture failed: %", fmt(cstring, (char *)SDL_GetError()));
+
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
+
+    bool should_quit = false;
     do {
         vm_run_to_break(&vm, vm_on_screen_update_pc);
-    } while (screen_update(&vm.screen));
+
+        static bool fullscreen = false;
+
+        SDL_Event event = {0};
+        while (SDL_PollEvent(&event) != 0) switch (event.type) {
+            case SDL_KEYDOWN: {
+                if (event.key.keysym.sym != SDLK_F11) break;
+                fullscreen = !fullscreen;
+                SDL_SetWindowFullscreen(vm.screen.window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+            } break;
+            case SDL_QUIT: should_quit = true;
+            default: break;
+        }
+
+        SDL_UpdateTexture(vm.screen.texture, 0, vm.screen.pixels, screen_width * sizeof(u32));
+        SDL_RenderClear(vm.screen.renderer);
+        SDL_RenderCopy(vm.screen.renderer, vm.screen.texture, 0, 0);
+        SDL_RenderPresent(vm.screen.renderer);
+    } while (!should_quit);
 
     u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | vm_screen_quit);
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
-    screen_quit(&vm.screen);
+
+    SDL_DestroyTexture(vm.screen.texture);
+    SDL_DestroyRenderer(vm.screen.renderer);
+    SDL_DestroyWindow(vm.screen.window);
+    SDL_Quit();
 
     print("param  stack (bot->top): { ");
     for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));
@@ -372,14 +346,6 @@ structdef(Asm) {
 
     Array_u8 rom;
 };
-
-static void asm_label_push(Asm *ctx, String name, u16 addr) {
-    if (ctx->labels.len == ctx->labels.cap) {
-        panic("cannot add label '%': maximum number of labels reached", fmt(String, name));
-    }
-    ctx->labels.ptr[ctx->labels.len] = (Asm_Label){ .name = name, .addr = addr };
-    ctx->labels.len += 1;
-}
 
 static u16 asm_label_get_addr_of(Asm *ctx, String name) {
     for (u8 i = 0; i < ctx->labels.len; i += 1) {
@@ -466,25 +432,6 @@ static void asm_forward_res_push(Asm *ctx, Asm_Res_Mode res_mode) {
     ctx->forward_res.ptr[ctx->forward_res.len] = (Asm_Res){ .pc = (u16)ctx->rom.len, .mode = res_mode };
     ctx->forward_res.len += 1;
 }
-static void asm_forward_res_resolve_last(Asm *ctx) {
-    if (ctx->forward_res.len == 0) {
-        err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, ctx->path_biciasm), fmt(u64, ctx->i));
-        ctx->rom.len = 0;
-        return;
-    }
-    ctx->forward_res.len -= 1;
-    Asm_Res res = ctx->forward_res.ptr[ctx->forward_res.len];
-    switch (res.mode) {
-        case res_num: ctx->rom.ptr[res.pc] = (u8)(ctx->rom.len - 1 - res.pc); break;
-        case res_addr: {
-            u16 pc_bak = (u16)ctx->rom.len;
-            ctx->rom.len = res.pc;
-            asm_rom_write2(ctx, pc_bak);
-            ctx->rom.len = pc_bak;
-        } break;
-        default: unreachable;
-    }
-}
 
 static void asm_compile_op(Asm *ctx, Vm_Op_Mode mode, u8 op) {
     if (vm_instruction_is_special(op)) { asm_rom_write(ctx, op); return; }
@@ -559,8 +506,10 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
             } continue;
             case ':': {
                 ctx.i += 1;
-                String name = asm_parse_alpha(&ctx);
-                asm_label_push(&ctx, name, (u16)ctx.rom.len);
+                String label_name = asm_parse_alpha(&ctx);
+                if (ctx.labels.len == ctx.labels.cap) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
+                Asm_Label label = { .name = label_name, .addr = (u16)ctx.rom.len };
+                slice_push(ctx.labels, label);
             } continue;
             case '{': {
                 ctx.i += 1;
@@ -576,7 +525,29 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
                     } continue;
                 }
             } continue;
-            case '}': asm_forward_res_resolve_last(&ctx); continue;
+            case '}': {
+                if (ctx.forward_res.len == 0) {
+                    err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, ctx.path_biciasm), fmt(u64, ctx.i));
+                    ctx.rom.len = 0;
+                    break;
+                }
+
+                ctx.forward_res.len -= 1;
+                Asm_Res res = ctx.forward_res.ptr[ctx.forward_res.len];
+
+                switch (res.mode) {
+                    case res_num: ctx.rom.ptr[res.pc] = (u8)(ctx.rom.len - 1 - res.pc); break;
+                    case res_addr: {
+                        u16 pc_bak = (u16)ctx.rom.len;
+                        ctx.rom.len = res.pc;
+                        asm_rom_write2(&ctx, pc_bak);
+                        ctx.rom.len = pc_bak;
+                    } break;
+                    default: unreachable;
+                }
+
+                continue;
+            } break;
             case '_': {
                 ctx.i += 1;
                 Asm_Hex num = asm_parse_hex(&ctx);

@@ -138,6 +138,7 @@ typedef Array(u8) Array_u8;
 #define slice_from_c_array(c_array) { .ptr = c_array, .len = array_count(c_array) }
 #define slice_from_array(a) { .ptr = (a).ptr, .len = (a).len }
 #define slice_get_last_assume_not_empty(s) ((s).ptr[(s).len - 1])
+#define slice_pop(slice) (slice).ptr[--(slice).len]
 #define slice_push(slice, item) (slice).ptr[(slice).len++] = item
 #define slice_range(slice, beg, end) { .ptr = (void *)((uptr)(slice).ptr + (beg)), .len = (end) - (beg) }
 #define slice_remove(slice_ptr, idx) (slice_ptr)->ptr[idx] = (slice_ptr)->ptr[--(slice_ptr)->len]

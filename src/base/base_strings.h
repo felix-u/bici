@@ -50,12 +50,12 @@ const u8 decimal_from_hex_digit_table[256] = {
     _for_valid_hex_digit(_make_hex_digit_value_table)
 };
 
-const b8 is_hex_digit_table[256] = {
+const b8 is_hex_digit[256] = {
     #define _make_hex_digit_truth_table(c, val) [c] = true,
     _for_valid_hex_digit(_make_hex_digit_truth_table)
 };
 
-static usize decimal_from_hex_string(String s);
+static usize int_from_hex_string(String s);
 
 static char *cstring_from_string(Arena *arena, String s);
 

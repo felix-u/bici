@@ -1,4 +1,4 @@
-static usize decimal_from_hex_string(String s) {
+static usize int_from_hex_string(String s) {
     usize result = 0, magnitude = s.len;
     for (usize i = 0; i < s.len; i += 1, magnitude -= 1) {
         usize hex_digit = decimal_from_hex_digit_table[s.ptr[i]];

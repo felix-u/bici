@@ -28,7 +28,7 @@ structdef(Screen) {
     u32 pixels[screen_width * screen_height];
 };
 
-#define vm_for_op(action)\
+#define vm_for_opcode(action)\
     action(break,  0x00)/* NO MODE */\
     action(push,   0x01)/* NO k MODE */\
     action(drop,   0x02)\
@@ -79,37 +79,44 @@ enum Vm_Screen_Action {
 };
 
 // B = mode_bytes, b = mode_bits
-#define vm_op_cases(B, bi)\
-    /* TODO: for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */\
-    case vm_op_jmi: case vm_op_jei: case vm_op_jni: case vm_op_jsi: case vm_op_break: panic("reached full-byte opcodes in generic switch case");\
-    case vm_op_push:   vm_push##bi(vm, vm_load##bi(vm, vm->pc + 1)); add = B + 1; break;\
-    case vm_op_drop:   discard(vm_pop##bi(vm)); break;\
-    case vm_op_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
-    case vm_op_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
-    case vm_op_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
-    case vm_op_dup:    assert(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
-    case vm_op_over:   assert(!vm->op_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
-    case vm_op_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
-    case vm_op_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
-    case vm_op_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
-    case vm_op_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
-    case vm_op_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
-    case vm_op_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
-    case vm_op_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
-    case vm_op_div:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
-    case vm_op_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
-    case vm_op_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
-    case vm_op_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\
-    case vm_op_or:     vm_push##bi(vm, vm_pop##bi(vm) | vm_pop##bi(vm)); break;\
-    case vm_op_xor:    vm_push##bi(vm, vm_pop##bi(vm) ^ vm_pop##bi(vm)); break;\
-    case vm_op_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push##bi(vm, (u##bi)(vm_pop##bi(vm) << l >> r)); } break;\
-    case vm_op_jmp:    vm->pc = vm_pop16(vm); add = 0; break;\
-    case vm_op_jeq:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->pc = addr; add = 0; } } break;\
-    case vm_op_jst:    vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 1); vm->stack_active = stack_param; vm->pc = vm_pop16(vm); add = 0; break;\
-    case vm_op_stash:  { u##bi val = vm_pop##bi(vm); vm->stack_active = stack_ret; vm_push##bi(vm, val); vm->stack_active = stack_param; } break;\
-    case vm_op_load:   { u16 addr = vm_pop16(vm); u##bi val = vm_load##bi(vm, addr); vm_push##bi(vm, val); } break;\
-    case vm_op_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
-    case vm_op_read:   {\
+#define vm_opcode_cases(B, bi)\
+    /* TODO(felix): for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */\
+    case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:\
+        panic("reached full-byte opcodes in generic switch case");\
+    case vm_opcode_push:   vm_push##bi(vm, vm_load##bi(vm, vm->program_counter + 1)); add = B + 1; break;\
+    case vm_opcode_drop:   discard(vm_pop##bi(vm)); break;\
+    case vm_opcode_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
+    case vm_opcode_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
+    case vm_opcode_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
+    case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
+    case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
+    case vm_opcode_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
+    case vm_opcode_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
+    case vm_opcode_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
+    case vm_opcode_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
+    case vm_opcode_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
+    case vm_opcode_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
+    case vm_opcode_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
+    case vm_opcode_div:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
+    case vm_opcode_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
+    case vm_opcode_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
+    case vm_opcode_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\
+    case vm_opcode_or:     vm_push##bi(vm, vm_pop##bi(vm) | vm_pop##bi(vm)); break;\
+    case vm_opcode_xor:    vm_push##bi(vm, vm_pop##bi(vm) ^ vm_pop##bi(vm)); break;\
+    case vm_opcode_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push##bi(vm, (u##bi)(vm_pop##bi(vm) << l >> r)); } break;\
+    case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;\
+    case vm_opcode_jeq:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
+    case vm_opcode_jst:    {\
+        vm->active_stack = stack_ret;\
+        vm_push16(vm, vm->program_counter + 1);\
+        vm->active_stack = stack_param;\
+        vm->program_counter = vm_pop16(vm);\
+        add = 0;\
+    } break;\
+    case vm_opcode_stash:  { u##bi val = vm_pop##bi(vm); vm->active_stack = stack_ret; vm_push##bi(vm, val); vm->active_stack = stack_param; } break;\
+    case vm_opcode_load:   { u16 addr = vm_pop16(vm); u##bi val = vm_load##bi(vm, addr); vm_push##bi(vm, val); } break;\
+    case vm_opcode_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
+    case vm_opcode_read:   {\
         u8 vm_device_and_action = vm_pop8(vm);\
         Vm_Device device = vm_device_and_action & 0xf0;\
         u8 action = vm_device_and_action & 0x0f;\
@@ -120,14 +127,14 @@ enum Vm_Screen_Action {
             default: panic("invalid device #% for operation 'read'", fmt(u64, device, .base = 16));\
         }\
     } break;\
-    case vm_op_write:  {\
+    case vm_opcode_write:  {\
         u8 vm_device_and_action = vm_pop8(vm);\
         Vm_Device device = vm_device_and_action & 0xf0;\
         u8 action = vm_device_and_action & 0x0f;\
         switch (device) {\
             case vm_device_console: switch (action) {\
                 case 0x0: {\
-                    assert(vm->op_mode.size == vm_op_size_byte);\
+                    assert(vm->current_mode.size == vm_opcode_size_byte);\
                     u16 str_addr = vm_pop16(vm);\
                     u8 str_len = vm_load8(vm, str_addr);\
                     String str = { .ptr = vm->memory + str_addr + 1, .len = str_len };\
@@ -148,94 +155,101 @@ enum Vm_Screen_Action {
             default: panic("invalid device #% for operation 'write'", fmt(u64, device, .base = 16));\
         }\
     } break;\
-    default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_op_name(byte)), fmt(u64, byte, .base = 16));
+    default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
 
-enumdef(Vm_Op, u8) {
-    #define vm_op_def_enum(name, val) vm_op_##name = val,
-    vm_for_op(vm_op_def_enum)
-    vm_op_max_value_plus_one
+enumdef(Vm_Opcode, u8) {
+    #define vm_opcode_def_enum(name, val) vm_opcode_##name = val,
+    vm_for_opcode(vm_opcode_def_enum)
+    vm_opcode_max_value_plus_one
 };
 
-const char *vm_op_name_table[vm_op_max_value_plus_one] = {
-    #define vm_op_set_name(name, val) [val] = #name,
-    vm_for_op(vm_op_set_name)
+const char *vm_opcode_name_table[vm_opcode_max_value_plus_one] = {
+    #define vm_opcode_set_name(name, val) [val] = #name,
+    vm_for_opcode(vm_opcode_set_name)
 };
 
-static bool vm_instruction_is_special(u8 instruction) {
+static bool vm_opcode_is_special(u8 instruction) {
     switch (instruction) {
-        case vm_op_jmi: case vm_op_jei: case vm_op_jni: case vm_op_jsi: case vm_op_break: return true;
+        case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break: return true;
         default: return false;
     }
 }
 
-static const char *vm_op_name(u8 instruction) {
-    return vm_op_name_table[vm_instruction_is_special(instruction) ? instruction : (instruction & 0x1f)];
+static const char *vm_opcode_name(u8 instruction) {
+    return vm_opcode_name_table[vm_opcode_is_special(instruction) ? instruction : (instruction & 0x1f)];
 }
 
 structdef(Vm_Stack) { u8 memory[0x100], ptr; };
-enumdef(Vm_Stack_Active, u8) { stack_param = 0, stack_ret = 1 };
-enumdef(Vm_Op_Size, u8)  { vm_op_size_byte = 0, vm_op_size_short = 1 };
-structdef(Vm_Op_Mode) { b8 keep; Vm_Stack_Active stack; Vm_Op_Size size; };
+enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_ret = 1 };
+enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
+structdef(Vm_Instruction_Mode) { b8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
 
-structdef(Vm_Instruction) { Vm_Op op; Vm_Op_Mode mode; };
+structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
 
 structdef(Vm) {
     u8 memory[0x10000];
     Vm_Stack stacks[2];
-    Vm_Stack_Active stack_active;
-    u16 pc;
-    Vm_Op_Mode op_mode;
+    Vm_Stack_Id active_stack;
+    u16 program_counter;
+    Vm_Instruction_Mode current_mode;
     Screen screen;
 };
 
-#define vm_stack vm->stacks[vm->stack_active].memory
-#define vm_sp vm->stacks[vm->stack_active].ptr
+#define vm_stack vm->stacks[vm->active_stack].memory
+#define vm_sp vm->stacks[vm->active_stack].ptr
 
 #define vm_s(ptr) vm_stack[(u8)(ptr)]
 #define vm_mem(ptr) vm->memory[(u16)(ptr)]
 
 static u8   vm_get8(Vm *vm, u8 i_back) { return *(vm_stack + (u8)(vm_sp - i_back)); }
 static void vm_push8(Vm *vm, u8 byte) { vm_s(vm_sp) = byte; vm_sp += 1; }
-static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!vm->op_mode.keep) vm_sp -= 1; return val; }
+static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!vm->current_mode.keep) vm_sp -= 1; return val; }
 static u8   vm_load8(Vm *vm, u16 addr) { return vm_mem(addr); }
 static void vm_store8(Vm *vm, u16 addr, u8 val) { vm_mem(addr) = val; }
 
 static u16  vm_get16(Vm *vm, u8 i_back) { return (u16)vm_s(vm_sp - 2 * i_back + 1) | (u16)(vm_s(vm_sp - 2 * i_back) << 8); }
 static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm, (u8)byte2); }
-static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!vm->op_mode.keep) vm_sp -= 2; return val; }
+static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!vm->current_mode.keep) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
-static void vm_run_to_break(Vm *vm, u16 pc) {
-    vm->pc = pc;
+static void vm_run_to_break(Vm *vm, u16 program_counter) {
+    vm->program_counter = program_counter;
     u16 add = 1;
-    for (; true; vm->pc += add) {
+    for (; true; vm->program_counter += add) {
         add = 1;
-        u8 byte = vm_mem(vm->pc);
+        u8 byte = vm_mem(vm->program_counter);
 
-        Vm_Instruction instruction = { .op = byte & 0x1f, .mode = {
+        Vm_Instruction instruction = { .opcode = byte & 0x1f, .mode = {
             .keep =  (byte & 0x80) >> 7,
             .stack = (byte & 0x40) >> 6,
             .size =  (byte & 0x20) >> 5,
         } };
 
-        vm->op_mode = instruction.mode;
+        vm->current_mode = instruction.mode;
 
-        vm->stack_active = instruction.mode.stack;
+        vm->active_stack = instruction.mode.stack;
 
         switch (byte) {
-            case vm_op_break: return;
-            case vm_op_jmi: vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
-            case vm_op_jei: if ( vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
-            case vm_op_jni: if (!vm_pop8(vm)) { vm->pc = vm_load16(vm, vm->pc + 1); add = 0; } else add = 3; continue;
-            case vm_op_jsi: vm->stack_active = stack_ret; vm_push16(vm, vm->pc + 3); vm->stack_active = stack_param; vm->pc = vm_load16(vm, vm->pc + 1); add = 0; continue;
+            case vm_opcode_break: return;
+            case vm_opcode_jmi: vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; continue;
+            case vm_opcode_jei: if ( vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
+            case vm_opcode_jni: if (!vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
+            case vm_opcode_jsi: {
+                vm->active_stack = stack_ret;
+                vm_push16(vm, vm->program_counter + 3);
+                vm->active_stack = stack_param;
+                vm->program_counter = vm_load16(vm, vm->program_counter + 1);
+                add = 0;
+                continue;
+            } break;
             default: break;
         }
 
         switch (instruction.mode.size) {
-            case vm_op_size_byte: switch (instruction.op) { vm_op_cases(1, 8) } break;
-            case vm_op_size_short: switch (instruction.op) { vm_op_cases(2, 16) } break;
-            default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_op_name(byte)), fmt(u64, byte, .base = 16));
+            case vm_opcode_size_byte: switch (instruction.opcode) { vm_opcode_cases(1, 8) } break;
+            case vm_opcode_size_short: switch (instruction.opcode) { vm_opcode_cases(2, 16) } break;
+            default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
         }
     }
 }
@@ -251,7 +265,7 @@ static void vm_run(String rom) {
         u8 byte = vm.memory[i];
 
         String mode_string = string("");
-        if (!vm_instruction_is_special(byte)) switch ((byte & 0xe0) >> 5) {
+        if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
             case 0x1: mode_string = string("2"); break;
             case 0x2: mode_string = string("r"); break;
             case 0x3: mode_string = string("r2"); break;
@@ -261,7 +275,7 @@ static void vm_run(String rom) {
             case 0x7: mode_string = string("kr2"); break;
         }
 
-        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_op_name(byte)), fmt(String, mode_string));
+        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string));
     }
     print("\nRUN ===\n");
 
@@ -275,7 +289,7 @@ static void vm_run(String rom) {
     );
     if (vm.screen.window == 0) panic("SDL_CreateWindow failed: %", fmt(cstring, (char *)SDL_GetError()));
 
-    // TODO: SDL_CreateRenderer crashes with asan
+    // TODO(felix): SDL_CreateRenderer crashes with asan
     vm.screen.renderer = SDL_CreateRenderer(vm.screen.window, -1, SDL_RENDERER_ACCELERATED);
     if (vm.screen.renderer == 0) panic("SDL_CreateRenderer failed: %", fmt(cstring, (char *)SDL_GetError()));
 
@@ -328,29 +342,29 @@ static void vm_run(String rom) {
     print("}\n");
 }
 
-structdef(Asm_Label) { String name; u16 addr; };
+structdef(Asm_Label_Definition) { String name; u16 address; };
 
-structdef(Asm_Label_Ref) { String name; u16 loc; Vm_Op_Size size; };
+structdef(Asm_Label_Usage) { String name; u16 index_in_input_bytes; Vm_Opcode_Size size; };
 
-enumdef(Asm_Res_Mode, u8) { res_num, res_addr };
-structdef(Asm_Res) { u16 pc; Asm_Res_Mode mode; };
+enumdef(Asm_Resolution_Kind, u8) { resolve_byte_count, resolve_address };
+structdef(Asm_Resolution) { u16 index_in_output_bytes; Asm_Resolution_Kind kind; };
 
 structdef(Asm) {
-    char *path_biciasm;
-    String infile;
-    u16 i;
+    char *input_relative_path;
+    String input_bytes;
+    u16 input_cursor;
 
-    Array_Asm_Label labels;
-    Array_Asm_Label_Ref label_refs;
-    Array_Asm_Res forward_res;
+    Array_Asm_Label_Definition label_definitions;
+    Array_Asm_Label_Usage label_usages;
+    Array_Asm_Resolution resolutions;
 
-    Array_u8 rom;
+    Array_u8 output_bytes;
 };
 
-static u16 asm_label_get_addr_of(Asm *ctx, String name) {
-    for (u8 i = 0; i < ctx->labels.len; i += 1) {
-        if (!string_equal(ctx->labels.ptr[i].name, name)) continue;
-        return ctx->labels.ptr[i].addr;
+static u16 asm_get_address_of_label(Asm *ctx, String name) {
+    for (u8 i = 0; i < ctx->label_definitions.len; i += 1) {
+        if (!string_equal(ctx->label_definitions.ptr[i].name, name)) continue;
+        return ctx->label_definitions.ptr[i].address;
     }
     err("no such label '%'", fmt(String, name));
     return 0;
@@ -358,31 +372,33 @@ static u16 asm_label_get_addr_of(Asm *ctx, String name) {
 
 structdef(Asm_Hex) {
     bool ok;
-    u8 num_digits;
+    u8 digit_count;
     union { u8 int8; u16 int16; } result;
 };
 
 static Asm_Hex asm_parse_hex(Asm *ctx) {
-    u16 beg_i = ctx->i;
-    while (ctx->i < ctx->infile.len && is_hex_digit_table[ctx->infile.ptr[ctx->i]]) ctx->i += 1;
-    u16 end_i = ctx->i;
-    ctx->i -= 1;
-    u8 num_digits = (u8)(end_i - beg_i);
-    String hex_string = { .ptr = ctx->infile.ptr + beg_i, .len = num_digits };
+    u16 start_index = ctx->input_cursor;
+    while (ctx->input_cursor < ctx->input_bytes.len && is_hex_digit[ctx->input_bytes.ptr[ctx->input_cursor]]) ctx->input_cursor += 1;
+    u16 end_index = ctx->input_cursor;
+    ctx->input_cursor -= 1;
+    u8 digit_count = (u8)(end_index - start_index);
+    String hex_string = { .ptr = ctx->input_bytes.ptr + start_index, .len = digit_count };
 
-    switch (num_digits) {
+    switch (digit_count) {
         case 2: return (Asm_Hex){
             .ok = true,
-            .num_digits = num_digits,
-            .result.int8 = (u8)decimal_from_hex_string(hex_string),
+            .digit_count = digit_count,
+            .result.int8 = (u8)int_from_hex_string(hex_string),
         };
         case 4: return (Asm_Hex){
             .ok = true,
-            .num_digits = num_digits,
-            .result.int16 = (u16)decimal_from_hex_string(hex_string),
+            .digit_count = digit_count,
+            .result.int16 = (u16)int_from_hex_string(hex_string),
         };
         default: {
-            err("expected 2 digits (byte) or 4 digits (short), found % digits in number at '%'[%..%]", fmt(u64, num_digits), fmt(cstring, ctx->path_biciasm), fmt(u64, beg_i), fmt(u64, end_i));
+            err("expected 2 digits (byte) or 4 digits (short), found % digits in number at '%'[%..%]",
+                fmt(u64, digit_count), fmt(cstring, ctx->input_relative_path), fmt(u64, start_index), fmt(u64, end_index)
+            );
             return (Asm_Hex){0};
         } break;
     }
@@ -393,29 +409,29 @@ static bool asm_is_whitespace(u8 c) { return c == ' ' || c == '\t' || c == '\n' 
 static bool asm_is_alpha(u8 c) { return ('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || (c == '_'); }
 
 static String asm_parse_alpha(Asm *ctx) {
-    u16 beg_i = ctx->i;
-    u8 first_char = ctx->infile.ptr[ctx->i];
+    u16 start_index = ctx->input_cursor;
+    u8 first_char = ctx->input_bytes.ptr[ctx->input_cursor];
     if (!asm_is_alpha(first_char)) {
         err(
             "expected alphabetic character or underscore, found byte '%'/%/#% at '%'[%]",
-            fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, ctx->path_biciasm), fmt(u64, ctx->i)
+            fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, ctx->input_relative_path), fmt(u64, ctx->input_cursor)
         );
         return (String){0};
     }
 
-    ctx->i += 1;
-    while (ctx->i < ctx->infile.len && (asm_is_alpha(ctx->infile.ptr[ctx->i]))) ctx->i += 1;
-    u16 end_i = ctx->i;
-    ctx->i -= 1;
-    return (String){ .ptr = ctx->infile.ptr + beg_i, .len = end_i - beg_i };
+    ctx->input_cursor += 1;
+    while (ctx->input_cursor < ctx->input_bytes.len && (asm_is_alpha(ctx->input_bytes.ptr[ctx->input_cursor]))) ctx->input_cursor += 1;
+    u16 end_index = ctx->input_cursor;
+    ctx->input_cursor -= 1;
+    return (String){ .ptr = ctx->input_bytes.ptr + start_index, .len = end_index - start_index };
 }
 
 static void asm_rom_write(Asm *ctx, u8 byte) {
-    if (ctx->rom.len == ctx->rom.cap) {
-        err("reached maximum rom size");
+    if (ctx->output_bytes.len == ctx->output_bytes.cap) {
+        err("reached maximum output_bytes size");
         abort();
     }
-    array_push_assume_capacity(&ctx->rom, &byte);
+    array_push_assume_capacity(&ctx->output_bytes, &byte);
 }
 
 static void asm_rom_write2(Asm *ctx, u16 byte2) {
@@ -423,125 +439,126 @@ static void asm_rom_write2(Asm *ctx, u16 byte2) {
     asm_rom_write(ctx, byte2 & 0x00ff);
 }
 
-static void asm_forward_res_push(Asm *ctx, Asm_Res_Mode res_mode) {
-    if (ctx->forward_res.len == 0x0ff) {
-        err("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, ctx->path_biciasm), fmt(u64, ctx->i));
-        ctx->rom.len = 0;
+static void asm_resolutions_push(Asm *ctx, Asm_Resolution_Kind resolution_kind) {
+    if (ctx->resolutions.len == 0x0ff) {
+        err("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, ctx->input_relative_path), fmt(u64, ctx->input_cursor));
+        ctx->output_bytes.len = 0;
         return;
     }
-    ctx->forward_res.ptr[ctx->forward_res.len] = (Asm_Res){ .pc = (u16)ctx->rom.len, .mode = res_mode };
-    ctx->forward_res.len += 1;
+    Asm_Resolution resolution = { .index_in_output_bytes = (u16)ctx->output_bytes.len, .kind = resolution_kind };
+    slice_push(ctx->resolutions, resolution);
 }
 
-static void asm_compile_op(Asm *ctx, Vm_Op_Mode mode, u8 op) {
-    if (vm_instruction_is_special(op)) { asm_rom_write(ctx, op); return; }
-    asm_rom_write(ctx, op | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
+static void asm_compile_instruction(Asm *ctx, Vm_Instruction_Mode mode, u8 opcode) {
+    if (vm_opcode_is_special(opcode)) { asm_rom_write(ctx, opcode); return; }
+    asm_rom_write(ctx, opcode | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
 static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_biciasm) {
-    static u8 rom_mem[0x10000];
-    static Asm_Label labels_mem[0x100];
-    static Asm_Label_Ref label_refs_mem[0x100];
-    static Asm_Res forward_res_mem[0x100];
+    static u8 rom_memory[0x10000];
+    static Asm_Label_Definition label_definitions_memory[0x100];
+    static Asm_Label_Usage label_usages_memory[0x100];
+    static Asm_Resolution resolutions_memory[0x100];
 
     Asm ctx = {
-        .path_biciasm = _path_biciasm,
-        .infile = file_read_bytes_relative_path(arena, _path_biciasm, max_asm_filesize),
-        .labels = { .ptr = labels_mem, .cap = 0x100 },
-        .label_refs = { .ptr = label_refs_mem, .cap = 0x100 },
-        .forward_res = { .ptr = forward_res_mem, .cap = 0x100 },
-        .rom = { .ptr = rom_mem, .len = 0x100, .cap = 0x10000 },
+        .input_relative_path = _path_biciasm,
+        .input_bytes = file_read_bytes_relative_path(arena, _path_biciasm, max_asm_filesize),
+        .label_definitions = { .ptr = label_definitions_memory, .cap = 0x100 },
+        .label_usages = { .ptr = label_usages_memory, .cap = 0x100 },
+        .resolutions = { .ptr = resolutions_memory, .cap = 0x100 },
+        .output_bytes = { .ptr = rom_memory, .len = 0x100, .cap = 0x10000 },
     };
-    if (ctx.infile.len == 0) return (String){0};
+    if (ctx.input_bytes.len == 0) return (String){0};
 
-    u16 add = 1;
-    for (ctx.i = 0; ctx.i < ctx.infile.len; ctx.i += add) {
-        add = 1;
-        if (asm_is_whitespace(ctx.infile.ptr[ctx.i])) continue;
+    u16 cursor_step = 1;
+    for (ctx.input_cursor = 0; ctx.input_cursor < ctx.input_bytes.len; ctx.input_cursor += cursor_step) {
+        cursor_step = 1;
+        if (asm_is_whitespace(ctx.input_bytes.ptr[ctx.input_cursor])) continue;
 
-        Vm_Op_Mode mode = {0};
+        Vm_Instruction_Mode mode = {0};
 
-        switch (ctx.infile.ptr[ctx.i]) {
-            case '/': if (ctx.i + 1 < ctx.infile.len && ctx.infile.ptr[ctx.i + 1] == '/') {
-                for (ctx.i += 2; ctx.i < ctx.infile.len && ctx.infile.ptr[ctx.i] != '\n';) ctx.i += 1;
+        switch (ctx.input_bytes.ptr[ctx.input_cursor]) {
+            case '/': if (ctx.input_cursor + 1 < ctx.input_bytes.len && ctx.input_bytes.ptr[ctx.input_cursor + 1] == '/') {
+                for (ctx.input_cursor += 2; ctx.input_cursor < ctx.input_bytes.len && ctx.input_bytes.ptr[ctx.input_cursor] != '\n';) ctx.input_cursor += 1;
             } continue;
             case '|': {
-                ctx.i += 1;
-                Asm_Hex new_pc = asm_parse_hex(&ctx);
-                if (!new_pc.ok) return (String){0};
-                ctx.rom.len = new_pc.result.int16;
+                ctx.input_cursor += 1;
+                Asm_Hex new_program_counter = asm_parse_hex(&ctx);
+                if (!new_program_counter.ok) return (String){0};
+                ctx.output_bytes.len = new_program_counter.result.int16;
             } continue;
             case '@': {
-                ctx.i += 1;
-                String name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Asm_Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_short };
-                ctx.label_refs.len += 1;
-                ctx.rom.len += 2;
+                ctx.input_cursor += 1;
+                String label_name = asm_parse_alpha(&ctx);
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)ctx.output_bytes.len, .size = vm_opcode_size_short };
+                slice_push(ctx.label_usages, label);
+                ctx.output_bytes.len += 2;
             } continue;
             case '#': {
-                ctx.i += 1;
-                Asm_Hex num = asm_parse_hex(&ctx);
-                if (!num.ok) return (String){0};
-                switch (num.num_digits) {
-                    case 2: asm_compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_byte }, vm_op_push); asm_rom_write(&ctx, num.result.int8); break;
-                    case 4: asm_compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_short }, vm_op_push); asm_rom_write2(&ctx, num.result.int16); break;
+                ctx.input_cursor += 1;
+                Asm_Hex number = asm_parse_hex(&ctx);
+                if (!number.ok) return (String){0};
+                switch (number.digit_count) {
+                    case 2: asm_compile_instruction(&ctx, (Vm_Instruction_Mode){ .size = vm_opcode_size_byte }, vm_opcode_push); asm_rom_write(&ctx, number.result.int8); break;
+                    case 4: asm_compile_instruction(&ctx, (Vm_Instruction_Mode){ .size = vm_opcode_size_short }, vm_opcode_push); asm_rom_write2(&ctx, number.result.int16); break;
                     default: unreachable;
                 }
             } continue;
             case '*': {
-                asm_compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_byte }, vm_op_push);
-                ctx.i += 1;
-                String name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Asm_Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_byte };
-                ctx.label_refs.len += 1;
-                ctx.rom.len += 1;
+                asm_compile_instruction(&ctx, (Vm_Instruction_Mode){ .size = vm_opcode_size_byte }, vm_opcode_push);
+                ctx.input_cursor += 1;
+                String label_name = asm_parse_alpha(&ctx);
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)ctx.output_bytes.len, .size = vm_opcode_size_byte };
+                slice_push(ctx.label_usages, label);
+                ctx.output_bytes.len += 1;
             } continue;
             case '&': {
-                asm_compile_op(&ctx, (Vm_Op_Mode){ .size = vm_op_size_short }, vm_op_push);
-                ctx.i += 1;
-                String name = asm_parse_alpha(&ctx);
-                ctx.label_refs.ptr[ctx.label_refs.len] = (Asm_Label_Ref){ .name = name, .loc = (u16)ctx.rom.len, .size = vm_op_size_short };
-                ctx.label_refs.len += 1;
-                ctx.rom.len += 2;
+                asm_compile_instruction(&ctx, (Vm_Instruction_Mode){ .size = vm_opcode_size_short }, vm_opcode_push);
+                ctx.input_cursor += 1;
+                String label_name = asm_parse_alpha(&ctx);
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)ctx.output_bytes.len, .size = vm_opcode_size_short };
+                slice_push(ctx.label_usages, label);
+                ctx.output_bytes.len += 2;
             } continue;
             case ':': {
-                ctx.i += 1;
+                ctx.input_cursor += 1;
                 String label_name = asm_parse_alpha(&ctx);
-                if (ctx.labels.len == ctx.labels.cap) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
-                Asm_Label label = { .name = label_name, .addr = (u16)ctx.rom.len };
-                slice_push(ctx.labels, label);
+                if (ctx.label_definitions.len == ctx.label_definitions.cap) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
+                Asm_Label_Definition label = { .name = label_name, .address = (u16)ctx.output_bytes.len };
+                slice_push(ctx.label_definitions, label);
             } continue;
             case '{': {
-                ctx.i += 1;
-                switch (ctx.infile.ptr[ctx.i]) {
+                ctx.input_cursor += 1;
+                switch (ctx.input_bytes.ptr[ctx.input_cursor]) {
                     case '#': {
-                        asm_forward_res_push(&ctx, res_num);
-                        ctx.rom.len += 1;
+                        asm_resolutions_push(&ctx, resolve_byte_count);
+                        ctx.output_bytes.len += 1;
                     } continue;
                     default: {
-                        asm_forward_res_push(&ctx, res_addr);
-                        ctx.rom.len += 2;
-                        add = 0;
+                        asm_resolutions_push(&ctx, resolve_address);
+                        ctx.output_bytes.len += 2;
+                        cursor_step = 0;
                     } continue;
                 }
             } continue;
             case '}': {
-                if (ctx.forward_res.len == 0) {
-                    err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, ctx.path_biciasm), fmt(u64, ctx.i));
-                    ctx.rom.len = 0;
+                if (ctx.resolutions.len == 0) {
+                    err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, ctx.input_relative_path), fmt(u64, ctx.input_cursor));
+                    ctx.output_bytes.len = 0;
                     break;
                 }
 
-                ctx.forward_res.len -= 1;
-                Asm_Res res = ctx.forward_res.ptr[ctx.forward_res.len];
-
-                switch (res.mode) {
-                    case res_num: ctx.rom.ptr[res.pc] = (u8)(ctx.rom.len - 1 - res.pc); break;
-                    case res_addr: {
-                        u16 pc_bak = (u16)ctx.rom.len;
-                        ctx.rom.len = res.pc;
-                        asm_rom_write2(&ctx, pc_bak);
-                        ctx.rom.len = pc_bak;
+                Asm_Resolution resolution = slice_pop(ctx.resolutions);
+                switch (resolution.kind) {
+                    case resolve_byte_count: {
+                        u8 byte_count = (u8)(ctx.output_bytes.len - 1 - resolution.index_in_output_bytes);
+                        ctx.output_bytes.ptr[resolution.index_in_output_bytes] = byte_count;
+                    } break;
+                    case resolve_address: {
+                        u16 current_address = (u16)ctx.output_bytes.len;
+                        ctx.output_bytes.len = resolution.index_in_output_bytes;
+                        asm_rom_write2(&ctx, current_address);
+                        ctx.output_bytes.len = current_address;
                     } break;
                     default: unreachable;
                 }
@@ -549,83 +566,89 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
                 continue;
             } break;
             case '_': {
-                ctx.i += 1;
-                Asm_Hex num = asm_parse_hex(&ctx);
-                if (!num.ok) return (String){0};
-                switch (num.num_digits) {
-                    case 2: asm_rom_write(&ctx, num.result.int8); break;
-                    case 4: asm_rom_write2(&ctx, num.result.int16); break;
+                ctx.input_cursor += 1;
+                Asm_Hex number = asm_parse_hex(&ctx);
+                if (!number.ok) return (String){0};
+                switch (number.digit_count) {
+                    case 2: asm_rom_write(&ctx, number.result.int8); break;
+                    case 4: asm_rom_write2(&ctx, number.result.int16); break;
                     default: unreachable;
                 }
             } continue;
             case '"': {
-                for (ctx.i += 1; ctx.i < ctx.infile.len && !asm_is_whitespace(ctx.infile.ptr[ctx.i]); ctx.i += 1) {
-                    asm_rom_write(&ctx, ctx.infile.ptr[ctx.i]);
+                ctx.input_cursor += 1;
+                for (; ctx.input_cursor < ctx.input_bytes.len && !asm_is_whitespace(ctx.input_bytes.ptr[ctx.input_cursor]); ctx.input_cursor += 1) {
+                    asm_rom_write(&ctx, ctx.input_bytes.ptr[ctx.input_cursor]);
                 }
-                add = 0;
+                cursor_step = 0;
             } continue;
             default: break;
         }
 
-        u8 first_char = ctx.infile.ptr[ctx.i];
+        u8 first_char = ctx.input_bytes.ptr[ctx.input_cursor];
         if (!asm_is_alpha(first_char)) {
-            err("invalid byte '%'/%/#% at '%'[%]", fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, ctx.path_biciasm), fmt(u64, ctx.i));
+            err("invalid byte '%'/%/#% at '%'[%]",
+                fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, ctx.input_relative_path), fmt(u64, ctx.input_cursor)
+            );
             return (String){0};
         }
 
-        usize beg_i = ctx.i, end_i = beg_i;
-        for (; ctx.i < ctx.infile.len && !asm_is_whitespace(ctx.infile.ptr[ctx.i]); ctx.i += 1) {
-            if ('a' <= ctx.infile.ptr[ctx.i] && ctx.infile.ptr[ctx.i] <= 'z') continue;
-            end_i = ctx.i;
-            if (ctx.infile.ptr[ctx.i] == ';') for (ctx.i += 1; ctx.i < ctx.infile.len;) {
-                u8 c = ctx.infile.ptr[ctx.i];
+        usize start_index = ctx.input_cursor, end_index = start_index;
+        for (; ctx.input_cursor < ctx.input_bytes.len && !asm_is_whitespace(ctx.input_bytes.ptr[ctx.input_cursor]); ctx.input_cursor += 1) {
+            u8 c = ctx.input_bytes.ptr[ctx.input_cursor];
+            if ('a' <= c && c <= 'z') continue;
+            end_index = ctx.input_cursor;
+            if (c == ';') for (ctx.input_cursor += 1; ctx.input_cursor < ctx.input_bytes.len;) {
+                c = ctx.input_bytes.ptr[ctx.input_cursor];
                 if (asm_is_whitespace(c)) goto done;
                 switch (c) {
                     case 'k': mode.keep = true; break;
                     case 'r': mode.stack = stack_ret; break;
-                    case '2': mode.size = vm_op_size_short; break;
+                    case '2': mode.size = vm_opcode_size_short; break;
                     default: {
-                        err("expected one of ['k', 'r', '2'], found byte '%'/%/#% at '%'[%]", fmt(char, c), fmt(u64, c), fmt(u64, c, .base = 16), fmt(cstring, ctx.path_biciasm), fmt(u64, ctx.i));
+                        err("expected one of ['k', 'r', '2'], found byte '%'/%/#% at '%'[%]",
+                            fmt(char, c), fmt(u64, c), fmt(u64, c, .base = 16), fmt(cstring, ctx.input_relative_path), fmt(u64, ctx.input_cursor)
+                        );
                         return (String){0};
                     } break;
                 }
-                ctx.i += 1;
+                ctx.input_cursor += 1;
             }
         }
         done:
-        if (end_i == beg_i) end_i = ctx.i;
-        String lexeme = string_range(ctx.infile, beg_i, end_i);
+        if (end_index == start_index) end_index = ctx.input_cursor;
+        String lexeme = string_range(ctx.input_bytes, start_index, end_index);
 
         if (false) {}
-        #define compile_if_op_string(name, val)\
-            else if (string_equal(lexeme, string(#name))) asm_compile_op(&ctx, mode, val);
-        vm_for_op(compile_if_op_string)
+        #define compile_if_string_is_opcode(name, val)\
+            else if (string_equal(lexeme, string(#name))) asm_compile_instruction(&ctx, mode, val);
+        vm_for_opcode(compile_if_string_is_opcode)
         else {
-            err("invalid token '%' at '%'[%..%]", fmt(String, lexeme), fmt(cstring, ctx.path_biciasm), fmt(u64, beg_i), fmt(u64, end_i));
+            err("invalid token '%' at '%'[%..%]", fmt(String, lexeme), fmt(cstring, ctx.input_relative_path), fmt(u64, start_index), fmt(u64, end_index));
             return (String){0};
         };
 
         continue;
     }
-    if (ctx.rom.len == 0) return (String){0};
-    String rom = slice_from_array(ctx.rom);
+    if (ctx.output_bytes.len == 0) return (String){0};
+    String output_bytes = slice_from_array(ctx.output_bytes);
 
-    for (u8 i = 0; i < ctx.label_refs.len; i += 1) {
-        Asm_Label_Ref ref = ctx.label_refs.ptr[i];
+    for (u8 i = 0; i < ctx.label_usages.len; i += 1) {
+        Asm_Label_Usage ref = ctx.label_usages.ptr[i];
         if (ref.name.len == 0) return (String){0};
-        ctx.rom.len = ref.loc;
+        ctx.output_bytes.len = ref.index_in_input_bytes;
         switch (ref.size) {
-            case vm_op_size_byte: asm_rom_write(&ctx, (u8)asm_label_get_addr_of(&ctx, ref.name)); break;
-            case vm_op_size_short: asm_rom_write2(&ctx, asm_label_get_addr_of(&ctx, ref.name)); break;
+            case vm_opcode_size_byte: asm_rom_write(&ctx, (u8)asm_get_address_of_label(&ctx, ref.name)); break;
+            case vm_opcode_size_short: asm_rom_write2(&ctx, asm_get_address_of_label(&ctx, ref.name)); break;
             default: unreachable;
         }
     }
 
     print("ASM ===\n");
-    for (usize i = 0x100; i < rom.len; i += 1) print("% ", fmt(u64, rom.ptr[i], .base = 16));
+    for (usize i = 0x100; i < output_bytes.len; i += 1) print("% ", fmt(u64, output_bytes.ptr[i], .base = 16));
     putchar('\n');
 
-    return rom;
+    return output_bytes;
 }
 
 #define usage "usage: bici <com|run|script> <file...>"
@@ -638,20 +661,20 @@ int main(int argc, char **argv) {
 
     Arena arena = {0};
 
-    String cmd = string_from_cstring(argv[1]);
-    if (string_equal(cmd, string("com"))) {
+    String command = string_from_cstring(argv[1]);
+    if (string_equal(command, string("com"))) {
         if (argc != 4) {
             err("usage: bici com <file.biciasm> <file.bici>");
             return 1;
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
-        String rom = asm_compile(&arena, max_asm_filesize, argv[2]);
-        file_write_bytes_to_relative_path(argv[3], rom);
-    } else if (string_equal(cmd, string("run"))) {
+        String output_bytes = asm_compile(&arena, max_asm_filesize, argv[2]);
+        file_write_bytes_to_relative_path(argv[3], output_bytes);
+    } else if (string_equal(command, string("run"))) {
         arena = arena_init(0x10000);
         vm_run(file_read_bytes_relative_path(&arena, argv[2], 0x10000));
-    } else if (string_equal(cmd, string("script"))) {
+    } else if (string_equal(command, string("script"))) {
         if (argc != 3) {
             err("usage: bici script <file.biciasm>");
             return 1;
@@ -660,7 +683,7 @@ int main(int argc, char **argv) {
         arena = arena_init(max_asm_filesize);
         vm_run(asm_compile(&arena, max_asm_filesize, argv[2]));
     } else {
-        err("no such command '%'\n%", fmt(String, cmd), fmt(cstring, usage));
+        err("no such command '%'\n%", fmt(String, command), fmt(cstring, usage));
         return 1;
     }
 

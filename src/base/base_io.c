@@ -77,8 +77,7 @@ static void print_var_args(char *format, va_list args) {
     String_Builder output = { .arena = &arena };
     string_builder_printf_var_args(&output, format, args);
 
-    // TODO(felix): this should be a union access now that we're using C11
-    String str = string_from_string_builder(output);
+    String str = output.string;
 
     #if OS_WINDOWS
         OutputDebugStringA((char *)str.ptr);

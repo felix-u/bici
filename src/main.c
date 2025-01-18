@@ -612,7 +612,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
         continue;
     }
     if (ctx.output_bytes.len == 0) return (String){0};
-    String output_bytes = slice_from_array(ctx.output_bytes);
+    String output_bytes = bit_cast(String) ctx.output_bytes.slice;
 
     for (u8 i = 0; i < ctx.label_usages.len; i += 1) {
         Asm_Label_Usage ref = ctx.label_usages.ptr[i];

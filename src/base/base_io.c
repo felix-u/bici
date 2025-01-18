@@ -38,7 +38,7 @@ static String file_read_bytes_relative_path(Arena *arena, char *path, usize max_
 
     end:
     CloseHandle(file);
-    return (String)slice_from_array(bytes);
+    return bit_cast(String) bytes.slice;
 }
 
 static void file_write_bytes_to_relative_path(char *path, String bytes) {

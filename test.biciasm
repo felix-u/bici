@@ -20,12 +20,12 @@
     #0002 add;2 jmi @while } drop;2
     break
 
-:cast_16_from_8 #00 swap jmp;r
+:cast_16_from_8 #00 swap jump;r
 
 :load_coords_at_addr
     copy;2 load #02 divide jsi @cast_16_from_8
-    swap;2 inc;2 load #02 divide jsi @cast_16_from_8
-    jmp;r
+    swap;2 increment;2 load #02 divide jsi @cast_16_from_8
+    jump;r
 
 :smiley
     _0606 _1206

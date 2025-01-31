@@ -38,17 +38,17 @@ static u32 screen_palette[screen_colour_count] = {
     action(subtract,    0x0d)\
     action(multiply,    0x0e)\
     action(divide,    0x0f)\
-    action(inc,    0x10)\
+    action(increment,    0x10)\
     action(not,    0x11)\
     action(and,    0x12)\
     action(or,     0x13)\
     action(xor,    0x14)\
     action(shift,  0x15)\
-    action(jmp,    0x16)\
-    action(jeq,    0x17)\
-    action(jst,    0x18)\
-    action(jnq,    0x19)\
-    action(jni,    0x1a)\
+    action(jump,    0x16)\
+    action(jump_if_equals,    0x17)\
+    action(jump_stash,    0x18)\
+    action(jump_if_not_equals,    0x19)\
+    action(jni,    0x1a)/* TODO(felix): why can't I rename this? */\
     action(stash,  0x1b)\
     action(load,   0x1c)\
     action(store,  0x1d)\
@@ -91,15 +91,15 @@ enum Vm_Screen_Action {
     case vm_opcode_subtract:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
     case vm_opcode_multiply:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
     case vm_opcode_divide:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
-    case vm_opcode_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
+    case vm_opcode_increment:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
     case vm_opcode_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
     case vm_opcode_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\
     case vm_opcode_or:     vm_push##bi(vm, vm_pop##bi(vm) | vm_pop##bi(vm)); break;\
     case vm_opcode_xor:    vm_push##bi(vm, vm_pop##bi(vm) ^ vm_pop##bi(vm)); break;\
     case vm_opcode_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push##bi(vm, (u##bi)(vm_pop##bi(vm) << l >> r)); } break;\
-    case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;\
-    case vm_opcode_jeq:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
-    case vm_opcode_jst:    {\
+    case vm_opcode_jump:    vm->program_counter = vm_pop16(vm); add = 0; break;\
+    case vm_opcode_jump_if_equals:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
+    case vm_opcode_jump_stash:    {\
         vm->active_stack = stack_ret;\
         vm_push16(vm, vm->program_counter + 1);\
         vm->active_stack = stack_param;\

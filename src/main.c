@@ -25,19 +25,19 @@ static u32 screen_palette[screen_colour_count] = {
     action(break,  0x00)/* NO MODE */\
     action(push,   0x01)/* NO k MODE */\
     action(drop,   0x02)\
-    action(nip,    0x03)\
+    action(drop_second,    0x03)\
     action(swap,   0x04)\
-    action(rot,    0x05)\
-    action(dup,    0x06)\
+    action(rotate,    0x05)\
+    action(copy,    0x06)\
     action(over,   0x07)\
-    action(eq,     0x08)\
-    action(neq,    0x09)\
-    action(gt,     0x0a)\
-    action(lt,     0x0b)\
+    action(equals,     0x08)\
+    action(not_equals,    0x09)\
+    action(greater,     0x0a)\
+    action(less,     0x0b)\
     action(add,    0x0c)\
-    action(sub,    0x0d)\
-    action(mul,    0x0e)\
-    action(div,    0x0f)\
+    action(subtract,    0x0d)\
+    action(multiply,    0x0e)\
+    action(divide,    0x0f)\
     action(inc,    0x10)\
     action(not,    0x11)\
     action(and,    0x12)\
@@ -78,19 +78,19 @@ enum Vm_Screen_Action {
         panic("reached full-byte opcodes in generic switch case");\
     case vm_opcode_push:   vm_push##bi(vm, vm_load##bi(vm, vm->program_counter + 1)); add = B + 1; break;\
     case vm_opcode_drop:   discard(vm_pop##bi(vm)); break;\
-    case vm_opcode_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
+    case vm_opcode_drop_second:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
     case vm_opcode_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
-    case vm_opcode_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
-    case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
+    case vm_opcode_rotate:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
+    case vm_opcode_copy:    assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
     case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
-    case vm_opcode_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
-    case vm_opcode_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
-    case vm_opcode_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
-    case vm_opcode_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
+    case vm_opcode_equals:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
+    case vm_opcode_not_equals:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
+    case vm_opcode_greater:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
+    case vm_opcode_less:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
     case vm_opcode_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
-    case vm_opcode_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
-    case vm_opcode_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
-    case vm_opcode_div:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
+    case vm_opcode_subtract:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
+    case vm_opcode_multiply:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
+    case vm_opcode_divide:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
     case vm_opcode_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
     case vm_opcode_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
     case vm_opcode_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\

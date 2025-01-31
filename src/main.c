@@ -129,8 +129,8 @@ enum Vm_Screen_Action {
                 case 0x0: {\
                     assert(vm->current_mode.size == vm_opcode_size_byte);\
                     u16 str_addr = vm_pop16(vm);\
-                    u8 str_len = vm_load8(vm, str_addr);\
-                    String str = { .ptr = vm->memory + str_addr + 1, .len = str_len };\
+                    u8 str_count = vm_load8(vm, str_addr);\
+                    String str = { .data = vm->memory + str_addr + 1, .count = str_count };\
                     /* TODO(felix): check if this is print from SDL */ print("%", fmt(String, str));\
                 } break;\
                 default: panic("[write] invalid action #% for console device", fmt(u64, action, .base = 16));\
@@ -172,7 +172,7 @@ static const char *vm_opcode_name(u8 instruction) {
     return vm_opcode_name_table[vm_opcode_is_special(instruction) ? instruction : (instruction & 0x1f)];
 }
 
-structdef(Vm_Stack) { u8 memory[0x100], ptr; };
+structdef(Vm_Stack) { u8 memory[0x100], data; };
 enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_ret = 1 };
 enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
 structdef(Vm_Instruction_Mode) { b8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
@@ -190,10 +190,10 @@ structdef(Vm) {
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
-#define vm_sp vm->stacks[vm->active_stack].ptr
+#define vm_sp vm->stacks[vm->active_stack].data
 
-#define vm_s(ptr) vm_stack[(u8)(ptr)]
-#define vm_mem(ptr) vm->memory[(u16)(ptr)]
+#define vm_s(data) vm_stack[(u8)(data)]
+#define vm_mem(data) vm->memory[(u16)(data)]
 
 static u8   vm_get8(Vm *vm, u8 i_back) { return *(vm_stack + (u8)(vm_sp - i_back)); }
 static void vm_push8(Vm *vm, u8 byte) { vm_s(vm_sp) = byte; vm_sp += 1; }
@@ -249,13 +249,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 }
 
 static void vm_run(String rom) {
-    if (rom.len == 0) return;
+    if (rom.count == 0) return;
 
     Vm vm = {0};
-    memcpy(vm.memory, rom.ptr, rom.len);
+    memcpy(vm.memory, rom.data, rom.count);
 
     print("MEMORY ===\n");
-    for (u16 i = 0x100; i < rom.len; i += 1) {
+    for (u16 i = 0x100; i < rom.count; i += 1) {
         u8 byte = vm.memory[i];
 
         String mode_string = string("");
@@ -317,9 +317,9 @@ static void vm_run(String rom) {
     CloseWindow();
 
     print("param  stack (bot->top): { ");
-    for (u8 i = 0; i < vm.stacks[stack_param].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));
+    for (u8 i = 0; i < vm.stacks[stack_param].data; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));
     print("}\nreturn stack (bot->top): { ");
-    for (u8 i = 0; i < vm.stacks[stack_ret].ptr; i += 1) print("% ", fmt(u64, vm.stacks[stack_ret].memory[i], .base = 16));
+    for (u8 i = 0; i < vm.stacks[stack_ret].data; i += 1) print("% ", fmt(u64, vm.stacks[stack_ret].memory[i], .base = 16));
     print("}\n");
 }
 
@@ -343,9 +343,9 @@ structdef(Asm) {
 };
 
 static u16 asm_get_address_of_label(Asm *context, String name) {
-    for (u8 i = 0; i < context->label_definitions.len; i += 1) {
-        if (!string_equal(context->label_definitions.ptr[i].name, name)) continue;
-        return context->label_definitions.ptr[i].address;
+    for (u8 i = 0; i < context->label_definitions.count; i += 1) {
+        if (!string_equal(context->label_definitions.data[i].name, name)) continue;
+        return context->label_definitions.data[i].address;
     }
     err("no such label '%'", fmt(String, name));
     return 0;
@@ -359,11 +359,11 @@ structdef(Asm_Hex) {
 
 static Asm_Hex asm_parse_hex(Asm *context) {
     u16 start_index = context->input_cursor;
-    while (context->input_cursor < context->input_bytes.len && is_hex_digit[context->input_bytes.ptr[context->input_cursor]]) context->input_cursor += 1;
+    while (context->input_cursor < context->input_bytes.count && is_hex_digit[context->input_bytes.data[context->input_cursor]]) context->input_cursor += 1;
     u16 end_index = context->input_cursor;
     context->input_cursor -= 1;
     u8 digit_count = (u8)(end_index - start_index);
-    String hex_string = { .ptr = context->input_bytes.ptr + start_index, .len = digit_count };
+    String hex_string = { .data = context->input_bytes.data + start_index, .count = digit_count };
 
     switch (digit_count) {
         case 2: return (Asm_Hex){
@@ -391,7 +391,7 @@ static bool asm_is_alpha(u8 c) { return ('0' <= c && c <= '9') || ('A' <= c && c
 
 static String asm_parse_alpha(Asm *context) {
     u16 start_index = context->input_cursor;
-    u8 first_char = context->input_bytes.ptr[context->input_cursor];
+    u8 first_char = context->input_bytes.data[context->input_cursor];
     if (!asm_is_alpha(first_char)) {
         err(
             "expected alphabetic character or underscore, found byte '%'/%/#% at '%'[%]",
@@ -401,14 +401,14 @@ static String asm_parse_alpha(Asm *context) {
     }
 
     context->input_cursor += 1;
-    while (context->input_cursor < context->input_bytes.len && (asm_is_alpha(context->input_bytes.ptr[context->input_cursor]))) context->input_cursor += 1;
+    while (context->input_cursor < context->input_bytes.count && (asm_is_alpha(context->input_bytes.data[context->input_cursor]))) context->input_cursor += 1;
     u16 end_index = context->input_cursor;
     context->input_cursor -= 1;
-    return (String){ .ptr = context->input_bytes.ptr + start_index, .len = end_index - start_index };
+    return (String){ .data = context->input_bytes.data + start_index, .count = end_index - start_index };
 }
 
 static void asm_rom_write(Asm *context, u8 byte) {
-    if (context->output_bytes.len == context->output_bytes.cap) {
+    if (context->output_bytes.count == context->output_bytes.capacity) {
         err("reached maximum output_bytes size");
         abort();
     }
@@ -421,13 +421,13 @@ static void asm_rom_write2(Asm *context, u16 byte2) {
 }
 
 static void asm_resolutions_push(Asm *context, Asm_Resolution_Kind resolution_kind) {
-    if (context->resolutions.len == 0x0ff) {
+    if (context->resolutions.count == 0x0ff) {
         err("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor));
-        context->output_bytes.len = 0;
+        context->output_bytes.count = 0;
         return;
     }
-    Asm_Resolution resolution = { .index_in_output_bytes = (u16)context->output_bytes.len, .kind = resolution_kind };
-    slice_push(context->resolutions, resolution);
+    Asm_Resolution resolution = { .index_in_output_bytes = (u16)context->output_bytes.count, .kind = resolution_kind };
+    array_push_assume_capacity(&context->resolutions, &resolution);
 }
 
 static void asm_compile_instruction(Asm *context, Vm_Instruction_Mode mode, u8 opcode) {
@@ -444,36 +444,36 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
     Asm context = {
         .input_relative_path = _path_biciasm,
         .input_bytes = file_read_bytes_relative_path(arena, _path_biciasm, max_asm_filesize),
-        .label_definitions = { .ptr = label_definitions_memory, .cap = 0x100 },
-        .label_usages = { .ptr = label_usages_memory, .cap = 0x100 },
-        .resolutions = { .ptr = resolutions_memory, .cap = 0x100 },
-        .output_bytes = { .ptr = rom_memory, .len = 0x100, .cap = 0x10000 },
+        .label_definitions = { .data = label_definitions_memory, .capacity = 0x100 },
+        .label_usages = { .data = label_usages_memory, .capacity = 0x100 },
+        .resolutions = { .data = resolutions_memory, .capacity = 0x100 },
+        .output_bytes = { .data = rom_memory, .count = 0x100, .capacity = 0x10000 },
     };
-    if (context.input_bytes.len == 0) return (String){0};
+    if (context.input_bytes.count == 0) return (String){0};
 
     u16 cursor_step = 1;
-    for (context.input_cursor = 0; context.input_cursor < context.input_bytes.len; context.input_cursor += cursor_step) {
+    for (context.input_cursor = 0; context.input_cursor < context.input_bytes.count; context.input_cursor += cursor_step) {
         cursor_step = 1;
-        if (asm_is_whitespace(context.input_bytes.ptr[context.input_cursor])) continue;
+        if (asm_is_whitespace(context.input_bytes.data[context.input_cursor])) continue;
 
         Vm_Instruction_Mode mode = {0};
 
-        switch (context.input_bytes.ptr[context.input_cursor]) {
-            case '/': if (context.input_cursor + 1 < context.input_bytes.len && context.input_bytes.ptr[context.input_cursor + 1] == '/') {
-                for (context.input_cursor += 2; context.input_cursor < context.input_bytes.len && context.input_bytes.ptr[context.input_cursor] != '\n';) context.input_cursor += 1;
+        switch (context.input_bytes.data[context.input_cursor]) {
+            case '/': if (context.input_cursor + 1 < context.input_bytes.count && context.input_bytes.data[context.input_cursor + 1] == '/') {
+                for (context.input_cursor += 2; context.input_cursor < context.input_bytes.count && context.input_bytes.data[context.input_cursor] != '\n';) context.input_cursor += 1;
             } continue;
             case '|': {
                 context.input_cursor += 1;
                 Asm_Hex new_program_counter = asm_parse_hex(&context);
                 if (!new_program_counter.ok) return (String){0};
-                context.output_bytes.len = new_program_counter.result.int16;
+                context.output_bytes.count = new_program_counter.result.int16;
             } continue;
             case '@': {
                 context.input_cursor += 1;
                 String label_name = asm_parse_alpha(&context);
-                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.len, .size = vm_opcode_size_short };
-                slice_push(context.label_usages, label);
-                context.output_bytes.len += 2;
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_short };
+                array_push_assume_capacity(&context.label_usages, &label);
+                context.output_bytes.count += 2;
             } continue;
             case '#': {
                 context.input_cursor += 1;
@@ -489,57 +489,57 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
                 asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_byte }, vm_opcode_push);
                 context.input_cursor += 1;
                 String label_name = asm_parse_alpha(&context);
-                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.len, .size = vm_opcode_size_byte };
-                slice_push(context.label_usages, label);
-                context.output_bytes.len += 1;
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_byte };
+                array_push_assume_capacity(&context.label_usages, &label);
+                context.output_bytes.count += 1;
             } continue;
             case '&': {
                 asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_short }, vm_opcode_push);
                 context.input_cursor += 1;
                 String label_name = asm_parse_alpha(&context);
-                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.len, .size = vm_opcode_size_short };
-                slice_push(context.label_usages, label);
-                context.output_bytes.len += 2;
+                Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_short };
+                array_push_assume_capacity(&context.label_usages, &label);
+                context.output_bytes.count += 2;
             } continue;
             case ':': {
                 context.input_cursor += 1;
                 String label_name = asm_parse_alpha(&context);
-                if (context.label_definitions.len == context.label_definitions.cap) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
-                Asm_Label_Definition label = { .name = label_name, .address = (u16)context.output_bytes.len };
-                slice_push(context.label_definitions, label);
+                if (context.label_definitions.count == context.label_definitions.capacity) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
+                Asm_Label_Definition label = { .name = label_name, .address = (u16)context.output_bytes.count };
+                array_push_assume_capacity(&context.label_definitions, &label);
             } continue;
             case '{': {
                 context.input_cursor += 1;
-                switch (context.input_bytes.ptr[context.input_cursor]) {
+                switch (context.input_bytes.data[context.input_cursor]) {
                     case '#': {
                         asm_resolutions_push(&context, resolve_byte_count);
-                        context.output_bytes.len += 1;
+                        context.output_bytes.count += 1;
                     } continue;
                     default: {
                         asm_resolutions_push(&context, resolve_address);
-                        context.output_bytes.len += 2;
+                        context.output_bytes.count += 2;
                         cursor_step = 0;
                     } continue;
                 }
             } continue;
             case '}': {
-                if (context.resolutions.len == 0) {
+                if (context.resolutions.count == 0) {
                     err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor));
-                    context.output_bytes.len = 0;
+                    context.output_bytes.count = 0;
                     break;
                 }
 
                 Asm_Resolution resolution = slice_pop(context.resolutions);
                 switch (resolution.kind) {
                     case resolve_byte_count: {
-                        u8 byte_count = (u8)(context.output_bytes.len - 1 - resolution.index_in_output_bytes);
-                        context.output_bytes.ptr[resolution.index_in_output_bytes] = byte_count;
+                        u8 byte_count = (u8)(context.output_bytes.count - 1 - resolution.index_in_output_bytes);
+                        context.output_bytes.data[resolution.index_in_output_bytes] = byte_count;
                     } break;
                     case resolve_address: {
-                        u16 current_address = (u16)context.output_bytes.len;
-                        context.output_bytes.len = resolution.index_in_output_bytes;
+                        u16 current_address = (u16)context.output_bytes.count;
+                        context.output_bytes.count = resolution.index_in_output_bytes;
                         asm_rom_write2(&context, current_address);
-                        context.output_bytes.len = current_address;
+                        context.output_bytes.count = current_address;
                     } break;
                     default: unreachable;
                 }
@@ -558,15 +558,15 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
             } continue;
             case '"': {
                 context.input_cursor += 1;
-                for (; context.input_cursor < context.input_bytes.len && !asm_is_whitespace(context.input_bytes.ptr[context.input_cursor]); context.input_cursor += 1) {
-                    asm_rom_write(&context, context.input_bytes.ptr[context.input_cursor]);
+                for (; context.input_cursor < context.input_bytes.count && !asm_is_whitespace(context.input_bytes.data[context.input_cursor]); context.input_cursor += 1) {
+                    asm_rom_write(&context, context.input_bytes.data[context.input_cursor]);
                 }
                 cursor_step = 0;
             } continue;
             default: break;
         }
 
-        u8 first_char = context.input_bytes.ptr[context.input_cursor];
+        u8 first_char = context.input_bytes.data[context.input_cursor];
         if (!asm_is_alpha(first_char)) {
             err("invalid byte '%'/%/#% at '%'[%]",
                 fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor)
@@ -575,12 +575,12 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
         }
 
         usize start_index = context.input_cursor, end_index = start_index;
-        for (; context.input_cursor < context.input_bytes.len && !asm_is_whitespace(context.input_bytes.ptr[context.input_cursor]); context.input_cursor += 1) {
-            u8 c = context.input_bytes.ptr[context.input_cursor];
+        for (; context.input_cursor < context.input_bytes.count && !asm_is_whitespace(context.input_bytes.data[context.input_cursor]); context.input_cursor += 1) {
+            u8 c = context.input_bytes.data[context.input_cursor];
             if ('a' <= c && c <= 'z') continue;
             end_index = context.input_cursor;
-            if (c == ';') for (context.input_cursor += 1; context.input_cursor < context.input_bytes.len;) {
-                c = context.input_bytes.ptr[context.input_cursor];
+            if (c == ';') for (context.input_cursor += 1; context.input_cursor < context.input_bytes.count;) {
+                c = context.input_bytes.data[context.input_cursor];
                 if (asm_is_whitespace(c)) goto done;
                 switch (c) {
                     case 'k': mode.keep = true; break;
@@ -611,13 +611,13 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
 
         continue;
     }
-    if (context.output_bytes.len == 0) return (String){0};
-    String output_bytes = bit_cast(String) context.output_bytes.slice;
+    if (context.output_bytes.count == 0) return (String){0};
+    String output_bytes = bit_cast(String) context.output_bytes;
 
-    for (u8 i = 0; i < context.label_usages.len; i += 1) {
-        Asm_Label_Usage ref = context.label_usages.ptr[i];
-        if (ref.name.len == 0) return (String){0};
-        context.output_bytes.len = ref.index_in_input_bytes;
+    for (u8 i = 0; i < context.label_usages.count; i += 1) {
+        Asm_Label_Usage ref = context.label_usages.data[i];
+        if (ref.name.count == 0) return (String){0};
+        context.output_bytes.count = ref.index_in_input_bytes;
         switch (ref.size) {
             case vm_opcode_size_byte: asm_rom_write(&context, (u8)asm_get_address_of_label(&context, ref.name)); break;
             case vm_opcode_size_short: asm_rom_write2(&context, asm_get_address_of_label(&context, ref.name)); break;
@@ -626,7 +626,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
     }
 
     print("ASM ===\n");
-    for (usize i = 0x100; i < output_bytes.len; i += 1) print("% ", fmt(u64, output_bytes.ptr[i], .base = 16));
+    for (usize i = 0x100; i < output_bytes.count; i += 1) print("% ", fmt(u64, output_bytes.data[i], .base = 16));
     putchar('\n');
 
     return output_bytes;

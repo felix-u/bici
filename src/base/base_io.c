@@ -13,7 +13,7 @@ static String file_read_bytes_relative_path(Arena *arena, char *path, usize max_
         return (String){0};
     }
 
-    Array_u8 bytes = {0};
+    Array_u8 bytes = { .arena = arena };
 
     usize file_size = 0;
     if (!GetFileSizeEx(file, (PLARGE_INTEGER)&file_size)) {
@@ -26,25 +26,37 @@ static String file_read_bytes_relative_path(Arena *arena, char *path, usize max_
         goto end;
     }
 
-    arena_alloc_array(arena, &bytes, file_size);
+    array_ensure_capacity(&bytes, file_size);
 
     u32 num_bytes_read = 0;
-    if (!ReadFile(file, bytes.ptr, (u32)file_size, (LPDWORD)&num_bytes_read, 0)) {
+    if (!ReadFile(file, bytes.data, (u32)file_size, (LPDWORD)&num_bytes_read, 0)) {
         err("unable to read bytes of file '%' after opening", fmt(cstring, path));
         goto end;
     }
     assert(file_size == num_bytes_read);
-    bytes.len = file_size;
+    bytes.count = file_size;
 
     end:
     CloseHandle(file);
-    return bit_cast(String) bytes.slice;
+    return bit_cast(String) bytes;
 }
 
-static void file_write_bytes_to_relative_path(char *path, String bytes) {
-    discard(path);
-    discard(bytes);
-    panic("TODO");
+static bool file_write_bytes_to_relative_path(char *path, String bytes) {
+    usize dword_max = UINT32_MAX;
+    assert(bytes.count <= dword_max);
+
+    // NOTE(felix): not sure about this. See https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
+    DWORD share_mode = 0;
+    HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, share_mode, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        err("unable to open file '%'", fmt(cstring, path));
+        return false;
+    }
+
+    bool ok = WriteFile(file_handle, bytes.data, (DWORD)bytes.count, 0, 0);
+
+    CloseHandle(file_handle);
+    return ok;
 }
 
 static void log_internal_with_location(char *file, usize line, char *func, char *format, ...) {
@@ -77,18 +89,18 @@ static void print_var_args(char *format, va_list args) {
     String_Builder output = { .arena = &arena };
     string_builder_printf_var_args(&output, format, args);
 
-    String str = output.string;
+    String str = bit_cast(String) output;
 
     #if OS_WINDOWS
-        OutputDebugStringA((char *)str.ptr);
+        OutputDebugStringA((char *)str.data);
 
         // TODO(felix): stderr support
         HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
         assert(console_handle != INVALID_HANDLE_VALUE);
 
         u32 num_chars_written = 0;
-        assert(str.len <= UINT32_MAX);
-        assert(WriteConsole(console_handle, str.ptr, (u32)str.len, (LPDWORD)&num_chars_written, 0));
+        assert(str.count <= UINT32_MAX);
+        assert(WriteConsole(console_handle, str.data, (u32)str.count, (LPDWORD)&num_chars_written, 0));
         discard(num_chars_written);
     #else
         #error "unimplemented"

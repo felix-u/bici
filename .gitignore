@@ -1,4 +1,1 @@
 build/
-*.bak
-zig-out/
-.zig-cache/

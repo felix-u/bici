@@ -6,7 +6,7 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script test.biciasm"
+  arguments: "script draw.biciasm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////

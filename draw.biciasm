@@ -5,12 +5,6 @@
 
 |0100
 
-// :init
-//     &hello_world *console_print write
-//     break
-
-// :hello_world {# "Hello, _20 "World! _0a }
-
 :update break :quit break
 
 :init

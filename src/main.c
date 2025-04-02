@@ -250,26 +250,32 @@ static void vm_run(String rom) {
     Vm vm = {0};
     memcpy(vm.memory, rom.data, rom.count);
 
-    print("MEMORY ===\n");
-    for (u16 i = 0x100; i < rom.count; i += 1) {
-        u8 byte = vm.memory[i];
-
-        String mode_string = string("");
-        if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
-            case 0x1: mode_string = string("2"); break;
-            case 0x2: mode_string = string("r"); break;
-            case 0x3: mode_string = string("r2"); break;
-            case 0x4: mode_string = string("k"); break;
-            case 0x5: mode_string = string("k2"); break;
-            case 0x6: mode_string = string("kr"); break;
-            case 0x7: mode_string = string("kr2"); break;
-        }
-
-        print("[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string));
-    }
-    print("\nRUN ===\n");
-
     Arena persistent_arena = arena_init(8 * 1024 * 1024);
+    Arena_Temp temp = arena_temp_begin(&persistent_arena);
+    String_Builder builder = { .arena = &persistent_arena };
+    {
+        string_builder_print(&builder, "MEMORY ===\n");
+        for (u16 i = 0x100; i < rom.count; i += 1) {
+            u8 byte = vm.memory[i];
+
+            String mode_string = string("");
+            if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
+                case 0x1: mode_string = string("2"); break;
+                case 0x2: mode_string = string("r"); break;
+                case 0x3: mode_string = string("r2"); break;
+                case 0x4: mode_string = string("k"); break;
+                case 0x5: mode_string = string("k2"); break;
+                case 0x6: mode_string = string("kr"); break;
+                case 0x7: mode_string = string("kr2"); break;
+            }
+
+            string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string));
+        }
+        string_builder_print(&builder, "\nRUN ===\n");
+    }
+    os_write(bit_cast(String) builder);
+    arena_temp_end(temp);
+
     Gfx_Render_Context *gfx = &vm.gfx;
     *gfx = gfx_window_create(&persistent_arena, "bici", vm_screen_width, vm_screen_height);
     gfx->font = gfx_font_default_3x5;

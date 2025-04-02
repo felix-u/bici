@@ -7,8 +7,8 @@ static void array_ensure_capacity_explicit_item_size(Array_void *array, usize it
     usize new_capacity = clamp_low(1, array->capacity * 2);
     while (new_capacity < item_count) new_capacity *= 2;
 
-    u8 *new_memory = arena_make(array->arena, item_count, item_size);
-    memcpy(new_memory, array->data, array->count * item_size);
+    u8 *new_memory = arena_make(array->arena, new_capacity, item_size);
+    if (array->count > 0) memcpy(new_memory, array->data, array->count * item_size);
 
     if (!non_zero) {
         usize old_capacity = array->capacity;

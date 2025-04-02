@@ -8,7 +8,7 @@
 #elif defined(__linux__) || defined(__gnu_linux__)
     #define OS_LINUX 1
 #elif defined(__APPLE__) && defined(__MACH__)
-    #define OS_MACOS
+    #define OS_MACOS 1
 #elif defined(_WIN32)
     #define OS_WINDOWS 1
 #else
@@ -35,9 +35,6 @@
     #define COMPILER_GCC 1
 #elif defined(_MSC_VER)
     #define COMPILER_MSVC 1
-    #if !OS_WINDOWS
-        #error not sure how we got here, but MSVC on a non-Windows OS is unsupported
-    #endif
 #else
     #define COMPILER_STANDARD 1
 #endif // COMPILER_...

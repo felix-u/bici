@@ -175,7 +175,7 @@ static const char *vm_opcode_name(u8 instruction) {
 structdef(Vm_Stack) { u8 memory[0x100], data; };
 enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_ret = 1 };
 enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
-structdef(Vm_Instruction_Mode) { b8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
+structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
 
 structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
 
@@ -347,7 +347,7 @@ static u16 asm_get_address_of_label(Asm *context, String name) {
         if (!string_equal(context->label_definitions.data[i].name, name)) continue;
         return context->label_definitions.data[i].address;
     }
-    err("no such label '%'", fmt(String, name));
+    log_error("no such label '%'", fmt(String, name));
     return 0;
 }
 
@@ -377,7 +377,7 @@ static Asm_Hex asm_parse_hex(Asm *context) {
             .result.int16 = (u16)int_from_hex_string(hex_string),
         };
         default: {
-            err("expected 2 digits (byte) or 4 digits (short), found % digits in number at '%'[%..%]",
+            log_error("expected 2 digits (byte) or 4 digits (short), found % digits in number at '%'[%..%]",
                 fmt(u64, digit_count), fmt(cstring, context->input_relative_path), fmt(u64, start_index), fmt(u64, end_index)
             );
             return (Asm_Hex){0};
@@ -393,7 +393,7 @@ static String asm_parse_alpha(Asm *context) {
     u16 start_index = context->input_cursor;
     u8 first_char = context->input_bytes.data[context->input_cursor];
     if (!asm_is_alpha(first_char)) {
-        err(
+        log_error(
             "expected alphabetic character or underscore, found byte '%'/%/#% at '%'[%]",
             fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor)
         );
@@ -409,7 +409,7 @@ static String asm_parse_alpha(Asm *context) {
 
 static void asm_rom_write(Asm *context, u8 byte) {
     if (context->output_bytes.count == context->output_bytes.capacity) {
-        err("reached maximum output_bytes size");
+        log_error("reached maximum output_bytes size");
         abort();
     }
     array_push_assume_capacity(&context->output_bytes, &byte);
@@ -422,7 +422,7 @@ static void asm_rom_write2(Asm *context, u16 byte2) {
 
 static void asm_resolutions_push(Asm *context, Asm_Resolution_Kind resolution_kind) {
     if (context->resolutions.count == 0x0ff) {
-        err("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor));
+        log_error("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor));
         context->output_bytes.count = 0;
         return;
     }
@@ -524,12 +524,12 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
             } continue;
             case '}': {
                 if (context.resolutions.count == 0) {
-                    err("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor));
+                    log_error("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor));
                     context.output_bytes.count = 0;
                     break;
                 }
 
-                Asm_Resolution resolution = slice_pop(context.resolutions);
+                Asm_Resolution resolution = slice_pop_assume_not_empty(context.resolutions);
                 switch (resolution.kind) {
                     case resolve_byte_count: {
                         u8 byte_count = (u8)(context.output_bytes.count - 1 - resolution.index_in_output_bytes);
@@ -568,7 +568,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
 
         u8 first_char = context.input_bytes.data[context.input_cursor];
         if (!asm_is_alpha(first_char)) {
-            err("invalid byte '%'/%/#% at '%'[%]",
+            log_error("invalid byte '%'/%/#% at '%'[%]",
                 fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor)
             );
             return (String){0};
@@ -587,7 +587,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
                     case 'r': mode.stack = stack_ret; break;
                     case '2': mode.size = vm_opcode_size_short; break;
                     default: {
-                        err("expected one of ['k', 'r', '2'], found byte '%'/%/#% at '%'[%]",
+                        log_error("expected one of ['k', 'r', '2'], found byte '%'/%/#% at '%'[%]",
                             fmt(char, c), fmt(u64, c), fmt(u64, c, .base = 16), fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor)
                         );
                         return (String){0};
@@ -605,7 +605,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
             else if (string_equal(lexeme, string(#name))) asm_compile_instruction(&context, mode, val);
         vm_for_opcode(compile_if_string_is_opcode)
         else {
-            err("invalid token '%' at '%'[%..%]", fmt(String, lexeme), fmt(cstring, context.input_relative_path), fmt(u64, start_index), fmt(u64, end_index));
+            log_error("invalid token '%' at '%'[%..%]", fmt(String, lexeme), fmt(cstring, context.input_relative_path), fmt(u64, start_index), fmt(u64, end_index));
             return (String){0};
         };
 
@@ -627,7 +627,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
 
     print("ASM ===\n");
     for (usize i = 0x100; i < output_bytes.count; i += 1) print("% ", fmt(u64, output_bytes.data[i], .base = 16));
-    putchar('\n');
+    print("\n");
 
     return output_bytes;
 }
@@ -636,7 +636,7 @@ static String asm_compile(Arena *arena, usize max_asm_filesize, char *_path_bici
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        err("%", fmt(cstring, usage));
+        log_error("%", fmt(cstring, usage));
         return 1;
     }
 
@@ -645,7 +645,7 @@ int main(int argc, char **argv) {
     String command = string_from_cstring(argv[1]);
     if (string_equal(command, string("com"))) {
         if (argc != 4) {
-            err("usage: bici com <file.biciasm> <file.bici>");
+            log_error("usage: bici com <file.biciasm> <file.bici>");
             return 1;
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
@@ -657,14 +657,14 @@ int main(int argc, char **argv) {
         vm_run(file_read_bytes_relative_path(&arena, argv[2], 0x10000));
     } else if (string_equal(command, string("script"))) {
         if (argc != 3) {
-            err("usage: bici script <file.biciasm>");
+            log_error("usage: bici script <file.biciasm>");
             return 1;
         }
         usize max_asm_filesize = 8 * 1024 * 1024;
         arena = arena_init(max_asm_filesize);
         vm_run(asm_compile(&arena, max_asm_filesize, argv[2]));
     } else {
-        err("no such command '%'\n%", fmt(String, command), fmt(cstring, usage));
+        log_error("no such command '%'\n%", fmt(String, command), fmt(cstring, usage));
         return 1;
     }
 

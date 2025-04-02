@@ -22,30 +22,30 @@ static u32 screen_palette[screen_colour_count] = {
     action(break,  0x00)/* NO MODE */\
     action(push,   0x01)/* NO k MODE */\
     action(drop,   0x02)\
-    action(drop_second,    0x03)\
+    action(nip,    0x03)\
     action(swap,   0x04)\
-    action(rotate,    0x05)\
-    action(copy,    0x06)\
+    action(rot,    0x05)\
+    action(dup,    0x06)\
     action(over,   0x07)\
-    action(equals,     0x08)\
-    action(not_equals,    0x09)\
-    action(greater,     0x0a)\
-    action(less,     0x0b)\
+    action(eq,     0x08)\
+    action(neq,    0x09)\
+    action(gt,     0x0a)\
+    action(lt,     0x0b)\
     action(add,    0x0c)\
-    action(subtract,    0x0d)\
-    action(multiply,    0x0e)\
-    action(divide,    0x0f)\
-    action(increment,    0x10)\
+    action(sub,    0x0d)\
+    action(mul,    0x0e)\
+    action(div,    0x0f)\
+    action(inc,    0x10)\
     action(not,    0x11)\
     action(and,    0x12)\
     action(or,     0x13)\
     action(xor,    0x14)\
     action(shift,  0x15)\
-    action(jump,    0x16)\
-    action(jump_if_equals,    0x17)\
-    action(jump_stash,    0x18)\
-    action(jump_if_not_equals,    0x19)\
-    action(jni,    0x1a)/* TODO(felix): why can't I rename this? */\
+    action(jmp,    0x16)\
+    action(jme,    0x17)\
+    action(jst,    0x18)\
+    action(jne,    0x19)\
+    action(jni,    0x1a)\
     action(stash,  0x1b)\
     action(load,   0x1c)\
     action(store,  0x1d)\
@@ -75,28 +75,28 @@ enum Vm_Screen_Action {
         panic("reached full-byte opcodes in generic switch case");\
     case vm_opcode_push:   vm_push##bi(vm, vm_load##bi(vm, vm->program_counter + 1)); add = B + 1; break;\
     case vm_opcode_drop:   discard(vm_pop##bi(vm)); break;\
-    case vm_opcode_drop_second:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
+    case vm_opcode_nip:    { u##bi c = vm_pop##bi(vm); vm_pop##bi(vm); u##bi a = vm_pop##bi(vm); vm_push##bi(vm, a); vm_push##bi(vm, c); } break;\
     case vm_opcode_swap:   { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm); vm_push##bi(vm, c); vm_push##bi(vm, b); } break;\
-    case vm_opcode_rotate:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
-    case vm_opcode_copy:    assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
+    case vm_opcode_rot:    { u##bi c = vm_pop##bi(vm), b = vm_pop##bi(vm), a = vm_pop##bi(vm); vm_push##bi(vm, b); vm_push##bi(vm, c); vm_push##bi(vm, a); } break;\
+    case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 1)); break;\
     case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push##bi(vm, vm_get##bi(vm, 2)); break;\
-    case vm_opcode_equals:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
-    case vm_opcode_not_equals:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
-    case vm_opcode_greater:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
-    case vm_opcode_less:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
+    case vm_opcode_eq:     vm_push8(vm, vm_pop##bi(vm) == vm_pop##bi(vm)); break;\
+    case vm_opcode_neq:    vm_push8(vm, vm_pop##bi(vm) != vm_pop##bi(vm)); break;\
+    case vm_opcode_gt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left > right); } break;\
+    case vm_opcode_lt:     { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push8(vm, left < right); } break;\
     case vm_opcode_add:    vm_push##bi(vm, vm_pop##bi(vm) + vm_pop##bi(vm)); break;\
-    case vm_opcode_subtract:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
-    case vm_opcode_multiply:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
-    case vm_opcode_divide:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
-    case vm_opcode_increment:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
+    case vm_opcode_sub:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, left - right); } break;\
+    case vm_opcode_mul:    vm_push##bi(vm, vm_pop##bi(vm) * vm_pop##bi(vm)); break;\
+    case vm_opcode_div:    { u##bi right = vm_pop##bi(vm), left = vm_pop##bi(vm); vm_push##bi(vm, right == 0 ? 0 : (left / right)); } break;\
+    case vm_opcode_inc:    vm_push##bi(vm, vm_pop##bi(vm) + 1); break;\
     case vm_opcode_not:    vm_push##bi(vm, ~vm_pop##bi(vm)); break;\
     case vm_opcode_and:    vm_push##bi(vm, vm_pop##bi(vm) & vm_pop##bi(vm)); break;\
     case vm_opcode_or:     vm_push##bi(vm, vm_pop##bi(vm) | vm_pop##bi(vm)); break;\
     case vm_opcode_xor:    vm_push##bi(vm, vm_pop##bi(vm) ^ vm_pop##bi(vm)); break;\
     case vm_opcode_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push##bi(vm, (u##bi)(vm_pop##bi(vm) << l >> r)); } break;\
-    case vm_opcode_jump:    vm->program_counter = vm_pop16(vm); add = 0; break;\
-    case vm_opcode_jump_if_equals:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
-    case vm_opcode_jump_stash:    {\
+    case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;\
+    case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
+    case vm_opcode_jst:    {\
         vm->active_stack = stack_ret;\
         vm_push16(vm, vm->program_counter + 1);\
         vm->active_stack = stack_param;\
@@ -269,7 +269,9 @@ static void vm_run(String rom) {
                 case 0x7: mode_string = string("kr2"); break;
             }
 
-            string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n", fmt(u64, i, .base = 16), fmt(char, byte), fmt(u64, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string));
+            string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
+                fmt(u16, i, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
+            );
         }
         string_builder_print(&builder, "\nRUN ===\n");
     }

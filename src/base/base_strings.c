@@ -154,14 +154,19 @@ static void string_builder_push_format(String_Builder *builder, Format format) {
                 break;
             }
 
-            // UINT64_MAX = 18,446,744,073,709,551,615
-            // has 20 digits
             u8 buf_mem[sizeof(usize) * 8];
             usize buf_index = sizeof(buf_mem);
 
-            for (; value > 0; value /= 10) {
+            u8 base = format.base == 0 ? 10 : format.base;
+            assert(base <= 16);
+
+            // TODO(felix): support capitalised
+            char *character_from_digit = "0123456789abcdef";
+
+            for (; value > 0; value /= base) {
                 buf_index -= 1;
-                buf_mem[buf_index] = (u8)((value % 10) + '0');
+                u8 digit = (u8)(value % base);
+                buf_mem[buf_index] = character_from_digit[digit];
             }
 
             String decimal = { .data = buf_mem + buf_index, .count = sizeof(buf_mem) - buf_index };

@@ -14,18 +14,18 @@
 :update break :quit break
 
 :init
-    #0000 :while copy;2 &EOF less;2 jni {
-        copy;2 jsi @load_coords_at_addr
+    #0000 :while dup;2 &EOF lt;2 jni {
+        dup;2 jsi @load_coords_at_addr
         #06 *pixel write
     #0002 add;2 jmi @while } drop;2
     break
 
-:cast_16_from_8 #00 swap jump;r
+:cast_16_from_8 #00 swap jmp;r
 
 :load_coords_at_addr
-    copy;2 load #02 divide jsi @cast_16_from_8
-    swap;2 increment;2 load #02 divide jsi @cast_16_from_8
-    jump;r
+    dup;2 load #02 div jsi @cast_16_from_8
+    swap;2 inc;2 load #02 div jsi @cast_16_from_8
+    jmp;r
 
 :smiley
     _0606 _1206

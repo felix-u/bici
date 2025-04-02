@@ -238,10 +238,10 @@ static void array_push_slice_explicit_item_size_assume_capacity(Array_void *arra
 #define bit_cast(type) *(type *)&
 
 // TODO(felix): figure out how to solve min() and max() conflicting with windows headers, even when BASE_GRAPHICS is 1
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define clamp_low max
-#define clamp_high min
+#define min__(a, b) ((a) < (b) ? (a) : (b))
+#define max__(a, b) ((a) > (b) ? (a) : (b))
+#define clamp_low max__
+#define clamp_high min__
 #define clamp(value, low, high) clamp_high(clamp_low(value, low), high)
 
 #define swap(type, a, b) statement_macro( \

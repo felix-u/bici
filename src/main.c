@@ -1,7 +1,4 @@
-#define BASE_GRAPHICS 0
 #include "base/base.c"
-
-#include "raylib.h"
 
 enumdef(Screen_Colour, u8) {
     screen_c0a = 0, screen_c0b = 1,
@@ -141,7 +138,7 @@ enum Vm_Screen_Action {
                     if (colour >= screen_colour_count) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, screen_colour_count));\
                     u16 y = vm_pop16(vm), x = vm_pop16(vm);\
                     if (x >= vm_screen_width || y >= vm_screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_width, .base = 16), fmt(u64, vm_screen_height, .base = 16));\
-                    vm->screen_pixels[y * vm_screen_width + x] = screen_palette[colour];\
+                    gfx_set_pixel(&vm->gfx.texture, x, y, screen_palette[colour]);\
                 } break;\
                 default: panic("[write] invalid action #% for screen device", fmt(u64, action, .base = 16));\
             } break;\
@@ -185,8 +182,7 @@ structdef(Vm) {
     Vm_Stack_Id active_stack;
     u16 program_counter;
     Vm_Instruction_Mode current_mode;
-    Texture screen_texture;
-    u32 screen_pixels[vm_screen_width * vm_screen_height];
+    Gfx_Render_Context gfx;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -273,48 +269,28 @@ static void vm_run(String rom) {
     }
     print("\nRUN ===\n");
 
-    SetTraceLogLevel(LOG_WARNING);
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI);
+    Arena persistent_arena = arena_init(8 * 1024 * 1024);
+    Gfx_Render_Context *gfx = &vm.gfx;
+    *gfx = gfx_window_create(&persistent_arena, "bici", 320, 180);
+    gfx->font = gfx_font_default_3x5;
 
-    InitWindow(vm_screen_width, vm_screen_height, "bici");
-    SetTargetFPS(GetMonitorRefreshRate(GetCurrentMonitor()));
-    MaximizeWindow();
-
-    Image screen_image = {
-        .data = vm.screen_pixels,
-        .width = vm_screen_width,
-        .height = vm_screen_height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1,
-    };
-
-    vm.screen_texture = LoadTextureFromImage(screen_image);
-
+    // TODO(felix): program should control this
+    gfx_clear(&gfx->texture, 0x000000ff);
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
 
-    while (!WindowShouldClose()) {
-        vm_run_to_break(&vm, vm_on_screen_update_pc);
-        UpdateTexture(vm.screen_texture, vm.screen_pixels);
-
-        BeginDrawing();
-        ClearBackground((Color){ .a = 255 });
+    while (!gfx_window_should_close(gfx)) {
+        gfx_render_begin(gfx);
         {
-            Rectangle texture_area = { .width = vm_screen_width, .height = vm_screen_height };
-            Rectangle window_area = { .width = (f32)GetScreenWidth(), .height = (f32)GetScreenHeight() };
-            Color draw_mask = { 255, 255, 255, 255 };
-            DrawTexturePro(vm.screen_texture, texture_area, window_area, (Vector2){0}, 0, draw_mask);
+            vm_run_to_break(&vm, vm_on_screen_update_pc);
         }
-        EndDrawing();
+        gfx_render_end(gfx);
     }
 
     u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | vm_screen_quit);
     vm_run_to_break(&vm, vm_on_screen_quit_pc);
-
-    UnloadTexture(vm.screen_texture);
-    CloseWindow();
 
     print("param  stack (bot->top): { ");
     for (u8 i = 0; i < vm.stacks[stack_param].data; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));

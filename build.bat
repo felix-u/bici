@@ -9,8 +9,8 @@ if not "%release%"=="1"                    set debug=1
 
 set cl_common=cl -nologo -FC -diagnostics:column -std:c11 -MT %include_paths%
 set clang_common=clang -pedantic -Wno-microsoft -std=c11 -MT %include_paths%
-set cl_link=-link -incremental:no user32.lib d3d11.lib dxguid.lib dxgi.lib d3dcompiler.lib
-set clang_link=-Wl,-nodefaultlib:libcmt -l%dir_raylib%/lib/raylib -lgdi32 -lwinmm -luser32 -lshell32
+set cl_link=-link -incremental:no user32.lib gdi32.lib
+set clang_link=-luser32 -lgdi32
 set cl_debug=%cl_common% -W4 -WX -Z7 -DBUILD_DEBUG=1
 set clang_debug=%clang_common% ^
     -Wall -Werror -Wextra -Wshadow -Wconversion -Wdouble-promotion ^

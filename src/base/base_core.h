@@ -30,11 +30,11 @@
 #elif OS_WINDOWS
     #define WIN32_LEAN_AND_MEAN
     #define VC_EXTRALEAN
+    #define abort() ExitProcess(1) // TODO(felix): remove this
     #if !BASE_GRAPHICS
         #define NOGDI
         #define NOUSER
         #define NOMINMAX
-        #define abort() ExitProcess(1) // TODO(felix): remove this
         // #undef near
         // #undef far // TODO(felix): figure out what to do with this - needed by combaseapi.h
     #endif
@@ -238,10 +238,10 @@ static void array_push_slice_explicit_item_size_assume_capacity(Array_void *arra
 #define bit_cast(type) *(type *)&
 
 // TODO(felix): figure out how to solve min() and max() conflicting with windows headers, even when BASE_GRAPHICS is 1
-#define min__(a, b) ((a) < (b) ? (a) : (b))
-#define max__(a, b) ((a) > (b) ? (a) : (b))
-#define clamp_low max__
-#define clamp_high min__
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define clamp_low max
+#define clamp_high min
 #define clamp(value, low, high) clamp_high(clamp_low(value, low), high)
 
 #define swap(type, a, b) statement_macro( \

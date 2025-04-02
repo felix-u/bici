@@ -138,7 +138,7 @@ enum Vm_Screen_Action {
                     if (colour >= screen_colour_count) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, screen_colour_count));\
                     u16 y = vm_pop16(vm), x = vm_pop16(vm);\
                     if (x >= vm_screen_width || y >= vm_screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_width, .base = 16), fmt(u64, vm_screen_height, .base = 16));\
-                    gfx_set_pixel(&vm->gfx.texture, x, y, screen_palette[colour]);\
+                    gfx_set_pixel(&vm->gfx, x, y, screen_palette[colour]);\
                 } break;\
                 default: panic("[write] invalid action #% for screen device", fmt(u64, action, .base = 16));\
             } break;\
@@ -271,22 +271,21 @@ static void vm_run(String rom) {
 
     Arena persistent_arena = arena_init(8 * 1024 * 1024);
     Gfx_Render_Context *gfx = &vm.gfx;
-    *gfx = gfx_window_create(&persistent_arena, "bici", 320, 180);
+    *gfx = gfx_window_create(&persistent_arena, "bici", vm_screen_width, vm_screen_height);
     gfx->font = gfx_font_default_3x5;
 
     // TODO(felix): program should control this
-    gfx_clear(&gfx->texture, 0x000000ff);
+    gfx_clear(gfx, 0);
     u16 vm_on_screen_init_pc = vm_load16(&vm, vm_device_screen);
     vm_run_to_break(&vm, vm_on_screen_init_pc);
 
     u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
 
+    u32 x = 0;
     while (!gfx_window_should_close(gfx)) {
-        gfx_render_begin(gfx);
-        {
-            vm_run_to_break(&vm, vm_on_screen_update_pc);
-        }
-        gfx_render_end(gfx);
+        vm_run_to_break(&vm, vm_on_screen_update_pc);
+        x += 1;
+        x %= vm_screen_width;
     }
 
     u16 vm_on_screen_quit_pc = vm_load16(&vm, vm_device_screen | vm_screen_quit);

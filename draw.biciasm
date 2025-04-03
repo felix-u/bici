@@ -5,34 +5,37 @@
 
 |0100
 
-:update break :quit break
+:update break
+:quit break
 
 :init
-    #0000 :while dup;2 &EOF lt;2 jni {
-        dup;2 jsi @load_coords_at_addr
+    #0000 :while dup,2 &EOF lt,2 jni {
+        dup,2 jsi @load_coords_at_addr
         #06 *pixel write
-    #0002 add;2 jmi @while } drop;2
+    #0002 add,2 jmi @while } drop,2
     break
 
-:cast_16_from_8 #00 swap jmp;r
+:cast_16_from_8 #00 swap jmp,r
 
 :load_coords_at_addr
-    dup;2 load #02 div jsi @cast_16_from_8
-    swap;2 inc;2 load #02 div jsi @cast_16_from_8
-    jmp;r
+    dup,2 load #02 div jsi @cast_16_from_8
+    swap,2 inc,2 load #02 div jsi @cast_16_from_8
+    jmp,r
 
-:smiley
-    _0606 _1206
-    _060c _080e _0a10 _0c10 _0e10 _100e _120c
+:smiley [
+    0606 1206
+    060c 080e 0a10 0c10 0e10 100e 120c
+]
 
-:diagonal_line
-    _1020
-    _2040
-    _3060
-    _4080
-    _50a0
-    _60c0
-    _70e0
-    _80f0
+:diagonal_line [
+    1020
+    2040
+    3060
+    4080
+    50a0
+    60c0
+    70e0
+    80f0
+]
 
 :EOF

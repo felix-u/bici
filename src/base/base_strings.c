@@ -166,7 +166,7 @@ static void string_builder_push_format(String_Builder *builder, Format format) {
             for (; value > 0; value /= base) {
                 buf_index -= 1;
                 u8 digit = (u8)(value % base);
-                buf_mem[buf_index] = character_from_digit[digit];
+                buf_mem[buf_index] = (u8)character_from_digit[digit];
             }
 
             String decimal = { .data = buf_mem + buf_index, .count = sizeof(buf_mem) - buf_index };

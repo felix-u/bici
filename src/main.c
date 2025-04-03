@@ -446,6 +446,12 @@ int main(int argc, char **argv) {
         };
         Array_Label_Reference label_references = { .arena = &arena };
 
+        structdef(Curly_Reference) {
+            u16 address;
+            bool is_relative;
+        };
+        Array_Curly_Reference curly_references = { .arena = &arena };
+
         bool in_insertion_mode = false;
 
         for (u16 token_index = 0; token_index < tokens.count; token_index += 1) {
@@ -494,15 +500,34 @@ int main(int argc, char **argv) {
                     token_index += 1;
                 } break;
                 case '{': {
-                    bool relative = next.kind == '$';
-                    if (relative) {
-                        // TODO(felix)
-                        token_index += 1;
-                    }
-                    print("TODO(felix): compile %address at {\n", fmt(String, relative ? string("relative ") : string("absolute ")));
+                    Curly_Reference reference = {
+                        .address = (u16)rom.count,
+                        .is_relative = (next.kind == '$'),
+                    };
+                    array_push(&curly_references, &reference);
+                    rom.count += 1 + reference.is_relative;
+                    if (reference.is_relative) token_index += 1;
                 } break;
                 case '}': {
-                    print("TODO(felix): resolve address at }\n");
+                    if (curly_references.count == 0) {
+                        log_error("'}' has no matching '{'");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+
+                    Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
+                    if (reference.is_relative) {
+                        usize relative_jump = rom.count - reference.address;
+                        if (relative_jump > 255) {
+                            log_error("relative jump to '}' is % bytes, but the maximum is 255; use an absolute jump", fmt(usize, relative_jump));
+                            return parse_error(asm, token.start_index, token.length);
+                        }
+
+                        u8 *location_to_patch = &rom.data[reference.address];
+                        *location_to_patch = (u8)relative_jump;
+                    } else {
+                        u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
+                        *location_to_patch = (u16)rom.count;
+                    }
                 } break;
                 case '[': {
                     if (in_insertion_mode) {
@@ -536,11 +561,14 @@ int main(int argc, char **argv) {
                     } else {
                         Vm_Instruction instruction = {0};
 
-                        // structdef(Vm_Stack) { u8 memory[0x100], data; };
-                        // enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_return = 1 };
-                        // enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
-                        // structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
-                        // structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
+                        #define for_opcode_test_string(name, byte) else if (string_equal(token_string, string(#name))) instruction.opcode = byte;
+
+                        if (false) {}
+                        vm_for_opcode(for_opcode_test_string)
+                        else {
+                            log_error("no such opcode '%'", fmt(String, token_string));
+                            return parse_error(asm, token.start_index, token.length);
+                        }
 
                         bool explicit_mode = next.kind == token_kind_opmode;
                         if (explicit_mode) {
@@ -555,6 +583,7 @@ int main(int argc, char **argv) {
                             token_index += 1;
                         }
 
+                        // TODO(felix): byte_from_instruction()
                         u8 byte = instruction.opcode
                             | instruction.mode.keep
                             | (instruction.mode.stack << 6)
@@ -565,11 +594,36 @@ int main(int argc, char **argv) {
                     }
                 } break;
                 case token_kind_hexadecimal: {
+                    Vm_Instruction instruction = {
+                        .opcode = vm_opcode_push,
+                        .mode.size = token_string.count == 4 ? vm_opcode_size_short : vm_opcode_size_byte,
+                    };
+
+                    u8 byte = instruction.opcode
+                        | instruction.mode.keep
+                        | (instruction.mode.stack << 6)
+                        | (instruction.mode.keep << 5);
+
+                    rom.data[rom.count] = byte;
+                    rom.count += 1;
+
                     u16 value = (u16)int_from_hex_string(token_string);
-                    print("TODO(felix): push #%\n", fmt(u16, value, .base = 16));
+                    switch (token_string.count) {
+                        case 2: {
+                            rom.data[rom.count] = (u8)value;
+                            rom.count += 1;
+                        } break;
+                        case 4: {
+                            *(u16 *)(&rom.data[rom.count]) = value;
+                            rom.count += 2;
+                        } break;
+                        default: unreachable;
+                    }
                 } break;
                 case token_kind_string: {
-                    print("TODO(felix): compile string '%'\n", fmt(String, token_string));
+                    assert(rom.count + token_string.count <= 0x10000);
+                    memcpy(rom.data + rom.count, token_string.data, token_string.count);
+                    rom.count += token_string.count;
                 } break;
                 default: {
                     log_info("% %", fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove
@@ -579,6 +633,11 @@ int main(int argc, char **argv) {
         }
 
         print("TODO(felix): resolve % label references\n", fmt(usize, label_references.count));
+
+        if (curly_references.count != 0) {
+            log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, curly_references.count));
+            return parse_error(asm, 0, 0);
+        }
     }
 
     bool should_run = command == command_script || command == command_run;

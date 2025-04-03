@@ -243,38 +243,114 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
         }
     }
 }
+structdef(Asm_Label_Definition) { String name; u16 address; };
 
-static int parse_error(String text, u16 token_start_index, u8 token_length) {
-    // TODO(felix): print line and column, and highlight error in line
-    discard(text);
-    print("note: in range [%..%]\n", fmt(u16, token_start_index), fmt(u16, token_start_index + token_length));
-    return 1;
-}
+structdef(Asm_Label_Usage) { String name; u16 index_in_input_bytes; Vm_Opcode_Size size; };
 
-static force_inline void skip_whitespace(String text, u16 *cursor) {
-    while (*cursor < text.count && ascii_is_whitespace(text.data[*cursor])) (*cursor) += 1;
-}
+enumdef(Asm_Resolution_Kind, u8) { resolve_byte_count, resolve_address };
+structdef(Asm_Resolution) { u16 index_in_output_bytes; Asm_Resolution_Kind kind; };
 
-static force_inline bool is_starting_symbol_character(u8 c) {
-    return ascii_is_alpha(c) || c == '_';
-}
+structdef(Asm) {
+    char *input_relative_path;
+    String input_bytes;
+    u16 input_cursor;
 
-static force_inline bool is_symbol_character(u8 c) {
-    return is_starting_symbol_character(c) || ascii_is_decimal(c);
-}
+    Array_Asm_Label_Definition label_definitions;
+    Array_Asm_Label_Usage label_usages;
+    Array_Asm_Resolution resolutions;
 
-static force_inline void skip_symbol(String text, u16 *cursor) {
-    while (*cursor < text.count && is_symbol_character(text.data[*cursor])) (*cursor) += 1;
-}
+    Array_u8 output_bytes;
+};
 
-static force_inline void skip_hexadecimal(String text, u16 *cursor) {
-    u16 start = *cursor;
-    while (*cursor < text.count && ascii_is_hexadecimal(text.data[*cursor])) (*cursor) += 1;
-    u16 digit_count = *cursor - start;
-    if (digit_count > 4) {
-        log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
-        parse_error(text, start, (u8)digit_count);
+static u16 asm_get_address_of_label(Asm *context, String name) {
+    for (u8 i = 0; i < context->label_definitions.count; i += 1) {
+        if (!string_equal(context->label_definitions.data[i].name, name)) continue;
+        return context->label_definitions.data[i].address;
     }
+    log_error("no such label '%'", fmt(String, name));
+    return 0;
+}
+
+structdef(Asm_Hex) {
+    bool ok;
+    u8 digit_count;
+    union { u8 int8; u16 int16; } result;
+};
+
+static Asm_Hex asm_parse_hex(Asm *context) {
+    u16 start_index = context->input_cursor;
+    while (context->input_cursor < context->input_bytes.count && is_hex_digit[context->input_bytes.data[context->input_cursor]]) context->input_cursor += 1;
+    u16 end_index = context->input_cursor;
+    context->input_cursor -= 1;
+    u8 digit_count = (u8)(end_index - start_index);
+    String hex_string = { .data = context->input_bytes.data + start_index, .count = digit_count };
+
+    switch (digit_count) {
+        case 2: return (Asm_Hex){
+            .ok = true,
+            .digit_count = digit_count,
+            .result.int8 = (u8)int_from_hex_string(hex_string),
+        };
+        case 4: return (Asm_Hex){
+            .ok = true,
+            .digit_count = digit_count,
+            .result.int16 = (u16)int_from_hex_string(hex_string),
+        };
+        default: {
+            log_error("expected 2 digits (byte) or 4 digits (short), found % digits in number at '%'[%..%]",
+                fmt(u64, digit_count), fmt(cstring, context->input_relative_path), fmt(u64, start_index), fmt(u64, end_index)
+            );
+            return (Asm_Hex){0};
+        } break;
+    }
+}
+
+static bool asm_is_alpha(u8 c) { return ascii_is_alpha(c) || ascii_is_decimal(c) || (c == '_'); }
+
+static String asm_parse_alpha(Asm *context) {
+    u16 start_index = context->input_cursor;
+    u8 first_char = context->input_bytes.data[context->input_cursor];
+    if (!asm_is_alpha(first_char)) {
+        log_error(
+            "expected alphabetic character or underscore, found byte '%'/%/#% at '%'[%]",
+            fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor)
+        );
+        return (String){0};
+    }
+
+    context->input_cursor += 1;
+    while (context->input_cursor < context->input_bytes.count && (asm_is_alpha(context->input_bytes.data[context->input_cursor]))) context->input_cursor += 1;
+    u16 end_index = context->input_cursor;
+    context->input_cursor -= 1;
+    return (String){ .data = context->input_bytes.data + start_index, .count = end_index - start_index };
+}
+
+static void asm_rom_write(Asm *context, u8 byte) {
+    if (context->output_bytes.count == context->output_bytes.capacity) {
+        log_error("reached maximum output_bytes size");
+        abort();
+    }
+    array_push_assume_capacity(&context->output_bytes, &byte);
+}
+
+static void asm_rom_write2(Asm *context, u16 byte2) {
+    asm_rom_write(context, (byte2 & 0xff00) >> 8);
+    asm_rom_write(context, byte2 & 0x00ff);
+}
+
+static void asm_resolutions_push(Asm *context, Asm_Resolution_Kind resolution_kind) {
+    if (context->resolutions.count == 0x0ff) {
+        log_error("cannot resolve address at '%'[%]: maximum number of resolutions reached", fmt(cstring, context->input_relative_path), fmt(u64, context->input_cursor));
+        context->output_bytes.count = 0;
+        return;
+    }
+    Asm_Resolution resolution = { .index_in_output_bytes = (u16)context->output_bytes.count, .kind = resolution_kind };
+    array_push_assume_capacity(&context->resolutions, &resolution);
+}
+
+static void asm_compile_instruction(Asm *context, Vm_Instruction_Mode mode, u8 opcode) {
+    if (vm_opcode_is_special(opcode)) { asm_rom_write(context, opcode); return; }
+    asm_rom_write(context, opcode | (u8)(mode.size << 5) | (u8)(mode.stack << 6) | (u8)(mode.keep << 7));
 }
 
 #define usage "usage: bici <com|run|script> <file...>"
@@ -327,118 +403,200 @@ int main(int argc, char **argv) {
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = input_bytes;
     else {
-        enumdef(Token_Kind, u8) {
-            token_kind_ascii_delimiter = 128,
+        static u8 rom_memory[0x10000];
+        static Asm_Label_Definition label_definitions_memory[0x100];
+        static Asm_Label_Usage label_usages_memory[0x100];
+        static Asm_Resolution resolutions_memory[0x100];
 
-            token_kind_symbol,
-            token_kind_number,
-            token_kind_string,
-
-            token_kind_count,
+        Asm context = {
+            .input_relative_path = input_filepath,
+            .input_bytes = file_read_bytes_relative_path(&arena, input_filepath, 0x10000),
+            .label_definitions = { .data = label_definitions_memory, .capacity = 0x100 },
+            .label_usages = { .data = label_usages_memory, .capacity = 0x100 },
+            .resolutions = { .data = resolutions_memory, .capacity = 0x100 },
+            .output_bytes = { .data = rom_memory, .count = 0x100, .capacity = 0x10000 },
         };
+        if (context.input_bytes.count == 0) return (String){0};
 
-        structdef(Token) {
-            u16 start_index;
-            u8 length;
-            Token_Kind kind;
-        };
+        u16 cursor_step = 1;
+        for (context.input_cursor = 0; context.input_cursor < context.input_bytes.count; context.input_cursor += cursor_step) {
+            cursor_step = 1;
+            if (ascii_is_whitespace(context.input_bytes.data[context.input_cursor])) continue;
 
-        #define max_token_count 0x10000
-        static Token tokens_backing_memory[max_token_count] = {0};
-        Array_Token tokens = { .data = tokens_backing_memory, .capacity = max_token_count };
+            Vm_Instruction_Mode mode = {0};
 
-        String asm = input_bytes;
-        for (u16 asm_cursor = 0; asm_cursor < asm.count;) {
-            skip_whitespace(asm, &asm_cursor);
-            if (asm_cursor == asm.count) break;
-
-            u16 start_index = asm_cursor;
-            Token_Kind kind = 0;
-            if (is_starting_symbol_character(asm.data[asm_cursor])) {
-                kind = token_kind_symbol;
-                asm_cursor += 1;
-                skip_symbol(asm, &asm_cursor);
-            } else if (ascii_is_hexadecimal(asm.data[asm_cursor])) {
-                kind = token_kind_number;
-                asm_cursor += 1;
-                skip_hexadecimal(asm, &asm_cursor);
-            } else switch (asm.data[asm_cursor]) {
-                case '/': {
-                    bool is_comment = asm_cursor + 1 < asm.count && asm.data[asm_cursor + 1] == '/';
-                    if (is_comment) {
-                        while (asm_cursor < asm.count && asm.data[asm_cursor] != '\n') asm_cursor += 1;
-                        continue;
-                    }
-                } // fallthrough
-                case '|': case ':': case '@': case '#': case ',': case '&': case '{': case '}': case '*': case '[': case ']': {
-                    kind = asm.data[asm_cursor];
-                    asm_cursor += 1;
-                } break;
-                default: {
-                    log_error("invalid syntax '%'", fmt(char, asm.data[asm_cursor]));
-                    return parse_error(asm, asm_cursor, 1);
-                }
-            }
-
-            u16 length = asm_cursor - start_index;
-            assert(length <= 255);
-
-            Token token = {
-                .start_index = start_index,
-                .length = (u8)length,
-                .kind = kind,
-            };
-            array_push_assume_capacity(&tokens, &token);
-        }
-
-        // NOTE(felix): we can do lookahead by one token without a bounds check
-        assert(tokens.count < tokens.capacity);
-
-        for (u16 i = 0; i < tokens.count; i += 1) {
-            Token token = tokens.data[i];
-            switch (token.kind) {
+            switch (context.input_bytes.data[context.input_cursor]) {
+                case '/': if (context.input_cursor + 1 < context.input_bytes.count && context.input_bytes.data[context.input_cursor + 1] == '/') {
+                    for (context.input_cursor += 2; context.input_cursor < context.input_bytes.count && context.input_bytes.data[context.input_cursor] != '\n';) context.input_cursor += 1;
+                } continue;
                 case '|': {
-                    Token next = tokens.data[i + 1];
-                    if (next.kind != token_kind_number) {
-                        log_error("expected hexadecimal literal following padding indicator '|'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    String hex_string = string_range(asm, next.start_index, next.start_index + next.length);
-                    u16 new_cursor = (u16)int_from_hex_string(hex_string);
-                    rom.count = new_cursor;
-                    i += 1;
-                } break;
-                case ':': {
-                    Token next = tokens.data[i + 1];
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following ':'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    String label = string_range(asm, next.start_index, next.start_index + next.length);
-                    print("TODO(felix): push label '%'\n", fmt(String, label));
-                    i += 1;
-                } break;
+                    context.input_cursor += 1;
+                    Asm_Hex new_program_counter = asm_parse_hex(&context);
+                    if (!new_program_counter.ok) return (String){0};
+                    context.output_bytes.count = new_program_counter.result.int16;
+                } continue;
                 case '@': {
-                    Token next = tokens.data[i + 1];
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following ':'");
-                        return parse_error(asm, next.start_index, next.length);
+                    context.input_cursor += 1;
+                    String label_name = asm_parse_alpha(&context);
+                    Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_short };
+                    array_push_assume_capacity(&context.label_usages, &label);
+                    context.output_bytes.count += 2;
+                } continue;
+                case '#': {
+                    context.input_cursor += 1;
+                    Asm_Hex number = asm_parse_hex(&context);
+                    if (!number.ok) return (String){0};
+                    switch (number.digit_count) {
+                        case 2: asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_byte }, vm_opcode_push); asm_rom_write(&context, number.result.int8); break;
+                        case 4: asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_short }, vm_opcode_push); asm_rom_write2(&context, number.result.int16); break;
+                        default: unreachable;
                     }
-                    String label = string_range(asm, next.start_index, next.start_index + next.length);
-                    print("TODO(felix): insert label '%'\n", fmt(String, label));
-                    rom.count += 2;
-                    i += 1;
+                } continue;
+                case '*': {
+                    asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_byte }, vm_opcode_push);
+                    context.input_cursor += 1;
+                    String label_name = asm_parse_alpha(&context);
+                    Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_byte };
+                    array_push_assume_capacity(&context.label_usages, &label);
+                    context.output_bytes.count += 1;
+                } continue;
+                case '&': {
+                    asm_compile_instruction(&context, (Vm_Instruction_Mode){ .size = vm_opcode_size_short }, vm_opcode_push);
+                    context.input_cursor += 1;
+                    String label_name = asm_parse_alpha(&context);
+                    Asm_Label_Usage label = { .name = label_name, .index_in_input_bytes = (u16)context.output_bytes.count, .size = vm_opcode_size_short };
+                    array_push_assume_capacity(&context.label_usages, &label);
+                    context.output_bytes.count += 2;
+                } continue;
+                case ':': {
+                    context.input_cursor += 1;
+                    String label_name = asm_parse_alpha(&context);
+                    if (context.label_definitions.count == context.label_definitions.capacity) panic("cannot add label '%': maximum number of labels reached", fmt(String, label_name));
+                    Asm_Label_Definition label = { .name = label_name, .address = (u16)context.output_bytes.count };
+                    array_push_assume_capacity(&context.label_definitions, &label);
+                } continue;
+                case '{': {
+                    context.input_cursor += 1;
+                    switch (context.input_bytes.data[context.input_cursor]) {
+                        case '#': {
+                            asm_resolutions_push(&context, resolve_byte_count);
+                            context.output_bytes.count += 1;
+                        } continue;
+                        default: {
+                            asm_resolutions_push(&context, resolve_address);
+                            context.output_bytes.count += 2;
+                            cursor_step = 0;
+                        } continue;
+                    }
+                } continue;
+                case '}': {
+                    if (context.resolutions.count == 0) {
+                        log_error("forward resolution marker at '%'[%] matches no opening marker", fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor));
+                        context.output_bytes.count = 0;
+                        break;
+                    }
+
+                    Asm_Resolution resolution = slice_pop_assume_not_empty(context.resolutions);
+                    switch (resolution.kind) {
+                        case resolve_byte_count: {
+                            u8 byte_count = (u8)(context.output_bytes.count - 1 - resolution.index_in_output_bytes);
+                            context.output_bytes.data[resolution.index_in_output_bytes] = byte_count;
+                        } break;
+                        case resolve_address: {
+                            u16 current_address = (u16)context.output_bytes.count;
+                            context.output_bytes.count = resolution.index_in_output_bytes;
+                            asm_rom_write2(&context, current_address);
+                            context.output_bytes.count = current_address;
+                        } break;
+                        default: unreachable;
+                    }
+
+                    continue;
                 } break;
-                case token_kind_symbol: {
-                    String opcode = string_range(asm, token.start_index, token.start_index + token.length);
-                    print("TODO(felix): compile op '%'\n", fmt(String, opcode));
-                } break;
-                default: {
-                    log_info("% %", fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove
-                    unreachable;
+                case '_': {
+                    context.input_cursor += 1;
+                    Asm_Hex number = asm_parse_hex(&context);
+                    if (!number.ok) return (String){0};
+                    switch (number.digit_count) {
+                        case 2: asm_rom_write(&context, number.result.int8); break;
+                        case 4: asm_rom_write2(&context, number.result.int16); break;
+                        default: unreachable;
+                    }
+                } continue;
+                case '"': {
+                    context.input_cursor += 1;
+                    for (; context.input_cursor < context.input_bytes.count && !ascii_is_whitespace(context.input_bytes.data[context.input_cursor]); context.input_cursor += 1) {
+                        asm_rom_write(&context, context.input_bytes.data[context.input_cursor]);
+                    }
+                    cursor_step = 0;
+                } continue;
+                default: break;
+            }
+
+            u8 first_char = context.input_bytes.data[context.input_cursor];
+            if (!asm_is_alpha(first_char)) {
+                log_error("invalid byte '%'/%/#% at '%'[%]",
+                    fmt(char, first_char), fmt(u64, first_char), fmt(u64, first_char, .base = 16), fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor)
+                );
+                return (String){0};
+            }
+
+            usize start_index = context.input_cursor, end_index = start_index;
+            for (; context.input_cursor < context.input_bytes.count && !ascii_is_whitespace(context.input_bytes.data[context.input_cursor]); context.input_cursor += 1) {
+                u8 c = context.input_bytes.data[context.input_cursor];
+                if ('a' <= c && c <= 'z') continue;
+                end_index = context.input_cursor;
+                if (c == ';') for (context.input_cursor += 1; context.input_cursor < context.input_bytes.count;) {
+                    c = context.input_bytes.data[context.input_cursor];
+                    if (ascii_is_whitespace(c)) goto done;
+                    switch (c) {
+                        case 'k': mode.keep = true; break;
+                        case 'r': mode.stack = stack_ret; break;
+                        case '2': mode.size = vm_opcode_size_short; break;
+                        default: {
+                            log_error("expected one of ['k', 'r', '2'], found byte '%'/%/#% at '%'[%]",
+                                fmt(char, c), fmt(u64, c), fmt(u64, c, .base = 16), fmt(cstring, context.input_relative_path), fmt(u64, context.input_cursor)
+                            );
+                            return (String){0};
+                        } break;
+                    }
+                    context.input_cursor += 1;
                 }
             }
+            done:
+            if (end_index == start_index) end_index = context.input_cursor;
+            String lexeme = string_range(context.input_bytes, start_index, end_index);
+
+            if (false) {}
+            #define compile_if_string_is_opcode(name, val)\
+                else if (string_equal(lexeme, string(#name))) asm_compile_instruction(&context, mode, val);
+            vm_for_opcode(compile_if_string_is_opcode)
+            else {
+                log_error("invalid token '%' at '%'[%..%]", fmt(String, lexeme), fmt(cstring, context.input_relative_path), fmt(u64, start_index), fmt(u64, end_index));
+                return (String){0};
+            };
+
+            continue;
         }
+        if (context.output_bytes.count == 0) return (String){0};
+        String output_bytes = bit_cast(String) context.output_bytes;
+
+        for (u8 i = 0; i < context.label_usages.count; i += 1) {
+            Asm_Label_Usage ref = context.label_usages.data[i];
+            if (ref.name.count == 0) return (String){0};
+            context.output_bytes.count = ref.index_in_input_bytes;
+            switch (ref.size) {
+                case vm_opcode_size_byte: asm_rom_write(&context, (u8)asm_get_address_of_label(&context, ref.name)); break;
+                case vm_opcode_size_short: asm_rom_write2(&context, asm_get_address_of_label(&context, ref.name)); break;
+                default: unreachable;
+            }
+        }
+
+        print("ASM ===\n");
+        for (usize i = 0x100; i < output_bytes.count; i += 1) print("% ", fmt(u64, output_bytes.data[i], .base = 16));
+        print("\n");
+
+        rom = output_bytes;
     }
 
     bool should_run = command == command_script || command == command_run;

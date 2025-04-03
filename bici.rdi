@@ -10,13 +10,14 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script hello_world.biciasm"
+  arguments: "script self_visualiser.biciasm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////
 
 recent_file: "src/base/base_gfx.c"
 recent_file: "src/base/base_strings.c"
+recent_file: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"
 recent_file: "src/main.c"
 
 /// exception code filters ////////////////////////////////////////////////////

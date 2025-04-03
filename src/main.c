@@ -128,7 +128,7 @@ enum Vm_Screen_Action {
                     u16 str_addr = vm_pop16(vm);\
                     u8 str_count = vm_load8(vm, str_addr);\
                     String str = { .data = vm->memory + str_addr + 1, .count = str_count };\
-                    /* TODO(felix): check if this is print from SDL */ print("%", fmt(String, str));\
+                    print("%", fmt(String, str));\
                 } break;\
                 default: panic("[write] invalid action #% for console device", fmt(u64, action, .base = 16));\
             } break;\
@@ -246,6 +246,16 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
         }
     }
 }
+
+static u8 byte_from_instruction(Vm_Instruction instruction) {
+    if (vm_opcode_is_special(instruction.opcode)) return instruction.opcode;
+    u8 byte = instruction.opcode
+        | (instruction.mode.keep << 7)
+        | (instruction.mode.stack << 6)
+        | (instruction.mode.size << 5);
+    return byte;
+}
+
 
 static int parse_error(String text, u16 token_start_index, u8 token_length) {
     // TODO(felix): print line and column, and highlight error in line
@@ -433,6 +443,12 @@ int main(int argc, char **argv) {
         // NOTE(felix): we can do lookahead by one token without a bounds check
         assert(tokens.count < tokens.capacity);
 
+        // // TODO(felix): remove
+        // for_slice (Token *, token, tokens) {
+        //     String string = string_range(asm, token->start_index, token->start_index + token->length);
+        //     print("TOKEN %: %\t%\n", fmt(usize, token - tokens.data), fmt(u8, token->kind), fmt(String, string));
+        // }
+
         structdef(Label) {
             u16 token_index;
             u16 address;
@@ -495,7 +511,8 @@ int main(int argc, char **argv) {
                         .is_insertion = in_insertion_mode,
                     };
                     array_push(&label_references, &reference);
-                    rom.count += reference.width;
+                    u8 byte_count_for_push_instruction = !in_insertion_mode;
+                    rom.count += reference.width + byte_count_for_push_instruction;
 
                     token_index += 1;
                 } break;
@@ -516,14 +533,14 @@ int main(int argc, char **argv) {
 
                     Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
                     if (reference.is_relative) {
-                        usize relative_jump = rom.count - reference.address;
-                        if (relative_jump > 255) {
-                            log_error("relative jump to '}' is % bytes, but the maximum is 255; use an absolute jump", fmt(usize, relative_jump));
+                        usize relative_difference = rom.count - reference.address;
+                        if (relative_difference > 255) {
+                            log_error("relative difference from '{' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
                             return parse_error(asm, token.start_index, token.length);
                         }
 
                         u8 *location_to_patch = &rom.data[reference.address];
-                        *location_to_patch = (u8)relative_jump;
+                        *location_to_patch = (u8)relative_difference;
                     } else {
                         u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
                         *location_to_patch = (u16)rom.count;
@@ -583,12 +600,7 @@ int main(int argc, char **argv) {
                             token_index += 1;
                         }
 
-                        // TODO(felix): byte_from_instruction()
-                        u8 byte = instruction.opcode
-                            | instruction.mode.keep
-                            | (instruction.mode.stack << 6)
-                            | (instruction.mode.keep << 5);
-
+                        u8 byte = byte_from_instruction(instruction);
                         rom.data[rom.count] = byte;
                         rom.count += 1;
                     }
@@ -599,11 +611,7 @@ int main(int argc, char **argv) {
                         .mode.size = token_string.count == 4 ? vm_opcode_size_short : vm_opcode_size_byte,
                     };
 
-                    u8 byte = instruction.opcode
-                        | instruction.mode.keep
-                        | (instruction.mode.stack << 6)
-                        | (instruction.mode.keep << 5);
-
+                    u8 byte = byte_from_instruction(instruction);
                     rom.data[rom.count] = byte;
                     rom.count += 1;
 
@@ -632,7 +640,49 @@ int main(int argc, char **argv) {
             }
         }
 
-        print("TODO(felix): resolve % label references\n", fmt(usize, label_references.count));
+        for_slice (Label_Reference *, reference, label_references) {
+            Token reference_token = tokens.data[reference->token_index];
+            String reference_string = string_range(asm, reference_token.start_index, reference_token.start_index + reference_token.length);
+
+            Label *match = 0;
+            for_slice (Label *, label, labels) {
+                Token label_token = tokens.data[label->token_index];
+                String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+
+                if (!string_equal(reference_string, label_string)) continue;
+                match = label;
+                break;
+            }
+
+            if (match == 0) {
+                log_error("no such label '%'", fmt(String, reference_string));
+                return parse_error(asm, reference_token.start_index, reference_token.length);
+            }
+
+            u16 address = reference->address;
+            if (reference->is_insertion) {
+                Vm_Instruction instruction = {
+                    .opcode = vm_opcode_push,
+                    .mode.size = reference->width == 2 ? vm_opcode_size_short : vm_opcode_size_byte,
+                };
+                u8 byte = byte_from_instruction(instruction);
+                rom.data[address] = byte;
+                address += 1;
+            }
+
+            switch (reference->width) {
+                case 1: {
+                    u8 *location_to_patch = &rom.data[address];
+                    assert(match->address <= 255);
+                    *location_to_patch = (u8)match->address;
+                } break;
+                case 2: {
+                    u16 *location_to_patch = (u16 *)&rom.data[address];
+                    *location_to_patch = match->address;
+                } break;
+                default: unreachable;
+            }
+        }
 
         if (curly_references.count != 0) {
             log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, curly_references.count));

@@ -10,7 +10,7 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script draw.biciasm"
+  arguments: "script hello_world.biciasm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////

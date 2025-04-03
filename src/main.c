@@ -252,7 +252,7 @@ static int parse_error(String text, u16 token_start_index, u8 token_length) {
 }
 
 static force_inline bool is_starting_symbol_character(u8 c) {
-    return ascii_is_alpha(c) || c == '_' || c == ',';
+    return ascii_is_alpha(c) || c == '_';
 }
 
 #define usage "usage: bici <com|run|script> <file...>"
@@ -311,6 +311,7 @@ int main(int argc, char **argv) {
             token_kind_symbol,
             token_kind_hexadecimal,
             token_kind_string,
+            token_kind_opmode,
 
             token_kind_count,
         };
@@ -347,9 +348,9 @@ int main(int argc, char **argv) {
 
                 while (asm_cursor < asm.count && ascii_is_hexadecimal(asm.data[asm_cursor])) asm_cursor += 1;
                 u16 digit_count = asm_cursor - start_index;
-                if (digit_count > 4) {
+                if (digit_count != 2 && digit_count != 4) {
                     log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
-                    parse_error(asm, start_index, (u8)digit_count);
+                    return parse_error(asm, start_index, (u8)digit_count);
                 }
             } else switch (asm.data[asm_cursor]) {
                 case '/': {
@@ -359,9 +360,51 @@ int main(int argc, char **argv) {
                         continue;
                     }
                 } // fallthrough
-                case '|': case ':': case '@': case '#': case ',': case '&': case '{': case '}': case '*': case '[': case ']': {
+                case '|': case ':': case '#': case '$': case '&': case '{': case '}': case '*': case '[': case ']': {
                     kind = asm.data[asm_cursor];
                     asm_cursor += 1;
+                } break;
+                case '"': {
+                    kind = token_kind_string;
+
+                    asm_cursor += 1;
+                    start_index = asm_cursor;
+                    for (; asm_cursor < asm.count; asm_cursor += 1) {
+                        u8 c = asm.data[asm_cursor];
+                        if (c == '"') break;
+                        if (c == '\n') {
+                            log_error("expected '\"' to close string before newline");
+                            return parse_error(asm, start_index, (u8)(asm_cursor - start_index));
+                        }
+                    }
+
+                    if (asm_cursor == asm.count) {
+                        log_error("expected '\"' to close string before end of file");
+                        return parse_error(asm, start_index, (u8)(asm_cursor - start_index));
+                    }
+
+                    assert(asm.data[asm_cursor] == '"');
+                    asm_cursor += 1;
+                } break;
+                case ',': {
+                    kind = token_kind_opmode;
+
+                    asm_cursor += 1;
+                    start_index = asm_cursor;
+                    for (; asm_cursor < asm.count; asm_cursor += 1) {
+                        u8 c = asm.data[asm_cursor];
+                        if (ascii_is_whitespace(c)) break;
+                        if (c != '2' && c != 'k' && c != 'r') {
+                            log_error("only characters '2', 'k', and 'r' are valid op modes");
+                            return parse_error(asm, asm_cursor, 1);
+                        }
+                    }
+
+                    u16 length = asm_cursor - start_index;
+                    if (length == 0 || length > 3) {
+                        log_error("a valid op mode contains 1, 2, or 3 characters (as in op,2kr), but this one has %", fmt(u16, length));
+                        return parse_error(asm, start_index, (u8)length);
+                    }
                 } break;
                 default: {
                     log_error("invalid syntax '%'", fmt(char, asm.data[asm_cursor]));
@@ -370,6 +413,7 @@ int main(int argc, char **argv) {
             }
 
             u16 length = asm_cursor - start_index;
+            if (kind == token_kind_string) length -= 1;
             assert(length <= 255);
 
             Token token = {
@@ -396,25 +440,6 @@ int main(int argc, char **argv) {
                     }
                     u16 new_cursor = (u16)int_from_hex_string(next_string);
                     rom.count = new_cursor;
-                    i += 1;
-                } break;
-                case ':': {
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following ':'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    String label = next_string;
-                    print("TODO(felix): push label '%'\n", fmt(String, label));
-                    i += 1;
-                } break;
-                case '@': {
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following ':'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    String label = next_string;
-                    print("TODO(felix): insert label '%'\n", fmt(String, label));
-                    rom.count += 2;
                     i += 1;
                 } break;
                 case '#': {
@@ -445,7 +470,12 @@ int main(int argc, char **argv) {
                     i += 1;
                 } break;
                 case '{': {
-                    print("TODO(felix): compile address at {\n");
+                    bool relative = next.kind == '$';
+                    if (relative) {
+                        // TODO(felix)
+                        i += 1;
+                    }
+                    print("TODO(felix): compile %address at {\n", fmt(String, relative ? string("relative ") : string("absolute ")));
                 } break;
                 case '}': {
                     print("TODO(felix): resolve address at }\n");
@@ -453,15 +483,30 @@ int main(int argc, char **argv) {
                 case '[': {
                     print("TODO(felix): compile bytes at [\n");
                     for (i += 1; i < tokens.count; i += 1) {
-                        if (tokens.data[i].kind != token_kind_hexadecimal) break;
+                        if (tokens.data[i].kind == ']') break;
                     }
-                    if (tokens.data[i].kind != ']') {
-                        log_error("expected ']' to end byte sequence");
+                    if (i == tokens.count) {
+                        log_error("expected ']' to end byte sequence before end of file");
                         return parse_error(asm, tokens.data[i].start_index, tokens.data[i].length);
                     }
                 } break;
                 case token_kind_symbol: {
-                    print("TODO(felix): compile op '%'\n", fmt(String, token_string));
+                    if (next.kind == ':') {
+                        print("TODO(felix): define label '%'\n", fmt(String, token_string));
+                        i += 1;
+                    } else {
+                        bool explicit_mode = next.kind == token_kind_opmode;
+                        if (explicit_mode) {
+                            i += 1;
+                            // TODO(felix)
+                        }
+                        print("TODO(felix): compile op '%", fmt(String, token_string));
+                        if (explicit_mode) print(",%", fmt(String, next_string));
+                        print("'\n");
+                    }
+                } break;
+                case token_kind_string: {
+                    print("TODO(felix): compile string '%'\n", fmt(String, token_string));
                 } break;
                 default: {
                     log_info("% %", fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove

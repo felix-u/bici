@@ -58,7 +58,7 @@ static String string_print(Arena *arena, char *format, ...) {
 
 static String string_range(String string, usize start, usize end) {
     assert(end <= string.count);
-    assert(start < end);
+    assert(start <= end);
     String result = { .data = string.data + start, .count = end - start };
     return result;
 }

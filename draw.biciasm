@@ -1,33 +1,33 @@
-|00 :console_print
-|10 :screen
+|00 console_print:
+|10 screen:
     |10 @init |12 @update |14 @quit
-    |11 :pixel
+    |11 pixel:
 
 |0100
 
-:update break
-:quit break
+update: break
+quit: break
 
-:init
-    #0000 :while dup,2 &EOF lt,2 jni {
+init:
+    #0000 while: dup,2 &EOF lt,2 jni {
         dup,2 jsi @load_coords_at_addr
         #06 *pixel write
     #0002 add,2 jmi @while } drop,2
     break
 
-:cast_16_from_8 #00 swap jmp,r
+cast_16_from_8: #00 swap jmp,r
 
-:load_coords_at_addr
+load_coords_at_addr:
     dup,2 load #02 div jsi @cast_16_from_8
     swap,2 inc,2 load #02 div jsi @cast_16_from_8
     jmp,r
 
-:smiley [
+smiley: [
     0606 1206
     060c 080e 0a10 0c10 0e10 100e 120c
 ]
 
-:diagonal_line [
+diagonal_line: [
     1020
     2040
     3060
@@ -38,4 +38,4 @@
     80f0
 ]
 
-:EOF
+EOF:

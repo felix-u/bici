@@ -246,35 +246,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
 static int parse_error(String text, u16 token_start_index, u8 token_length) {
     // TODO(felix): print line and column, and highlight error in line
-    discard(text);
-    print("note: in range [%..%]\n", fmt(u16, token_start_index), fmt(u16, token_start_index + token_length));
+    String lexeme = string_range(text, token_start_index, token_start_index + token_length);
+    print("note: '%' at bytes [%..%]\n", fmt(String, lexeme), fmt(u16, token_start_index), fmt(u16, token_start_index + token_length));
     return 1;
 }
 
-static force_inline void skip_whitespace(String text, u16 *cursor) {
-    while (*cursor < text.count && ascii_is_whitespace(text.data[*cursor])) (*cursor) += 1;
-}
-
 static force_inline bool is_starting_symbol_character(u8 c) {
-    return ascii_is_alpha(c) || c == '_';
-}
-
-static force_inline bool is_symbol_character(u8 c) {
-    return is_starting_symbol_character(c) || ascii_is_decimal(c);
-}
-
-static force_inline void skip_symbol(String text, u16 *cursor) {
-    while (*cursor < text.count && is_symbol_character(text.data[*cursor])) (*cursor) += 1;
-}
-
-static force_inline void skip_hexadecimal(String text, u16 *cursor) {
-    u16 start = *cursor;
-    while (*cursor < text.count && ascii_is_hexadecimal(text.data[*cursor])) (*cursor) += 1;
-    u16 digit_count = *cursor - start;
-    if (digit_count > 4) {
-        log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
-        parse_error(text, start, (u8)digit_count);
-    }
+    return ascii_is_alpha(c) || c == '_' || c == ',';
 }
 
 #define usage "usage: bici <com|run|script> <file...>"
@@ -331,7 +309,7 @@ int main(int argc, char **argv) {
             token_kind_ascii_delimiter = 128,
 
             token_kind_symbol,
-            token_kind_number,
+            token_kind_hexadecimal,
             token_kind_string,
 
             token_kind_count,
@@ -349,7 +327,7 @@ int main(int argc, char **argv) {
 
         String asm = input_bytes;
         for (u16 asm_cursor = 0; asm_cursor < asm.count;) {
-            skip_whitespace(asm, &asm_cursor);
+            while (asm_cursor < asm.count && ascii_is_whitespace(asm.data[asm_cursor])) asm_cursor += 1;
             if (asm_cursor == asm.count) break;
 
             u16 start_index = asm_cursor;
@@ -357,11 +335,22 @@ int main(int argc, char **argv) {
             if (is_starting_symbol_character(asm.data[asm_cursor])) {
                 kind = token_kind_symbol;
                 asm_cursor += 1;
-                skip_symbol(asm, &asm_cursor);
+
+                for (; asm_cursor < asm.count; asm_cursor += 1) {
+                    u8 c = asm.data[asm_cursor];
+                    bool is_symbol_character = is_starting_symbol_character(c) || ascii_is_decimal(c);
+                    if (!is_symbol_character) break;
+                }
             } else if (ascii_is_hexadecimal(asm.data[asm_cursor])) {
-                kind = token_kind_number;
+                kind = token_kind_hexadecimal;
                 asm_cursor += 1;
-                skip_hexadecimal(asm, &asm_cursor);
+
+                while (asm_cursor < asm.count && ascii_is_hexadecimal(asm.data[asm_cursor])) asm_cursor += 1;
+                u16 digit_count = asm_cursor - start_index;
+                if (digit_count > 4) {
+                    log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
+                    parse_error(asm, start_index, (u8)digit_count);
+                }
             } else switch (asm.data[asm_cursor]) {
                 case '/': {
                     bool is_comment = asm_cursor + 1 < asm.count && asm.data[asm_cursor + 1] == '/';
@@ -396,42 +385,83 @@ int main(int argc, char **argv) {
 
         for (u16 i = 0; i < tokens.count; i += 1) {
             Token token = tokens.data[i];
+            String token_string = string_range(asm, token.start_index, token.start_index + token.length);
+            Token next = tokens.data[i + 1];
+            String next_string = string_range(asm, next.start_index, next.start_index + next.length);
             switch (token.kind) {
                 case '|': {
-                    Token next = tokens.data[i + 1];
-                    if (next.kind != token_kind_number) {
+                    if (next.kind != token_kind_hexadecimal) {
                         log_error("expected hexadecimal literal following padding indicator '|'");
                         return parse_error(asm, next.start_index, next.length);
                     }
-                    String hex_string = string_range(asm, next.start_index, next.start_index + next.length);
-                    u16 new_cursor = (u16)int_from_hex_string(hex_string);
+                    u16 new_cursor = (u16)int_from_hex_string(next_string);
                     rom.count = new_cursor;
                     i += 1;
                 } break;
                 case ':': {
-                    Token next = tokens.data[i + 1];
                     if (next.kind != token_kind_symbol) {
                         log_error("expected label following ':'");
                         return parse_error(asm, next.start_index, next.length);
                     }
-                    String label = string_range(asm, next.start_index, next.start_index + next.length);
+                    String label = next_string;
                     print("TODO(felix): push label '%'\n", fmt(String, label));
                     i += 1;
                 } break;
                 case '@': {
-                    Token next = tokens.data[i + 1];
                     if (next.kind != token_kind_symbol) {
                         log_error("expected label following ':'");
                         return parse_error(asm, next.start_index, next.length);
                     }
-                    String label = string_range(asm, next.start_index, next.start_index + next.length);
+                    String label = next_string;
                     print("TODO(felix): insert label '%'\n", fmt(String, label));
                     rom.count += 2;
                     i += 1;
                 } break;
+                case '#': {
+                    if (next.kind != token_kind_hexadecimal) {
+                        log_error("expected hexadecimal literal following push indicator '#'");
+                        return parse_error(asm, next.start_index, next.length);
+                    }
+                    u16 value = (u16)int_from_hex_string(next_string);
+                    print("TODO(felix): push #%\n", fmt(u16, value, .base = 16));
+                    i += 1;
+                } break;
+                case '*': {
+                    if (next.kind != token_kind_symbol) {
+                        log_error("expected label following '*'");
+                        return parse_error(asm, next.start_index, next.length);
+                    }
+                    String label = next_string;
+                    print("TODO(felix): push %\n", fmt(String, label));
+                    i += 1;
+                } break;
+                case '&': {
+                    if (next.kind != token_kind_symbol) {
+                        log_error("expected label following '&'");
+                        return parse_error(asm, next.start_index, next.length);
+                    }
+                    String label = next_string;
+                    print("TODO(felix): push,2 %\n", fmt(String, label));
+                    i += 1;
+                } break;
+                case '{': {
+                    print("TODO(felix): compile address at {\n");
+                } break;
+                case '}': {
+                    print("TODO(felix): resolve address at }\n");
+                } break;
+                case '[': {
+                    print("TODO(felix): compile bytes at [\n");
+                    for (i += 1; i < tokens.count; i += 1) {
+                        if (tokens.data[i].kind != token_kind_hexadecimal) break;
+                    }
+                    if (tokens.data[i].kind != ']') {
+                        log_error("expected ']' to end byte sequence");
+                        return parse_error(asm, tokens.data[i].start_index, tokens.data[i].length);
+                    }
+                } break;
                 case token_kind_symbol: {
-                    String opcode = string_range(asm, token.start_index, token.start_index + token.length);
-                    print("TODO(felix): compile op '%'\n", fmt(String, opcode));
+                    print("TODO(felix): compile op '%'\n", fmt(String, token_string));
                 } break;
                 default: {
                     log_info("% %", fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove

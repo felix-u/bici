@@ -1,9 +1,9 @@
-|00 console_print:
-|10 screen:
-    |10 [&init] |12 [&update] |14 [&quit]
-    |11 pixel:
+|#00 console_print:
+|#10 screen:
+    |#10 [&init] |#12 [&update] |#14 [&quit]
+    |#11 pixel:
 
-|0100
+|#0100
 
 init:
     &hello_world *console_print write

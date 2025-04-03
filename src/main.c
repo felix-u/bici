@@ -97,13 +97,13 @@ enum Vm_Screen_Action {
     case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;\
     case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop##bi(vm)) { vm->program_counter = addr; add = 0; } } break;\
     case vm_opcode_jst:    {\
-        vm->active_stack = stack_ret;\
+        vm->active_stack = stack_return;\
         vm_push16(vm, vm->program_counter + 1);\
         vm->active_stack = stack_param;\
         vm->program_counter = vm_pop16(vm);\
         add = 0;\
     } break;\
-    case vm_opcode_stash:  { u##bi val = vm_pop##bi(vm); vm->active_stack = stack_ret; vm_push##bi(vm, val); vm->active_stack = stack_param; } break;\
+    case vm_opcode_stash:  { u##bi val = vm_pop##bi(vm); vm->active_stack = stack_return; vm_push##bi(vm, val); vm->active_stack = stack_param; } break;\
     case vm_opcode_load:   { u16 addr = vm_pop16(vm); u##bi val = vm_load##bi(vm, addr); vm_push##bi(vm, val); } break;\
     case vm_opcode_store:  { u16 addr = vm_pop16(vm); u##bi val = vm_pop##bi(vm); vm_store##bi(vm, addr, val); } break;\
     case vm_opcode_read:   {\
@@ -170,8 +170,11 @@ static const char *vm_opcode_name(u8 instruction) {
 }
 
 structdef(Vm_Stack) { u8 memory[0x100], data; };
-enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_ret = 1 };
+// TODO(felix): set stack_return to 0x40 and avoid shifting later
+enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_return = 1 };
+// TODO(felix): replace with numeric byte width 1, 2
 enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
+// TODO(felix): set keep to 0x20 and avoid shifting later
 structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
 
 structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
@@ -226,7 +229,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
             case vm_opcode_jei: if ( vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jni: if (!vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jsi: {
-                vm->active_stack = stack_ret;
+                vm->active_stack = stack_return;
                 vm_push16(vm, vm->program_counter + 3);
                 vm->active_stack = stack_param;
                 vm->program_counter = vm_load16(vm, vm->program_counter + 1);
@@ -342,17 +345,20 @@ int main(int argc, char **argv) {
                     bool is_symbol_character = is_starting_symbol_character(c) || ascii_is_decimal(c);
                     if (!is_symbol_character) break;
                 }
-            } else if (ascii_is_hexadecimal(asm.data[asm_cursor])) {
-                kind = token_kind_hexadecimal;
-                asm_cursor += 1;
-
-                while (asm_cursor < asm.count && ascii_is_hexadecimal(asm.data[asm_cursor])) asm_cursor += 1;
-                u16 digit_count = asm_cursor - start_index;
-                if (digit_count != 2 && digit_count != 4) {
-                    log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
-                    return parse_error(asm, start_index, (u8)digit_count);
-                }
             } else switch (asm.data[asm_cursor]) {
+                case '#': {
+                    kind = token_kind_hexadecimal;
+
+                    asm_cursor += 1;
+                    start_index = asm_cursor;
+
+                    while (asm_cursor < asm.count && ascii_is_hexadecimal(asm.data[asm_cursor])) asm_cursor += 1;
+                    u16 digit_count = asm_cursor - start_index;
+                    if (digit_count != 2 && digit_count != 4) {
+                        log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
+                        return parse_error(asm, start_index, (u8)digit_count);
+                    }
+                } break;
                 case '/': {
                     bool is_comment = asm_cursor + 1 < asm.count && asm.data[asm_cursor + 1] == '/';
                     if (is_comment) {
@@ -360,7 +366,7 @@ int main(int argc, char **argv) {
                         continue;
                     }
                 } // fallthrough
-                case '|': case ':': case '#': case '$': case '&': case '{': case '}': case '*': case '[': case ']': {
+                case '|': case ':': case '$': case '&': case '{': case '}': case '*': case '[': case ']': {
                     kind = asm.data[asm_cursor];
                     asm_cursor += 1;
                 } break;
@@ -427,11 +433,38 @@ int main(int argc, char **argv) {
         // NOTE(felix): we can do lookahead by one token without a bounds check
         assert(tokens.count < tokens.capacity);
 
-        for (u16 i = 0; i < tokens.count; i += 1) {
-            Token token = tokens.data[i];
+        structdef(Label) {
+            u16 token_index;
+            u16 address;
+        };
+        Array_Label labels = { .arena = &arena };
+
+        structdef(Label_Reference) {
+            u16 token_index, address;
+            u8 width;
+            bool is_insertion;
+        };
+        Array_Label_Reference label_references = { .arena = &arena };
+
+        bool in_insertion_mode = false;
+
+        for (u16 token_index = 0; token_index < tokens.count; token_index += 1) {
+            Token token = tokens.data[token_index];
             String token_string = string_range(asm, token.start_index, token.start_index + token.length);
-            Token next = tokens.data[i + 1];
+
+            if (in_insertion_mode) {
+                switch (token.kind) {
+                    case '&': case ']': case token_kind_hexadecimal: break;
+                    default: {
+                        log_error("insertion mode only supports addresses (e.g. &label) and hexadecimal literals");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+                };
+            }
+
+            Token next = tokens.data[token_index + 1];
             String next_string = string_range(asm, next.start_index, next.start_index + next.length);
+
             switch (token.kind) {
                 case '|': {
                     if (next.kind != token_kind_hexadecimal) {
@@ -440,40 +473,31 @@ int main(int argc, char **argv) {
                     }
                     u16 new_cursor = (u16)int_from_hex_string(next_string);
                     rom.count = new_cursor;
-                    i += 1;
+                    token_index += 1;
                 } break;
-                case '#': {
-                    if (next.kind != token_kind_hexadecimal) {
-                        log_error("expected hexadecimal literal following push indicator '#'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    u16 value = (u16)int_from_hex_string(next_string);
-                    print("TODO(felix): push #%\n", fmt(u16, value, .base = 16));
-                    i += 1;
-                } break;
-                case '*': {
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following '*'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    String label = next_string;
-                    print("TODO(felix): push %\n", fmt(String, label));
-                    i += 1;
-                } break;
+                case '*': assert(!in_insertion_mode); // fallthrough
                 case '&': {
                     if (next.kind != token_kind_symbol) {
-                        log_error("expected label following '&'");
+                        log_error("expected label following '%'", fmt(String, token_string));
                         return parse_error(asm, next.start_index, next.length);
                     }
-                    String label = next_string;
-                    print("TODO(felix): push,2 %\n", fmt(String, label));
-                    i += 1;
+
+                    Label_Reference reference = {
+                        .token_index = token_index + 1,
+                        .address = (u16)rom.count,
+                        .width = next.kind == '*' ? 1 : 2,
+                        .is_insertion = in_insertion_mode,
+                    };
+                    array_push(&label_references, &reference);
+                    rom.count += reference.width;
+
+                    token_index += 1;
                 } break;
                 case '{': {
                     bool relative = next.kind == '$';
                     if (relative) {
                         // TODO(felix)
-                        i += 1;
+                        token_index += 1;
                     }
                     print("TODO(felix): compile %address at {\n", fmt(String, relative ? string("relative ") : string("absolute ")));
                 } break;
@@ -481,29 +505,68 @@ int main(int argc, char **argv) {
                     print("TODO(felix): resolve address at }\n");
                 } break;
                 case '[': {
-                    print("TODO(felix): compile bytes at [\n");
-                    for (i += 1; i < tokens.count; i += 1) {
-                        if (tokens.data[i].kind == ']') break;
+                    if (in_insertion_mode) {
+                        log_error("cannot enter insertion mode while already in insertion mode");
+                        return parse_error(asm, token.start_index, token.length);
                     }
-                    if (i == tokens.count) {
-                        log_error("expected ']' to end byte sequence before end of file");
-                        return parse_error(asm, tokens.data[i].start_index, tokens.data[i].length);
+                    in_insertion_mode = true;
+                } break;
+                case ']': {
+                    if (!in_insertion_mode) {
+                        log_error("']' has no matching '['");
+                        return parse_error(asm, token.start_index, token.length);
                     }
+                    in_insertion_mode = false;
                 } break;
                 case token_kind_symbol: {
                     if (next.kind == ':') {
-                        print("TODO(felix): define label '%'\n", fmt(String, token_string));
-                        i += 1;
+                        for_slice (Label *, label, labels) {
+                            Token label_token = tokens.data[label->token_index];
+                            String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+                            if (string_equal(label_string, token_string)) {
+                                log_error("redefinition of label '%'", fmt(String, token_string));
+                                return parse_error(asm, token.start_index, token.length);
+                            }
+                        }
+
+                        Label new_label = { .token_index = token_index, .address = (u16)rom.count };
+                        array_push(&labels, &new_label);
+
+                        token_index += 1;
                     } else {
+                        Vm_Instruction instruction = {0};
+
+                        // structdef(Vm_Stack) { u8 memory[0x100], data; };
+                        // enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_return = 1 };
+                        // enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
+                        // structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
+                        // structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
+
                         bool explicit_mode = next.kind == token_kind_opmode;
                         if (explicit_mode) {
-                            i += 1;
-                            // TODO(felix)
+                            for_slice (u8 *, c, next_string) {
+                                switch (*c) {
+                                    case '2': instruction.mode.size = vm_opcode_size_short; break;
+                                    case 'k': instruction.mode.keep = 0x80; break;
+                                    case 'r': instruction.mode.stack = stack_return; break;
+                                    default: unreachable;
+                                }
+                            }
+                            token_index += 1;
                         }
-                        print("TODO(felix): compile op '%", fmt(String, token_string));
-                        if (explicit_mode) print(",%", fmt(String, next_string));
-                        print("'\n");
+
+                        u8 byte = instruction.opcode
+                            | instruction.mode.keep
+                            | (instruction.mode.stack << 6)
+                            | (instruction.mode.keep << 5);
+
+                        rom.data[rom.count] = byte;
+                        rom.count += 1;
                     }
+                } break;
+                case token_kind_hexadecimal: {
+                    u16 value = (u16)int_from_hex_string(token_string);
+                    print("TODO(felix): push #%\n", fmt(u16, value, .base = 16));
                 } break;
                 case token_kind_string: {
                     print("TODO(felix): compile string '%'\n", fmt(String, token_string));
@@ -514,6 +577,8 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
+        print("TODO(felix): resolve % label references\n", fmt(usize, label_references.count));
     }
 
     bool should_run = command == command_script || command == command_run;
@@ -528,8 +593,8 @@ int main(int argc, char **argv) {
         String_Builder builder = { .arena = &persistent_arena };
         {
             string_builder_print(&builder, "MEMORY ===\n");
-            for (u16 i = 0x100; i < rom.count; i += 1) {
-                u8 byte = vm.memory[i];
+            for (u16 token_index = 0x100; token_index < rom.count; token_index += 1) {
+                u8 byte = vm.memory[token_index];
 
                 String mode_string = string("");
                 if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
@@ -543,7 +608,7 @@ int main(int argc, char **argv) {
                 }
 
                 string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
-                    fmt(u16, i, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
+                    fmt(u16, token_index, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
                 );
             }
             string_builder_print(&builder, "\nRUN ===\n");
@@ -570,9 +635,9 @@ int main(int argc, char **argv) {
         vm_run_to_break(&vm, vm_on_screen_quit_pc);
 
         print("param  stack (bot->top): { ");
-        for (u8 i = 0; i < vm.stacks[stack_param].data; i += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[i], .base = 16));
+        for (u8 token_index = 0; token_index < vm.stacks[stack_param].data; token_index += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[token_index], .base = 16));
         print("}\nreturn stack (bot->top): { ");
-        for (u8 i = 0; i < vm.stacks[stack_ret].data; i += 1) print("% ", fmt(u64, vm.stacks[stack_ret].memory[i], .base = 16));
+        for (u8 token_index = 0; token_index < vm.stacks[stack_return].data; token_index += 1) print("% ", fmt(u64, vm.stacks[stack_return].memory[token_index], .base = 16));
         print("}\n");
     }
 

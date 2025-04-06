@@ -281,6 +281,51 @@ static force_inline bool is_starting_symbol_character(u8 c) {
     return ascii_is_alpha(c) || c == '_';
 }
 
+enumdef(Token_Kind, u8) {
+    token_kind_ascii_delimiter = 128,
+
+    token_kind_symbol,
+    token_kind_hexadecimal,
+    token_kind_string,
+    token_kind_opmode,
+
+    token_kind_count,
+};
+
+structdef(Token) {
+    u16 start_index;
+    u8 length;
+    Token_Kind kind;
+    u16 value;
+};
+
+structdef(Label) {
+    u16 token_index;
+    u16 address;
+};
+
+static Label *find_label_by_name_via_token_index(String asm, Array_Label labels, Array_Token tokens, u16 token_index) {
+    Label *match = 0;
+
+    Token token = tokens.data[token_index];
+    String reference_string = string_range(asm, token.start_index, token.start_index + token.length);
+
+    for_slice (Label *, label, labels) {
+        Token label_token = tokens.data[label->token_index];
+        String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+
+        if (!string_equal(reference_string, label_string)) continue;
+        match = label;
+        break;
+    }
+
+    if (match == 0) {
+        log_error("no such label '%'", fmt(String, reference_string));
+        parse_error(asm, token.start_index, token.length);
+    }
+    return match;
+}
+
 #define usage "usage: bici <com|run|script> <file...>"
 
 int main(int argc, char **argv) {
@@ -331,24 +376,6 @@ int main(int argc, char **argv) {
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = input_bytes;
     else {
-        enumdef(Token_Kind, u8) {
-            token_kind_ascii_delimiter = 128,
-
-            token_kind_symbol,
-            token_kind_hexadecimal,
-            token_kind_string,
-            token_kind_opmode,
-
-            token_kind_count,
-        };
-
-        structdef(Token) {
-            u16 start_index;
-            u8 length;
-            Token_Kind kind;
-            u16 value;
-        };
-
         #define max_token_count 0x10000
         static Token tokens_backing_memory[max_token_count] = {0};
         Array_Token tokens = { .data = tokens_backing_memory, .capacity = max_token_count };
@@ -398,7 +425,7 @@ int main(int argc, char **argv) {
                     asm_cursor += 1;
                     continue;
                 } break;
-                case ':': case '$': case '{': case '}': case '[': case ']': {
+                case ':': case '$': case '{': case '}': case '[': case ']': case ',': {
                     kind = asm.data[asm_cursor];
                     asm_cursor += 1;
                 } break;
@@ -465,23 +492,21 @@ int main(int argc, char **argv) {
         // NOTE(felix): we can do lookahead by one token without a bounds check
         assert(tokens.count < tokens.capacity);
 
-        structdef(Label) {
-            u16 token_index;
-            u16 address;
-        };
         Array_Label labels = { .arena = &arena };
 
         structdef(Label_Reference) {
-            u16 token_index, address;
+            u16 token_index;
+            union { u16 destination_address, destination_label_token_index; };
             u8 width;
+            bool is_patch;
         };
         Array_Label_Reference label_references = { .arena = &arena };
 
-        structdef(Curly_Reference) {
+        structdef(Scoped_Reference) {
             u16 address;
             bool is_relative;
         };
-        Array_Curly_Reference curly_references = { .arena = &arena };
+        Array_Scoped_Reference scoped_reference = { .arena = &arena };
 
         structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
         Insertion_Mode insertion_mode = {0};
@@ -505,17 +530,17 @@ int main(int argc, char **argv) {
 
             switch (token.kind) {
                 case '{': {
-                    Curly_Reference reference = { .address = (u16)rom.count };
-                    array_push(&curly_references, &reference);
+                    Scoped_Reference reference = { .address = (u16)rom.count };
+                    array_push(&scoped_reference, &reference);
                     rom.count += 2;
                 } break;
                 case '}': {
-                    if (curly_references.count == 0) {
+                    if (scoped_reference.count == 0) {
                         log_error("'}' has no matching '{'");
                         return parse_error(asm, token.start_index, token.length);
                     }
 
-                    Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
+                    Scoped_Reference reference = slice_pop_assume_not_empty(scoped_reference);
                     if (reference.is_relative) {
                         log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
                         return parse_error(asm, token.start_index, token.length);
@@ -534,8 +559,8 @@ int main(int argc, char **argv) {
                     bool compile_byte_count_to_closing_bracket = next.kind == '$';
                     if (compile_byte_count_to_closing_bracket) {
                         insertion_mode.has_relative_reference = true;
-                        Curly_Reference reference = { .address = (u16)rom.count, .is_relative = true };
-                        array_push(&curly_references, &reference);
+                        Scoped_Reference reference = { .address = (u16)rom.count, .is_relative = true };
+                        array_push(&scoped_reference, &reference);
                         rom.count += 1;
                         token_index += 1;
                     }
@@ -547,7 +572,7 @@ int main(int argc, char **argv) {
                     }
 
                     if (insertion_mode.has_relative_reference) {
-                        Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
+                        Scoped_Reference reference = slice_pop_assume_not_empty(scoped_reference);
                         if (!reference.is_relative) {
                             log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
                             return parse_error(asm, token.start_index, token.length);
@@ -623,7 +648,7 @@ int main(int argc, char **argv) {
                             if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
 
                             if (next.kind == token_kind_symbol) {
-                                Label_Reference reference = { .token_index = token_index + 1, .address = (u16)rom.count, .width = width };
+                                Label_Reference reference = { .token_index = token_index + 1, .destination_address = (u16)rom.count, .width = width };
                                 array_push(&label_references, &reference);
                                 rom.count += reference.width;
                             } else {
@@ -663,9 +688,34 @@ int main(int argc, char **argv) {
 
                         token_index += 1;
                         break;
+                    } else if (string_equal(token_string, string("patch"))) {
+                        if (next.kind != token_kind_symbol) {
+                            log_error("expected label to indicate destination offset as first argument to directive 'patch'");
+                            return parse_error(asm, next.start_index, next.length);
+                        }
+
+                        token_index += 1;
+                        Label_Reference reference = { .is_patch = true, .destination_label_token_index = token_index };
+
+                        next = tokens.data[token_index + 1];
+                        if (next.kind != ',') {
+                            log_error("expected ',' after between first and second arguments to directive 'patch'");
+                            return parse_error(asm, next.start_index, next.length);
+                        }
+
+                        token_index += 1;
+                        next = tokens.data[token_index + 1];
+                        if (next.kind != token_kind_symbol) {
+                            log_error("expected label to indicate address as second argument to directive 'patch'");
+                            return parse_error(asm, next.start_index, next.length);
+                        }
+
+                        token_index += 1;
+                        reference.token_index = token_index;
+                        array_push(&label_references, &reference);
                     }
 
-                    Label_Reference reference = { .token_index = token_index, .address = (u16)rom.count, .width = 2 };
+                    Label_Reference reference = { .token_index = token_index, .destination_address = (u16)rom.count, .width = 2 };
                     array_push(&label_references, &reference);
                     rom.count += reference.width;
                 } break;
@@ -706,48 +756,39 @@ int main(int argc, char **argv) {
                     rom.count += token_string.count;
                 } break;
                 default: {
-                    log_info("[%] % %", fmt(usize, token_index), fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove
-                    unreachable;
+                    log_error("invalid syntax");
+                    return parse_error(asm, token.start_index, token.length);
                 }
             }
         }
 
+        if (scoped_reference.count != 0) {
+            log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, scoped_reference.count));
+            return parse_error(asm, 0, 0);
+        }
+
         for_slice (Label_Reference *, reference, label_references) {
-            Token reference_token = tokens.data[reference->token_index];
-            String reference_string = string_range(asm, reference_token.start_index, reference_token.start_index + reference_token.length);
+            Label *match = find_label_by_name_via_token_index(asm, labels, tokens, reference->token_index);
+            if (match == 0) return 1;
 
-            Label *match = 0;
-            for_slice (Label *, label, labels) {
-                Token label_token = tokens.data[label->token_index];
-                String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+            if (reference->is_patch) {
+                Label *destination_label = find_label_by_name_via_token_index(asm, labels, tokens, reference->destination_label_token_index);
+                if (destination_label == 0) return 1;
 
-                if (!string_equal(reference_string, label_string)) continue;
-                match = label;
-                break;
-            }
-
-            if (match == 0) {
-                log_error("no such label '%'", fmt(String, reference_string));
-                return parse_error(asm, reference_token.start_index, reference_token.length);
-            }
-
-            switch (reference->width) {
+                u16 *location_to_patch = (u16 *)&rom.data[destination_label->address];
+                write_u16_swap_bytes(location_to_patch, match->address);
+            } else switch (reference->width) {
                 case 1: {
-                    u8 *location_to_patch = &rom.data[reference->address];
+                    u8 *location_to_patch = &rom.data[reference->destination_address];
                     assert(match->address <= 255);
                     *location_to_patch = (u8)match->address;
                 } break;
                 case 2: {
-                    u16 *location_to_patch = (u16 *)&rom.data[reference->address];
+                    u16 *location_to_patch = (u16 *)&rom.data[reference->destination_address];
                     write_u16_swap_bytes(location_to_patch, match->address);
                 } break;
                 default: unreachable;
             }
-        }
-
-        if (curly_references.count != 0) {
-            log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, curly_references.count));
-            return parse_error(asm, 0, 0);
         }
 
         if (command == command_compile) {

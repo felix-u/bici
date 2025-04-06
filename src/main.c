@@ -299,19 +299,19 @@ int main(int argc, char **argv) {
     Command command = 0;
     if (string_equal(command_string, string("com"))) {
         if (argc != 4) {
-            log_error("usage: bici com <file.biciasm> <file.bici>");
+            log_error("usage: bici com <file.asm> <file.rom>");
             return 1;
         }
         command = command_compile;
     } else if (string_equal(command_string, string("run"))) {
         if (argc != 3) {
-            log_error("usage: bici run <file.bici>");
+            log_error("usage: bici run <file.rom>");
             return 1;
         }
         command = command_run;
     } else if (string_equal(command_string, string("script"))) {
         if (argc != 3) {
-            log_error("usage: bici script <file.biciasm>");
+            log_error("usage: bici script <file.asm>");
             return 1;
         }
         command = command_script;
@@ -465,12 +465,6 @@ int main(int argc, char **argv) {
         // NOTE(felix): we can do lookahead by one token without a bounds check
         assert(tokens.count < tokens.capacity);
 
-        // // TODO(felix): remove
-        // for_slice (Token *, token, tokens) {
-        //     String string = string_range(asm, token->start_index, token->start_index + token->length);
-        //     print("TOKEN %: %\t%\n", fmt(usize, token - tokens.data), fmt(u8, token->kind), fmt(String, string));
-        // }
-
         structdef(Label) {
             u16 token_index;
             u16 address;
@@ -615,12 +609,19 @@ int main(int argc, char **argv) {
 
                         if (instruction_takes_immediate(instruction)) {
                             next = tokens.data[token_index + 1];
-                            if (next.kind != token_kind_symbol && next.kind != token_kind_hexadecimal) {
-                                log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
-                                return parse_error(asm, next.start_index, next.length);
+                            switch (next.kind) {
+                                case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
+                                default: {
+                                    log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
+                                    return parse_error(asm, next.start_index, next.length);
+                                }
                             }
 
-                            u8 width = instruction.mode.size == vm_opcode_size_byte ? 1 : 2;
+                            if (next.kind == '{') continue;
+
+                            u8 width = 1;
+                            if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
+
                             if (next.kind == token_kind_symbol) {
                                 Label_Reference reference = { .token_index = token_index + 1, .address = (u16)rom.count, .width = width };
                                 array_push(&label_references, &reference);
@@ -747,6 +748,12 @@ int main(int argc, char **argv) {
         if (curly_references.count != 0) {
             log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, curly_references.count));
             return parse_error(asm, 0, 0);
+        }
+
+        if (command == command_compile) {
+            assert(argc == 4);
+            char *output_path = argv[3];
+            file_write_bytes_to_relative_path(output_path, rom);
         }
     }
 

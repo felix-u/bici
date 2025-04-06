@@ -15,8 +15,8 @@ static u32 screen_palette[screen_colour_count] = {
     [screen_c3a] = 0xffffffff, [screen_c3b] = 0xffffffff,
 };
 
-#define vm_screen_width 320
-#define vm_screen_height 240
+#define vm_screen_width 256
+#define vm_screen_height 256
 
 #define vm_for_opcode(action)\
     /*     name,   byte, is_immediate */\

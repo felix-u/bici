@@ -1,41 +1,63 @@
-|#00 console_print:
-|#10 screen:
-    |#10 [&init] |#12 [&update] |#14 [&quit]
-    |#11 pixel:
+org 0x00 console_print:
+org 0x10 screen:
+    org 0x10 [init]
+    org 0x11 pixel:
+    org 0x12 [update]
+    org 0x14 [quit]
 
-|#0100
+org 0x100
 
 update: break
 quit: break
 
 init:
-    #0000 while: dup,2 &EOF lt,2 jni {
-        dup,2 jsi [&load_coords_at_addr]
-        #06 *pixel write
-    #0002 add,2 jmi [&while] } drop,2
+    push.2 0x0
+    while:
+        dup.2
+        push.2 EOF
+        lt.2
+        jni {
+            dup.2
+            jsi load_coordinates_at_address
+            push 0x06
+            push pixel
+            write
+
+            push.2 0x2
+            add.2
+            jmi while
+        }
+        drop.2
     break
 
-cast_16_from_8: #00 swap jmp,r
+cast_16_from_8:
+    push 0x0
+    swap
+    jmp.r
 
-load_coords_at_addr:
-    dup,2 load #02 div jsi [&cast_16_from_8]
-    swap,2 inc,2 load #02 div jsi [&cast_16_from_8]
-    jmp,r
+load_coordinates_at_address:
+    dup.2
+    load
+    jsi cast_16_from_8
+    swap.2
+    inc.2
+    load
+    jsi cast_16_from_8
+    jmp.r
 
 smiley: [
-    #0606 #1206
-    #060c #080e #0a10 #0c10 #0e10 #100e #120c
+    0x00 ; align
+    0x8080 0x8380
+    0x8084 0x8185 0x8285 0x8384
 ]
 
 diagonal_line: [
-    #1020
-    #2040
-    #3060
-    #4080
-    #50a0
-    #60c0
-    #70e0
-    #80f0
+    0x50a0
+    0x58b0
+    0x60c0
+    0x68d0
+    0x70e0
+    0x78f0
 ]
 
 EOF:

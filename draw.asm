@@ -18,7 +18,7 @@ init:
         lt.2
         jni {
             dup.2
-            jsi load_coords_at_addr
+            jsi load_coordinates_at_address
             push 0x06
             push pixel
             write
@@ -35,34 +35,29 @@ cast_16_from_8:
     swap
     jmp.r
 
-load_coords_at_addr:
+load_coordinates_at_address:
     dup.2
     load
-    push 0x02
-    div
     jsi cast_16_from_8
     swap.2
     inc.2
     load
-    push 0x02
-    div
     jsi cast_16_from_8
     jmp.r
 
 smiley: [
-    0x0606 0x1206
-    0x060c 0x080e 0x0a10 0x0c10 0x0e10 0x100e 0x120c
+    0x00 ; align
+    0x8080 0x8380
+    0x8084 0x8185 0x8285 0x8384
 ]
 
 diagonal_line: [
-    0x1020
-    0x2040
-    0x3060
-    0x4080
     0x50a0
+    0x58b0
     0x60c0
+    0x68d0
     0x70e0
-    0x80f0
+    0x78f0
 ]
 
 EOF:

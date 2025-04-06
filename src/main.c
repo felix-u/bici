@@ -19,42 +19,43 @@ static u32 screen_palette[screen_colour_count] = {
 #define vm_screen_height 240
 
 #define vm_for_opcode(action)\
-    action(break,  0x00)/* NO MODE */\
-    action(push,   0x01)/* NO k MODE */\
-    action(drop,   0x02)\
-    action(nip,    0x03)\
-    action(swap,   0x04)\
-    action(rot,    0x05)\
-    action(dup,    0x06)\
-    action(over,   0x07)\
-    action(eq,     0x08)\
-    action(neq,    0x09)\
-    action(gt,     0x0a)\
-    action(lt,     0x0b)\
-    action(add,    0x0c)\
-    action(sub,    0x0d)\
-    action(mul,    0x0e)\
-    action(div,    0x0f)\
-    action(inc,    0x10)\
-    action(not,    0x11)\
-    action(and,    0x12)\
-    action(or,     0x13)\
-    action(xor,    0x14)\
-    action(shift,  0x15)\
-    action(jmp,    0x16)\
-    action(jme,    0x17)\
-    action(jst,    0x18)\
-    action(jne,    0x19)\
-    action(jni,    0x1a)\
-    action(stash,  0x1b)\
-    action(load,   0x1c)\
-    action(store,  0x1d)\
-    action(read,   0x1e)\
-    action(write,  0x1f)\
-    action(jmi,    0x80)/* NO MODE (== push;k)  */\
-    action(jei,    0xa0)/* NO MODE (== push;k2) */\
-    action(jsi,    0xc0)/* NO MODE (== push;kr) */\
-    /* UNUSED      0xe0)   NO MODE (== push;kr2)*/\
+    /*     name,   byte, is_immediate */\
+    action(break,  0x00, 0)/* NO MODE */\
+    action(push,   0x01, 1)/* NO k MODE */\
+    action(drop,   0x02, 0)\
+    action(nip,    0x03, 0)\
+    action(swap,   0x04, 0)\
+    action(rot,    0x05, 0)\
+    action(dup,    0x06, 0)\
+    action(over,   0x07, 0)\
+    action(eq,     0x08, 0)\
+    action(neq,    0x09, 0)\
+    action(gt,     0x0a, 0)\
+    action(lt,     0x0b, 0)\
+    action(add,    0x0c, 0)\
+    action(sub,    0x0d, 0)\
+    action(mul,    0x0e, 0)\
+    action(div,    0x0f, 0)\
+    action(inc,    0x10, 0)\
+    action(not,    0x11, 0)\
+    action(and,    0x12, 0)\
+    action(or,     0x13, 0)\
+    action(xor,    0x14, 0)\
+    action(shift,  0x15, 0)\
+    action(jmp,    0x16, 0)\
+    action(jme,    0x17, 0)\
+    action(jst,    0x18, 0)\
+    action(jne,    0x19, 0)\
+    action(jni,    0x1a, 1)\
+    action(stash,  0x1b, 0)\
+    action(load,   0x1c, 0)\
+    action(store,  0x1d, 0)\
+    action(read,   0x1e, 0)\
+    action(write,  0x1f, 0)\
+    action(jmi,    0x80, 1)/* NO MODE (== push;k)  */\
+    action(jei,    0xa0, 1)/* NO MODE (== push;k2) */\
+    action(jsi,    0xc0, 1)/* NO MODE (== push;kr) */\
+    /* UNUSED      0xe0, 0)   NO MODE (== push;kr2)*/\
 
 enumdef(Vm_Device, u8) {
     vm_device_console = 0x00,
@@ -148,13 +149,13 @@ enum Vm_Screen_Action {
     default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
 
 enumdef(Vm_Opcode, u8) {
-    #define vm_opcode_def_enum(name, val) vm_opcode_##name = val,
+    #define vm_opcode_def_enum(name, val, ...) vm_opcode_##name = val,
     vm_for_opcode(vm_opcode_def_enum)
     vm_opcode_max_value_plus_one
 };
 
 const char *vm_opcode_name_table[vm_opcode_max_value_plus_one] = {
-    #define vm_opcode_set_name(name, val) [val] = #name,
+    #define vm_opcode_set_name(name, val, ...) [val] = #name,
     vm_for_opcode(vm_opcode_set_name)
 };
 
@@ -244,6 +245,14 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
             case vm_opcode_size_short: switch (instruction.opcode) { vm_opcode_cases(2, 16) } break;
             default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
         }
+    }
+}
+
+static bool instruction_takes_immediate(Vm_Instruction instruction) {
+    #define for_opcode_return_is_immediate(name, value, is_immediate) case vm_opcode_##name: return is_immediate;
+    switch (instruction.opcode) {
+        vm_for_opcode(for_opcode_return_is_immediate)
+        default: unreachable;
     }
 }
 
@@ -337,6 +346,7 @@ int main(int argc, char **argv) {
             u16 start_index;
             u8 length;
             Token_Kind kind;
+            u16 value;
         };
 
         #define max_token_count 0x10000
@@ -360,27 +370,35 @@ int main(int argc, char **argv) {
                     if (!is_symbol_character) break;
                 }
             } else switch (asm.data[asm_cursor]) {
-                case '#': {
+                case '0': {
                     kind = token_kind_hexadecimal;
 
-                    asm_cursor += 1;
+                    if (asm_cursor + 1 == asm.count || asm.data[asm_cursor + 1] != 'x') {
+                        log_error("expected 'x' after '0' to begin hexadecimal literal");
+                        return parse_error(asm, asm_cursor + 1, 1);
+                    }
+                    asm_cursor += 2;
                     start_index = asm_cursor;
 
-                    while (asm_cursor < asm.count && ascii_is_hexadecimal(asm.data[asm_cursor])) asm_cursor += 1;
-                    u16 digit_count = asm_cursor - start_index;
-                    if (digit_count != 2 && digit_count != 4) {
-                        log_error("expected 2 or 4 decimal digits, found %", fmt(u16, digit_count));
-                        return parse_error(asm, start_index, (u8)digit_count);
+                    if (asm_cursor == asm.count) {
+                        log_error("expected hexadecimal digits following '0x'");
+                        return parse_error(asm, 0, 0);
+                    }
+
+                    for (; asm_cursor < asm.count; asm_cursor += 1) {
+                        u8 c = asm.data[asm_cursor];
+                        if (ascii_is_hexadecimal(c)) continue;
+                        if (ascii_is_whitespace(c)) break;
+                        log_error("expected hexadecimal digits here");
+                        return parse_error(asm, asm_cursor, 1);
                     }
                 } break;
-                case '/': {
-                    bool is_comment = asm_cursor + 1 < asm.count && asm.data[asm_cursor + 1] == '/';
-                    if (is_comment) {
-                        while (asm_cursor < asm.count && asm.data[asm_cursor] != '\n') asm_cursor += 1;
-                        continue;
-                    }
-                } // fallthrough
-                case '|': case ':': case '$': case '&': case '{': case '}': case '*': case '[': case ']': {
+                case ';': {
+                    while (asm_cursor < asm.count && asm.data[asm_cursor] != '\n') asm_cursor += 1;
+                    asm_cursor += 1;
+                    continue;
+                } break;
+                case ':': case '$': case '{': case '}': case '[': case ']': {
                     kind = asm.data[asm_cursor];
                     asm_cursor += 1;
                 } break;
@@ -406,7 +424,7 @@ int main(int argc, char **argv) {
                     assert(asm.data[asm_cursor] == '"');
                     asm_cursor += 1;
                 } break;
-                case ',': {
+                case '.': {
                     kind = token_kind_opmode;
 
                     asm_cursor += 1;
@@ -462,7 +480,6 @@ int main(int argc, char **argv) {
         structdef(Label_Reference) {
             u16 token_index, address;
             u8 width;
-            bool is_insertion;
         };
         Array_Label_Reference label_references = { .arena = &arena };
 
@@ -472,17 +489,18 @@ int main(int argc, char **argv) {
         };
         Array_Curly_Reference curly_references = { .arena = &arena };
 
-        bool in_insertion_mode = false;
+        structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
+        Insertion_Mode insertion_mode = {0};
 
         for (u16 token_index = 0; token_index < tokens.count; token_index += 1) {
             Token token = tokens.data[token_index];
             String token_string = string_range(asm, token.start_index, token.start_index + token.length);
 
-            if (in_insertion_mode) {
+            if (insertion_mode.is_active) {
                 switch (token.kind) {
-                    case '&': case ']': case token_kind_hexadecimal: break;
+                    case token_kind_symbol: case ']': case '$': case token_kind_hexadecimal: case token_kind_string: break;
                     default: {
-                        log_error("insertion mode only supports addresses (e.g. &label) and hexadecimal literals");
+                        log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
                         return parse_error(asm, token.start_index, token.length);
                     }
                 };
@@ -492,42 +510,10 @@ int main(int argc, char **argv) {
             String next_string = string_range(asm, next.start_index, next.start_index + next.length);
 
             switch (token.kind) {
-                case '|': {
-                    if (next.kind != token_kind_hexadecimal) {
-                        log_error("expected hexadecimal literal following padding indicator '|'");
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-                    u16 new_cursor = (u16)int_from_hex_string(next_string);
-                    rom.count = new_cursor;
-                    token_index += 1;
-                } break;
-                case '*': assert(!in_insertion_mode); // fallthrough
-                case '&': {
-                    if (next.kind != token_kind_symbol) {
-                        log_error("expected label following '%'", fmt(String, token_string));
-                        return parse_error(asm, next.start_index, next.length);
-                    }
-
-                    Label_Reference reference = {
-                        .token_index = token_index + 1,
-                        .address = (u16)rom.count,
-                        .width = next.kind == '*' ? 1 : 2,
-                        .is_insertion = in_insertion_mode,
-                    };
-                    array_push(&label_references, &reference);
-                    u8 byte_count_for_push_instruction = !in_insertion_mode;
-                    rom.count += reference.width + byte_count_for_push_instruction;
-
-                    token_index += 1;
-                } break;
                 case '{': {
-                    Curly_Reference reference = {
-                        .address = (u16)rom.count,
-                        .is_relative = (next.kind == '$'),
-                    };
+                    Curly_Reference reference = { .address = (u16)rom.count };
                     array_push(&curly_references, &reference);
-                    rom.count += 1 + reference.is_relative;
-                    if (reference.is_relative) token_index += 1;
+                    rom.count += 2;
                 } break;
                 case '}': {
                     if (curly_references.count == 0) {
@@ -537,35 +523,57 @@ int main(int argc, char **argv) {
 
                     Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
                     if (reference.is_relative) {
-                        usize relative_difference = rom.count - reference.address;
+                        log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+
+                    u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
+                    write_u16_swap_bytes(location_to_patch, (u16)rom.count);
+                } break;
+                case '[': {
+                    if (insertion_mode.is_active) {
+                        log_error("cannot enter insertion mode while already in insertion mode");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+                    insertion_mode.is_active = true;
+
+                    bool compile_byte_count_to_closing_bracket = next.kind == '$';
+                    if (compile_byte_count_to_closing_bracket) {
+                        insertion_mode.has_relative_reference = true;
+                        Curly_Reference reference = { .address = (u16)rom.count, .is_relative = true };
+                        array_push(&curly_references, &reference);
+                        rom.count += 1;
+                        token_index += 1;
+                    }
+                } break;
+                case ']': {
+                    if (!insertion_mode.is_active) {
+                        log_error("']' has no matching '['");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+
+                    if (insertion_mode.has_relative_reference) {
+                        Curly_Reference reference = slice_pop_assume_not_empty(curly_references);
+                        if (!reference.is_relative) {
+                            log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
+                            return parse_error(asm, token.start_index, token.length);
+                        }
+
+                        usize relative_difference = rom.count - reference.address - 1;
                         if (relative_difference > 255) {
-                            log_error("relative difference from '{' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
+                            log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
                             return parse_error(asm, token.start_index, token.length);
                         }
 
                         u8 *location_to_patch = &rom.data[reference.address];
                         *location_to_patch = (u8)relative_difference;
-                    } else {
-                        u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
-                        write_u16_swap_bytes(location_to_patch, (u16)rom.count);
                     }
-                } break;
-                case '[': {
-                    if (in_insertion_mode) {
-                        log_error("cannot enter insertion mode while already in insertion mode");
-                        return parse_error(asm, token.start_index, token.length);
-                    }
-                    in_insertion_mode = true;
-                } break;
-                case ']': {
-                    if (!in_insertion_mode) {
-                        log_error("']' has no matching '['");
-                        return parse_error(asm, token.start_index, token.length);
-                    }
-                    in_insertion_mode = false;
+
+                    insertion_mode = (Insertion_Mode){0};
                 } break;
                 case token_kind_symbol: {
-                    if (next.kind == ':') {
+                    bool is_label = next.kind == ':';
+                    if (is_label) {
                         for_slice (Label *, label, labels) {
                             Token label_token = tokens.data[label->token_index];
                             String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
@@ -579,18 +587,15 @@ int main(int argc, char **argv) {
                         array_push(&labels, &new_label);
 
                         token_index += 1;
-                    } else {
-                        Vm_Instruction instruction = {0};
+                        break;
+                    }
 
-                        #define for_opcode_test_string(name, byte) else if (string_equal(token_string, string(#name))) instruction.opcode = byte;
-
-                        if (false) {}
-                        vm_for_opcode(for_opcode_test_string)
-                        else {
-                            log_error("no such opcode '%'", fmt(String, token_string));
-                            return parse_error(asm, token.start_index, token.length);
-                        }
-
+                    Vm_Instruction instruction = {0};
+                    bool is_opcode = false;
+                    #define for_opcode_test_string(name, byte, ...) else if (string_equal(token_string, string(#name))) { instruction.opcode = byte; is_opcode = true; }
+                    if (false) {}
+                    vm_for_opcode(for_opcode_test_string)
+                    if (is_opcode) {
                         bool explicit_mode = next.kind == token_kind_opmode;
                         if (explicit_mode) {
                             for_slice (u8 *, c, next_string) {
@@ -607,39 +612,100 @@ int main(int argc, char **argv) {
                         u8 byte = byte_from_instruction(instruction);
                         rom.data[rom.count] = byte;
                         rom.count += 1;
+
+                        if (instruction_takes_immediate(instruction)) {
+                            next = tokens.data[token_index + 1];
+                            if (next.kind != token_kind_symbol && next.kind != token_kind_hexadecimal) {
+                                log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
+                                return parse_error(asm, next.start_index, next.length);
+                            }
+
+                            u8 width = instruction.mode.size == vm_opcode_size_byte ? 1 : 2;
+                            if (next.kind == token_kind_symbol) {
+                                Label_Reference reference = { .token_index = token_index + 1, .address = (u16)rom.count, .width = width };
+                                array_push(&label_references, &reference);
+                                rom.count += reference.width;
+                            } else {
+                                assert(next.kind == token_kind_hexadecimal);
+                                next_string = string_range(asm, next.start_index, next.start_index + next.length);
+
+                                // TODO(felix): bounds check
+                                u16 value = (u16)int_from_hex_string(next_string);
+
+                                if (width == 1) {
+                                    if (value > 255) {
+                                        log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (% is greater than 255); did you mean to use mode '.2'?", fmt(u16, value));
+                                        return parse_error(asm, next.start_index, next.length);
+                                    }
+                                    rom.data[rom.count] = (u8)value;
+                                    rom.count += 1;
+                                } else {
+                                    assert(width == 2);
+                                    write_u16_swap_bytes((u16 *)(&rom.data[rom.count]), value);
+                                    rom.count += 2;
+                                }
+                            }
+                            token_index += 1;
+                        }
+
+                        break;
                     }
+
+                    if (string_equal(token_string, string("org"))) {
+                        if (next.kind != token_kind_hexadecimal) {
+                            log_error("expected numeric literal (byte offset) after directive 'org'");
+                            return parse_error(asm, next.start_index, next.length);
+                        }
+                        // TODO(felix): bounds check
+                        u16 value = (u16)int_from_hex_string(next_string);
+                        rom.count = value;
+
+                        token_index += 1;
+                        break;
+                    }
+
+                    Label_Reference reference = { .token_index = token_index, .address = (u16)rom.count, .width = 2 };
+                    array_push(&label_references, &reference);
+                    rom.count += reference.width;
                 } break;
                 case token_kind_hexadecimal: {
-                    Vm_Instruction instruction = {
-                        .opcode = vm_opcode_push,
-                        .mode.size = token_string.count == 4 ? vm_opcode_size_short : vm_opcode_size_byte,
-                    };
-
-                    u8 byte = byte_from_instruction(instruction);
-                    rom.data[rom.count] = byte;
-                    rom.count += 1;
-
-                    u16 value = (u16)int_from_hex_string(token_string);
-                    switch (token_string.count) {
-                        case 2: {
-                            rom.data[rom.count] = (u8)value;
-                            rom.count += 1;
-                        } break;
-                        case 4: {
-                            u16 *location_to_patch = (u16 *)(&rom.data[rom.count]);
-                            write_u16_swap_bytes(location_to_patch, value);
-                            rom.count += 2;
-                        } break;
-                        default: unreachable;
+                    if (!insertion_mode.is_active) {
+                        log_error("standalone hexadecimal literals are only supported in insertion mode (e.g. in [ ... ])");
+                        return parse_error(asm, token.start_index, token.length);
                     }
+
+                    // TODO(felix): bounds check
+                    u16 value = (u16)int_from_hex_string(token_string);
+
+                    bool is_byte = token_string.count <= 2;
+                    if (is_byte) {
+                        assert(value < 256);
+                        rom.data[rom.count] = (u8)value;
+                        rom.count += 1;
+                        break;
+                    }
+
+                    bool is_short = true;
+                    if (is_short) {
+                        write_u16_swap_bytes((u16 *)(&rom.data[rom.count]), value);
+                        rom.count += 2;
+                        break;
+                    }
+
+                    unreachable;
                 } break;
                 case token_kind_string: {
+                    if (!insertion_mode.is_active) {
+                        log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
+                        return parse_error(asm, token.start_index, token.length);
+                    }
+
                     assert(rom.count + token_string.count <= 0x10000);
                     memcpy(rom.data + rom.count, token_string.data, token_string.count);
                     rom.count += token_string.count;
                 } break;
                 default: {
-                    log_info("% %", fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove
+                    log_info("[%] % %", fmt(usize, token_index), fmt(u8, token.kind), fmt(char, token.kind)); // TODO(felix): remove
                     unreachable;
                 }
             }
@@ -664,25 +730,14 @@ int main(int argc, char **argv) {
                 return parse_error(asm, reference_token.start_index, reference_token.length);
             }
 
-            u16 address = reference->address;
-            if (!reference->is_insertion) {
-                Vm_Instruction instruction = {
-                    .opcode = vm_opcode_push,
-                    .mode.size = reference->width == 2 ? vm_opcode_size_short : vm_opcode_size_byte,
-                };
-                u8 byte = byte_from_instruction(instruction);
-                rom.data[address] = byte;
-                address += 1;
-            }
-
             switch (reference->width) {
                 case 1: {
-                    u8 *location_to_patch = &rom.data[address];
+                    u8 *location_to_patch = &rom.data[reference->address];
                     assert(match->address <= 255);
                     *location_to_patch = (u8)match->address;
                 } break;
                 case 2: {
-                    u16 *location_to_patch = (u16 *)&rom.data[address];
+                    u16 *location_to_patch = (u16 *)&rom.data[reference->address];
                     write_u16_swap_bytes(location_to_patch, match->address);
                 } break;
                 default: unreachable;

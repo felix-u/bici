@@ -1,3 +1,7 @@
+; TODO: directive `patch destination, source`
+; TODO: directive `include "file"`
+; TODO: relative/local labels (to make loops nicer)
+
 org 0x00 console_print:
 org 0x10 screen:
     org 0x10 [init]

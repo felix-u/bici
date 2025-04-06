@@ -281,6 +281,8 @@ static force_inline bool is_starting_symbol_character(u8 c) {
     return ascii_is_alpha(c) || c == '_';
 }
 
+// TODO(felix): it's probably time for an assembler context struct
+
 enumdef(Token_Kind, u8) {
     token_kind_ascii_delimiter = 128,
 
@@ -304,6 +306,7 @@ structdef(Label) {
     u16 address;
 };
 
+// TODO(felix): ZII
 static Label *find_label_by_name_via_token_index(String asm, Array_Label labels, Array_Token tokens, u16 token_index) {
     Label *match = 0;
 

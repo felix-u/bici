@@ -1,3 +1,5 @@
+[&init]
+
 |#00 console_print:
 |#10 screen:
     |#10 [&init] |#12 [&update] |#14 [&quit]

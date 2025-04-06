@@ -256,6 +256,10 @@ static u8 byte_from_instruction(Vm_Instruction instruction) {
     return byte;
 }
 
+static void write_u16_swap_bytes(u16 *location, u16 value) {
+    u16 swapped = (value << 8) | (value >> 8);
+    *location = swapped;
+}
 
 static int parse_error(String text, u16 token_start_index, u8 token_length) {
     // TODO(felix): print line and column, and highlight error in line
@@ -543,7 +547,7 @@ int main(int argc, char **argv) {
                         *location_to_patch = (u8)relative_difference;
                     } else {
                         u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
-                        *location_to_patch = (u16)rom.count;
+                        write_u16_swap_bytes(location_to_patch, (u16)rom.count);
                     }
                 } break;
                 case '[': {
@@ -622,7 +626,8 @@ int main(int argc, char **argv) {
                             rom.count += 1;
                         } break;
                         case 4: {
-                            *(u16 *)(&rom.data[rom.count]) = value;
+                            u16 *location_to_patch = (u16 *)(&rom.data[rom.count]);
+                            write_u16_swap_bytes(location_to_patch, value);
                             rom.count += 2;
                         } break;
                         default: unreachable;
@@ -660,7 +665,7 @@ int main(int argc, char **argv) {
             }
 
             u16 address = reference->address;
-            if (reference->is_insertion) {
+            if (!reference->is_insertion) {
                 Vm_Instruction instruction = {
                     .opcode = vm_opcode_push,
                     .mode.size = reference->width == 2 ? vm_opcode_size_short : vm_opcode_size_byte,
@@ -678,7 +683,7 @@ int main(int argc, char **argv) {
                 } break;
                 case 2: {
                     u16 *location_to_patch = (u16 *)&rom.data[address];
-                    *location_to_patch = match->address;
+                    write_u16_swap_bytes(location_to_patch, match->address);
                 } break;
                 default: unreachable;
             }

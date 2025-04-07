@@ -270,18 +270,9 @@ static void write_u16_swap_bytes(u16 *location, u16 value) {
     *location = swapped;
 }
 
-static int parse_error(String text, u16 token_start_index, u8 token_length) {
-    // TODO(felix): print line and column, and highlight error in line
-    String lexeme = string_range(text, token_start_index, token_start_index + token_length);
-    print("note: '%' at bytes [%..%]\n", fmt(String, lexeme), fmt(u16, token_start_index), fmt(u16, token_start_index + token_length));
-    return 1;
-}
-
 static force_inline bool is_starting_symbol_character(u8 c) {
     return ascii_is_alpha(c) || c == '_';
 }
-
-// TODO(felix): it's probably time for an assembler context struct
 
 enumdef(Token_Kind, u8) {
     token_kind_ascii_delimiter = 128,
@@ -295,19 +286,57 @@ enumdef(Token_Kind, u8) {
 };
 
 structdef(Token) {
-    u16 start_index;
+    u32 start_index;
     u8 length;
     Token_Kind kind;
     u16 value;
 };
 
+typedef u32 Token_Id;
+
 structdef(Label) {
-    u16 token_index;
+    Token_Id token_index;
     u16 address;
 };
 
+structdef(Label_Reference) {
+    Token_Id token_index;
+    union { u16 destination_address; Token_Id destination_label_token_index; };
+    u8 width;
+    bool is_patch;
+};
+
+structdef(Scoped_Reference) {
+    u16 address;
+    bool is_relative;
+};
+
+structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
+
+structdef(Assembler_Context) {
+    String asm;
+    u32 asm_cursor;
+    Array_Token tokens;
+    Array_Label labels;
+    Array_Label_Reference label_references;
+    Array_Scoped_Reference scoped_references;
+    Insertion_Mode insertion_mode;
+};
+
+static int parse_error(Assembler_Context *context, usize token_start_index, u8 token_length) {
+    String text = context->asm;
+    // TODO(felix): print line and column, and highlight error in line
+    String lexeme = string_range(text, token_start_index, token_start_index + token_length);
+    print("note: '%' at bytes [%..%]\n", fmt(String, lexeme), fmt(usize, token_start_index), fmt(usize, token_start_index + token_length));
+    return 1;
+}
+
 // TODO(felix): ZII
-static Label *find_label_by_name_via_token_index(String asm, Array_Label labels, Array_Token tokens, u16 token_index) {
+static Label *find_label_by_name_via_token_index(Assembler_Context *context, Token_Id token_index) {
+    String asm = context->asm;
+    Array_Label labels = context->labels;
+    Array_Token tokens = context->tokens;
+
     Label *match = 0;
 
     Token token = tokens.data[token_index];
@@ -324,7 +353,7 @@ static Label *find_label_by_name_via_token_index(String asm, Array_Label labels,
 
     if (match == 0) {
         log_error("no such label '%'", fmt(String, reference_string));
-        parse_error(asm, token.start_index, token.length);
+        parse_error(context, token.start_index, token.length);
     }
     return match;
 }
@@ -379,108 +408,111 @@ int main(int argc, char **argv) {
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = input_bytes;
     else {
-        #define max_token_count 0x10000
-        static Token tokens_backing_memory[max_token_count] = {0};
-        Array_Token tokens = { .data = tokens_backing_memory, .capacity = max_token_count };
+        Assembler_Context context = {
+            .asm = input_bytes,
+            .tokens = { .arena = &arena },
+            .labels = { .arena = &arena },
+            .label_references = { .arena = &arena },
+            .scoped_references = { .arena = &arena },
+        };
 
-        String asm = input_bytes;
-        for (u16 asm_cursor = 0; asm_cursor < asm.count;) {
-            while (asm_cursor < asm.count && ascii_is_whitespace(asm.data[asm_cursor])) asm_cursor += 1;
-            if (asm_cursor == asm.count) break;
+        for (; context.asm_cursor < context.asm.count;) {
+            while (context.asm_cursor < context.asm.count && ascii_is_whitespace(context.asm.data[context.asm_cursor])) context.asm_cursor += 1;
+            if (context.asm_cursor == context.asm.count) break;
 
-            u16 start_index = asm_cursor;
+            u32 start_index = context.asm_cursor;
             Token_Kind kind = 0;
-            if (is_starting_symbol_character(asm.data[asm_cursor])) {
+            if (is_starting_symbol_character(context.asm.data[context.asm_cursor])) {
                 kind = token_kind_symbol;
-                asm_cursor += 1;
+                context.asm_cursor += 1;
 
-                for (; asm_cursor < asm.count; asm_cursor += 1) {
-                    u8 c = asm.data[asm_cursor];
+                for (; context.asm_cursor < context.asm.count; context.asm_cursor += 1) {
+                    u8 c = context.asm.data[context.asm_cursor];
                     bool is_symbol_character = is_starting_symbol_character(c) || ascii_is_decimal(c);
                     if (!is_symbol_character) break;
                 }
-            } else switch (asm.data[asm_cursor]) {
+            } else switch (context.asm.data[context.asm_cursor]) {
                 case '0': {
                     kind = token_kind_hexadecimal;
 
-                    if (asm_cursor + 1 == asm.count || asm.data[asm_cursor + 1] != 'x') {
+                    if (context.asm_cursor + 1 == context.asm.count || context.asm.data[context.asm_cursor + 1] != 'x') {
                         log_error("expected 'x' after '0' to begin hexadecimal literal");
-                        return parse_error(asm, asm_cursor + 1, 1);
+                        return parse_error(&context, context.asm_cursor + 1, 1);
                     }
-                    asm_cursor += 2;
-                    start_index = asm_cursor;
+                    context.asm_cursor += 2;
+                    start_index = context.asm_cursor;
 
-                    if (asm_cursor == asm.count) {
+                    if (context.asm_cursor == context.asm.count) {
                         log_error("expected hexadecimal digits following '0x'");
-                        return parse_error(asm, 0, 0);
+                        return parse_error(&context, 0, 0);
                     }
 
-                    for (; asm_cursor < asm.count; asm_cursor += 1) {
-                        u8 c = asm.data[asm_cursor];
+                    for (; context.asm_cursor < context.asm.count; context.asm_cursor += 1) {
+                        u8 c = context.asm.data[context.asm_cursor];
                         if (ascii_is_hexadecimal(c)) continue;
                         if (ascii_is_whitespace(c)) break;
                         log_error("expected hexadecimal digits here");
-                        return parse_error(asm, asm_cursor, 1);
+                        return parse_error(&context, context.asm_cursor, 1);
                     }
                 } break;
                 case ';': {
-                    while (asm_cursor < asm.count && asm.data[asm_cursor] != '\n') asm_cursor += 1;
-                    asm_cursor += 1;
+                    while (context.asm_cursor < context.asm.count && context.asm.data[context.asm_cursor] != '\n') context.asm_cursor += 1;
+                    context.asm_cursor += 1;
                     continue;
                 } break;
                 case ':': case '$': case '{': case '}': case '[': case ']': case ',': {
-                    kind = asm.data[asm_cursor];
-                    asm_cursor += 1;
+                    kind = context.asm.data[context.asm_cursor];
+                    context.asm_cursor += 1;
                 } break;
                 case '"': {
                     kind = token_kind_string;
 
-                    asm_cursor += 1;
-                    start_index = asm_cursor;
-                    for (; asm_cursor < asm.count; asm_cursor += 1) {
-                        u8 c = asm.data[asm_cursor];
+                    context.asm_cursor += 1;
+                    start_index = context.asm_cursor;
+                    for (; context.asm_cursor < context.asm.count; context.asm_cursor += 1) {
+                        u8 c = context.asm.data[context.asm_cursor];
                         if (c == '"') break;
                         if (c == '\n') {
                             log_error("expected '\"' to close string before newline");
-                            return parse_error(asm, start_index, (u8)(asm_cursor - start_index));
+                            return parse_error(&context, start_index, (u8)(context.asm_cursor - start_index));
                         }
                     }
 
-                    if (asm_cursor == asm.count) {
+                    if (context.asm_cursor == context.asm.count) {
                         log_error("expected '\"' to close string before end of file");
-                        return parse_error(asm, start_index, (u8)(asm_cursor - start_index));
+                        return parse_error(&context, start_index, (u8)(context.asm_cursor - start_index));
                     }
 
-                    assert(asm.data[asm_cursor] == '"');
-                    asm_cursor += 1;
+                    assert(context.asm.data[context.asm_cursor] == '"');
+                    context.asm_cursor += 1;
                 } break;
                 case '.': {
                     kind = token_kind_opmode;
 
-                    asm_cursor += 1;
-                    start_index = asm_cursor;
-                    for (; asm_cursor < asm.count; asm_cursor += 1) {
-                        u8 c = asm.data[asm_cursor];
+                    context.asm_cursor += 1;
+                    start_index = context.asm_cursor;
+                    for (; context.asm_cursor < context.asm.count; context.asm_cursor += 1) {
+                        u8 c = context.asm.data[context.asm_cursor];
                         if (ascii_is_whitespace(c)) break;
                         if (c != '2' && c != 'k' && c != 'r') {
                             log_error("only characters '2', 'k', and 'r' are valid op modes");
-                            return parse_error(asm, asm_cursor, 1);
+                            return parse_error(&context, context.asm_cursor, 1);
                         }
                     }
 
-                    u16 length = asm_cursor - start_index;
+                    usize length = context.asm_cursor - start_index;
                     if (length == 0 || length > 3) {
-                        log_error("a valid op mode contains 1, 2, or 3 characters (as in op,2kr), but this one has %", fmt(u16, length));
-                        return parse_error(asm, start_index, (u8)length);
+                        log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %", fmt(usize, length));
+                        return parse_error(&context, start_index, (u8)length);
                     }
                 } break;
                 default: {
-                    log_error("invalid syntax '%'", fmt(char, asm.data[asm_cursor]));
-                    return parse_error(asm, asm_cursor, 1);
+                    log_error("invalid syntax '%'", fmt(char, context.asm.data[context.asm_cursor]));
+                    return parse_error(&context, context.asm_cursor, 1);
                 }
             }
 
-            u16 length = asm_cursor - start_index;
+            usize length = context.asm_cursor - start_index;
             if (kind == token_kind_string) length -= 1;
             assert(length <= 255);
 
@@ -489,124 +521,105 @@ int main(int argc, char **argv) {
                 .length = (u8)length,
                 .kind = kind,
             };
-            array_push_assume_capacity(&tokens, &token);
+            array_push(&context.tokens, &token);
         }
 
         // NOTE(felix): we can do lookahead by one token without a bounds check
-        assert(tokens.count < tokens.capacity);
+        array_ensure_capacity(&context.tokens, context.tokens.count + 1);
 
-        Array_Label labels = { .arena = &arena };
+        for (Token_Id token_index = 0; token_index < context.tokens.count; token_index += 1) {
+            Token token = context.tokens.data[token_index];
+            String token_string = string_range(context.asm, token.start_index, token.start_index + token.length);
 
-        structdef(Label_Reference) {
-            u16 token_index;
-            union { u16 destination_address, destination_label_token_index; };
-            u8 width;
-            bool is_patch;
-        };
-        Array_Label_Reference label_references = { .arena = &arena };
-
-        structdef(Scoped_Reference) {
-            u16 address;
-            bool is_relative;
-        };
-        Array_Scoped_Reference scoped_reference = { .arena = &arena };
-
-        structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
-        Insertion_Mode insertion_mode = {0};
-
-        for (u16 token_index = 0; token_index < tokens.count; token_index += 1) {
-            Token token = tokens.data[token_index];
-            String token_string = string_range(asm, token.start_index, token.start_index + token.length);
-
-            if (insertion_mode.is_active) {
+            if (context.insertion_mode.is_active) {
                 switch (token.kind) {
                     case token_kind_symbol: case ']': case '$': case token_kind_hexadecimal: case token_kind_string: break;
                     default: {
                         log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
                 };
             }
 
-            Token next = tokens.data[token_index + 1];
-            String next_string = string_range(asm, next.start_index, next.start_index + next.length);
+            Token next = context.tokens.data[token_index + 1];
+            String next_string = string_range(context.asm, next.start_index, next.start_index + next.length);
 
             switch (token.kind) {
                 case '{': {
                     Scoped_Reference reference = { .address = (u16)rom.count };
-                    array_push(&scoped_reference, &reference);
+                    array_push(&context.scoped_references, &reference);
                     rom.count += 2;
                 } break;
                 case '}': {
-                    if (scoped_reference.count == 0) {
+                    if (context.scoped_references.count == 0) {
                         log_error("'}' has no matching '{'");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
 
-                    Scoped_Reference reference = slice_pop_assume_not_empty(scoped_reference);
+                    Scoped_Reference reference = slice_pop_assume_not_empty(context.scoped_references);
                     if (reference.is_relative) {
                         log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
 
                     u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
                     write_u16_swap_bytes(location_to_patch, (u16)rom.count);
                 } break;
                 case '[': {
-                    if (insertion_mode.is_active) {
+                    if (context.insertion_mode.is_active) {
                         log_error("cannot enter insertion mode while already in insertion mode");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
-                    insertion_mode.is_active = true;
+                    context.insertion_mode.is_active = true;
 
                     bool compile_byte_count_to_closing_bracket = next.kind == '$';
                     if (compile_byte_count_to_closing_bracket) {
-                        insertion_mode.has_relative_reference = true;
+                        context.insertion_mode.has_relative_reference = true;
                         Scoped_Reference reference = { .address = (u16)rom.count, .is_relative = true };
-                        array_push(&scoped_reference, &reference);
+                        array_push(&context.scoped_references, &reference);
                         rom.count += 1;
                         token_index += 1;
                     }
                 } break;
                 case ']': {
-                    if (!insertion_mode.is_active) {
+                    if (!context.insertion_mode.is_active) {
                         log_error("']' has no matching '['");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
 
-                    if (insertion_mode.has_relative_reference) {
-                        Scoped_Reference reference = slice_pop_assume_not_empty(scoped_reference);
+                    if (context.insertion_mode.has_relative_reference) {
+                        Scoped_Reference reference = slice_pop_assume_not_empty(context.scoped_references);
                         if (!reference.is_relative) {
                             log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
-                            return parse_error(asm, token.start_index, token.length);
+                            return parse_error(&context, token.start_index, token.length);
                         }
 
                         usize relative_difference = rom.count - reference.address - 1;
                         if (relative_difference > 255) {
                             log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
-                            return parse_error(asm, token.start_index, token.length);
+                            return parse_error(&context, token.start_index, token.length);
                         }
 
                         u8 *location_to_patch = &rom.data[reference.address];
                         *location_to_patch = (u8)relative_difference;
                     }
 
-                    insertion_mode = (Insertion_Mode){0};
+                    context.insertion_mode = (Insertion_Mode){0};
                 } break;
                 case token_kind_symbol: {
                     bool is_label = next.kind == ':';
                     if (is_label) {
-                        for_slice (Label *, label, labels) {
-                            Token label_token = tokens.data[label->token_index];
-                            String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+                        for_slice (Label *, label, context.labels) {
+                            Token label_token = context.tokens.data[label->token_index];
+                            String label_string = string_range(context.asm, label_token.start_index, label_token.start_index + label_token.length);
                             if (string_equal(label_string, token_string)) {
                                 log_error("redefinition of label '%'", fmt(String, token_string));
-                                return parse_error(asm, token.start_index, token.length);
+                                return parse_error(&context, token.start_index, token.length);
                             }
                         }
 
                         Label new_label = { .token_index = token_index, .address = (u16)rom.count };
-                        array_push(&labels, &new_label);
+                        array_push(&context.labels, &new_label);
 
                         token_index += 1;
                         break;
@@ -636,12 +649,12 @@ int main(int argc, char **argv) {
                         rom.count += 1;
 
                         if (instruction_takes_immediate(instruction)) {
-                            next = tokens.data[token_index + 1];
+                            next = context.tokens.data[token_index + 1];
                             switch (next.kind) {
                                 case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
                                 default: {
                                     log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
-                                    return parse_error(asm, next.start_index, next.length);
+                                    return parse_error(&context, next.start_index, next.length);
                                 }
                             }
 
@@ -652,11 +665,11 @@ int main(int argc, char **argv) {
 
                             if (next.kind == token_kind_symbol) {
                                 Label_Reference reference = { .token_index = token_index + 1, .destination_address = (u16)rom.count, .width = width };
-                                array_push(&label_references, &reference);
+                                array_push(&context.label_references, &reference);
                                 rom.count += reference.width;
                             } else {
                                 assert(next.kind == token_kind_hexadecimal);
-                                next_string = string_range(asm, next.start_index, next.start_index + next.length);
+                                next_string = string_range(context.asm, next.start_index, next.start_index + next.length);
 
                                 // TODO(felix): bounds check
                                 u16 value = (u16)int_from_hex_string(next_string);
@@ -664,7 +677,7 @@ int main(int argc, char **argv) {
                                 if (width == 1) {
                                     if (value > 255) {
                                         log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (% is greater than 255); did you mean to use mode '.2'?", fmt(u16, value));
-                                        return parse_error(asm, next.start_index, next.length);
+                                        return parse_error(&context, next.start_index, next.length);
                                     }
                                     rom.data[rom.count] = (u8)value;
                                     rom.count += 1;
@@ -683,7 +696,7 @@ int main(int argc, char **argv) {
                     if (string_equal(token_string, string("org"))) {
                         if (next.kind != token_kind_hexadecimal) {
                             log_error("expected numeric literal (byte offset) after directive 'org'");
-                            return parse_error(asm, next.start_index, next.length);
+                            return parse_error(&context, next.start_index, next.length);
                         }
                         // TODO(felix): bounds check
                         u16 value = (u16)int_from_hex_string(next_string);
@@ -694,38 +707,52 @@ int main(int argc, char **argv) {
                     } else if (string_equal(token_string, string("patch"))) {
                         if (next.kind != token_kind_symbol) {
                             log_error("expected label to indicate destination offset as first argument to directive 'patch'");
-                            return parse_error(asm, next.start_index, next.length);
+                            return parse_error(&context, next.start_index, next.length);
                         }
 
                         token_index += 1;
                         Label_Reference reference = { .is_patch = true, .destination_label_token_index = token_index };
 
-                        next = tokens.data[token_index + 1];
+                        next = context.tokens.data[token_index + 1];
                         if (next.kind != ',') {
                             log_error("expected ',' after between first and second arguments to directive 'patch'");
-                            return parse_error(asm, next.start_index, next.length);
+                            return parse_error(&context, next.start_index, next.length);
                         }
 
                         token_index += 1;
-                        next = tokens.data[token_index + 1];
+                        next = context.tokens.data[token_index + 1];
                         if (next.kind != token_kind_symbol) {
                             log_error("expected label to indicate address as second argument to directive 'patch'");
-                            return parse_error(asm, next.start_index, next.length);
+                            return parse_error(&context, next.start_index, next.length);
                         }
 
                         token_index += 1;
                         reference.token_index = token_index;
-                        array_push(&label_references, &reference);
+                        array_push(&context.label_references, &reference);
+                    } else if (string_equal(token_string, string("include"))) {
+                        if (next.kind != token_kind_string) {
+                            log_error("expected string following directive 'include'");
+                            return parse_error(&context, next.start_index, next.length);
+                        }
+
+                        char *include_filepath = cstring_from_string(&arena, next_string);
+                        String include_bytes = file_read_bytes_relative_path(&arena, include_filepath, 0x10000);
+                        if (include_bytes.count == 0) return 1;
+
+                        print("TODO(felix): tokenise include\n");
+
+                        token_index += 1;
+                        break;
                     }
 
                     Label_Reference reference = { .token_index = token_index, .destination_address = (u16)rom.count, .width = 2 };
-                    array_push(&label_references, &reference);
+                    array_push(&context.label_references, &reference);
                     rom.count += reference.width;
                 } break;
                 case token_kind_hexadecimal: {
-                    if (!insertion_mode.is_active) {
+                    if (!context.insertion_mode.is_active) {
                         log_error("standalone hexadecimal literals are only supported in insertion mode (e.g. in [ ... ])");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
 
                     // TODO(felix): bounds check
@@ -749,9 +776,9 @@ int main(int argc, char **argv) {
                     unreachable;
                 } break;
                 case token_kind_string: {
-                    if (!insertion_mode.is_active) {
+                    if (!context.insertion_mode.is_active) {
                         log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
-                        return parse_error(asm, token.start_index, token.length);
+                        return parse_error(&context, token.start_index, token.length);
                     }
 
                     assert(rom.count + token_string.count <= 0x10000);
@@ -760,22 +787,22 @@ int main(int argc, char **argv) {
                 } break;
                 default: {
                     log_error("invalid syntax");
-                    return parse_error(asm, token.start_index, token.length);
+                    return parse_error(&context, token.start_index, token.length);
                 }
             }
         }
 
-        if (scoped_reference.count != 0) {
-            log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, scoped_reference.count));
-            return parse_error(asm, 0, 0);
+        if (context.scoped_references.count != 0) {
+            log_error("% anonymous reference(s) ('{') without matching '}'", fmt(usize, context.scoped_references.count));
+            return parse_error(&context, 0, 0);
         }
 
-        for_slice (Label_Reference *, reference, label_references) {
-            Label *match = find_label_by_name_via_token_index(asm, labels, tokens, reference->token_index);
+        for_slice (Label_Reference *, reference, context.label_references) {
+            Label *match = find_label_by_name_via_token_index(&context, reference->token_index);
             if (match == 0) return 1;
 
             if (reference->is_patch) {
-                Label *destination_label = find_label_by_name_via_token_index(asm, labels, tokens, reference->destination_label_token_index);
+                Label *destination_label = find_label_by_name_via_token_index(&context, reference->destination_label_token_index);
                 if (destination_label == 0) return 1;
 
                 u16 *location_to_patch = (u16 *)&rom.data[destination_label->address];

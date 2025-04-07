@@ -295,13 +295,13 @@ structdef(Token) {
 typedef u32 Token_Id;
 
 structdef(Label) {
-    Token_Id token_index;
+    Token_Id token_id;
     u16 address;
 };
 
 structdef(Label_Reference) {
-    Token_Id token_index;
-    union { u16 destination_address; Token_Id destination_label_token_index; };
+    Token_Id token_id;
+    union { u16 destination_address; Token_Id destination_label_token_id; };
     u8 width;
     bool is_patch;
 };
@@ -317,13 +317,14 @@ structdef(Assembler_Context) {
     String asm;
     u32 asm_cursor;
     Array_Token tokens;
+    Token_Id token_id;
     Array_Label labels;
     Array_Label_Reference label_references;
     Array_Scoped_Reference scoped_references;
     Insertion_Mode insertion_mode;
 };
 
-static int parse_error(Assembler_Context *context, usize token_start_index, u8 token_length) {
+static int parse_error(Assembler_Context *context, u32 token_start_index, u8 token_length) {
     String text = context->asm;
     // TODO(felix): print line and column, and highlight error in line
     String lexeme = string_range(text, token_start_index, token_start_index + token_length);
@@ -332,18 +333,18 @@ static int parse_error(Assembler_Context *context, usize token_start_index, u8 t
 }
 
 // TODO(felix): ZII
-static Label *find_label_by_name_via_token_index(Assembler_Context *context, Token_Id token_index) {
+static Label *find_label_by_name_via_token_index(Assembler_Context *context, Token_Id token_id) {
     String asm = context->asm;
     Array_Label labels = context->labels;
     Array_Token tokens = context->tokens;
 
     Label *match = 0;
 
-    Token token = tokens.data[token_index];
+    Token token = tokens.data[token_id];
     String reference_string = string_range(asm, token.start_index, token.start_index + token.length);
 
     for_slice (Label *, label, labels) {
-        Token label_token = tokens.data[label->token_index];
+        Token label_token = tokens.data[label->token_id];
         String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
 
         if (!string_equal(reference_string, label_string)) continue;
@@ -527,8 +528,8 @@ int main(int argc, char **argv) {
         // NOTE(felix): we can do lookahead by one token without a bounds check
         array_ensure_capacity(&context.tokens, context.tokens.count + 1);
 
-        for (Token_Id token_index = 0; token_index < context.tokens.count; token_index += 1) {
-            Token token = context.tokens.data[token_index];
+        for (; context.token_id < context.tokens.count; context.token_id += 1) {
+            Token token = context.tokens.data[context.token_id];
             String token_string = string_range(context.asm, token.start_index, token.start_index + token.length);
 
             if (context.insertion_mode.is_active) {
@@ -541,7 +542,7 @@ int main(int argc, char **argv) {
                 };
             }
 
-            Token next = context.tokens.data[token_index + 1];
+            Token next = context.tokens.data[context.token_id + 1];
             String next_string = string_range(context.asm, next.start_index, next.start_index + next.length);
 
             switch (token.kind) {
@@ -578,7 +579,7 @@ int main(int argc, char **argv) {
                         Scoped_Reference reference = { .address = (u16)rom.count, .is_relative = true };
                         array_push(&context.scoped_references, &reference);
                         rom.count += 1;
-                        token_index += 1;
+                        context.token_id += 1;
                     }
                 } break;
                 case ']': {
@@ -610,7 +611,7 @@ int main(int argc, char **argv) {
                     bool is_label = next.kind == ':';
                     if (is_label) {
                         for_slice (Label *, label, context.labels) {
-                            Token label_token = context.tokens.data[label->token_index];
+                            Token label_token = context.tokens.data[label->token_id];
                             String label_string = string_range(context.asm, label_token.start_index, label_token.start_index + label_token.length);
                             if (string_equal(label_string, token_string)) {
                                 log_error("redefinition of label '%'", fmt(String, token_string));
@@ -618,10 +619,10 @@ int main(int argc, char **argv) {
                             }
                         }
 
-                        Label new_label = { .token_index = token_index, .address = (u16)rom.count };
+                        Label new_label = { .token_id = context.token_id, .address = (u16)rom.count };
                         array_push(&context.labels, &new_label);
 
-                        token_index += 1;
+                        context.token_id += 1;
                         break;
                     }
 
@@ -641,7 +642,7 @@ int main(int argc, char **argv) {
                                     default: unreachable;
                                 }
                             }
-                            token_index += 1;
+                            context.token_id += 1;
                         }
 
                         u8 byte = byte_from_instruction(instruction);
@@ -649,7 +650,7 @@ int main(int argc, char **argv) {
                         rom.count += 1;
 
                         if (instruction_takes_immediate(instruction)) {
-                            next = context.tokens.data[token_index + 1];
+                            next = context.tokens.data[context.token_id + 1];
                             switch (next.kind) {
                                 case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
                                 default: {
@@ -664,7 +665,7 @@ int main(int argc, char **argv) {
                             if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
 
                             if (next.kind == token_kind_symbol) {
-                                Label_Reference reference = { .token_index = token_index + 1, .destination_address = (u16)rom.count, .width = width };
+                                Label_Reference reference = { .token_id = context.token_id + 1, .destination_address = (u16)rom.count, .width = width };
                                 array_push(&context.label_references, &reference);
                                 rom.count += reference.width;
                             } else {
@@ -687,7 +688,7 @@ int main(int argc, char **argv) {
                                     rom.count += 2;
                                 }
                             }
-                            token_index += 1;
+                            context.token_id += 1;
                         }
 
                         break;
@@ -702,7 +703,7 @@ int main(int argc, char **argv) {
                         u16 value = (u16)int_from_hex_string(next_string);
                         rom.count = value;
 
-                        token_index += 1;
+                        context.token_id += 1;
                         break;
                     } else if (string_equal(token_string, string("patch"))) {
                         if (next.kind != token_kind_symbol) {
@@ -710,24 +711,24 @@ int main(int argc, char **argv) {
                             return parse_error(&context, next.start_index, next.length);
                         }
 
-                        token_index += 1;
-                        Label_Reference reference = { .is_patch = true, .destination_label_token_index = token_index };
+                        context.token_id += 1;
+                        Label_Reference reference = { .is_patch = true, .destination_label_token_id = context.token_id };
 
-                        next = context.tokens.data[token_index + 1];
+                        next = context.tokens.data[context.token_id + 1];
                         if (next.kind != ',') {
                             log_error("expected ',' after between first and second arguments to directive 'patch'");
                             return parse_error(&context, next.start_index, next.length);
                         }
 
-                        token_index += 1;
-                        next = context.tokens.data[token_index + 1];
+                        context.token_id += 1;
+                        next = context.tokens.data[context.token_id + 1];
                         if (next.kind != token_kind_symbol) {
                             log_error("expected label to indicate address as second argument to directive 'patch'");
                             return parse_error(&context, next.start_index, next.length);
                         }
 
-                        token_index += 1;
-                        reference.token_index = token_index;
+                        context.token_id += 1;
+                        reference.token_id = context.token_id;
                         array_push(&context.label_references, &reference);
                     } else if (string_equal(token_string, string("include"))) {
                         if (next.kind != token_kind_string) {
@@ -741,11 +742,11 @@ int main(int argc, char **argv) {
 
                         print("TODO(felix): tokenise include\n");
 
-                        token_index += 1;
+                        context.token_id += 1;
                         break;
                     }
 
-                    Label_Reference reference = { .token_index = token_index, .destination_address = (u16)rom.count, .width = 2 };
+                    Label_Reference reference = { .token_id = context.token_id, .destination_address = (u16)rom.count, .width = 2 };
                     array_push(&context.label_references, &reference);
                     rom.count += reference.width;
                 } break;
@@ -798,11 +799,11 @@ int main(int argc, char **argv) {
         }
 
         for_slice (Label_Reference *, reference, context.label_references) {
-            Label *match = find_label_by_name_via_token_index(&context, reference->token_index);
+            Label *match = find_label_by_name_via_token_index(&context, reference->token_id);
             if (match == 0) return 1;
 
             if (reference->is_patch) {
-                Label *destination_label = find_label_by_name_via_token_index(&context, reference->destination_label_token_index);
+                Label *destination_label = find_label_by_name_via_token_index(&context, reference->destination_label_token_id);
                 if (destination_label == 0) return 1;
 
                 u16 *location_to_patch = (u16 *)&rom.data[destination_label->address];
@@ -840,8 +841,8 @@ int main(int argc, char **argv) {
         String_Builder builder = { .arena = &persistent_arena };
         {
             string_builder_print(&builder, "MEMORY ===\n");
-            for (u16 token_index = 0x100; token_index < rom.count; token_index += 1) {
-                u8 byte = vm.memory[token_index];
+            for (u16 token_id = 0x100; token_id < rom.count; token_id += 1) {
+                u8 byte = vm.memory[token_id];
 
                 String mode_string = string("");
                 if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
@@ -855,7 +856,7 @@ int main(int argc, char **argv) {
                 }
 
                 string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
-                    fmt(u16, token_index, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
+                    fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
                 );
             }
             string_builder_print(&builder, "\nRUN ===\n");
@@ -882,9 +883,9 @@ int main(int argc, char **argv) {
         vm_run_to_break(&vm, vm_on_screen_quit_pc);
 
         print("param  stack (bot->top): { ");
-        for (u8 token_index = 0; token_index < vm.stacks[stack_param].data; token_index += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[token_index], .base = 16));
+        for (u8 token_id = 0; token_id < vm.stacks[stack_param].data; token_id += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[token_id], .base = 16));
         print("}\nreturn stack (bot->top): { ");
-        for (u8 token_index = 0; token_index < vm.stacks[stack_return].data; token_index += 1) print("% ", fmt(u64, vm.stacks[stack_return].memory[token_index], .base = 16));
+        for (u8 token_id = 0; token_id < vm.stacks[stack_return].data; token_id += 1) print("% ", fmt(u64, vm.stacks[stack_return].memory[token_id], .base = 16));
         print("}\n");
     }
 

@@ -10,7 +10,7 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script draw.asm"
+  arguments: "script self_visualiser.asm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////

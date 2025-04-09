@@ -332,33 +332,6 @@ static int parse_error(Assembler_Context *context, u32 token_start_index, u8 tok
     return 1;
 }
 
-// TODO(felix): ZII
-static Label *find_label_by_name_via_token_index(Assembler_Context *context, Token_Id token_id) {
-    String asm = context->asm;
-    Array_Label labels = context->labels;
-    Array_Token tokens = context->tokens;
-
-    Label *match = 0;
-
-    Token token = tokens.data[token_id];
-    String reference_string = string_range(asm, token.start_index, token.start_index + token.length);
-
-    for_slice (Label *, label, labels) {
-        Token label_token = tokens.data[label->token_id];
-        String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
-
-        if (!string_equal(reference_string, label_string)) continue;
-        match = label;
-        break;
-    }
-
-    if (match == 0) {
-        log_error("no such label '%'", fmt(String, reference_string));
-        parse_error(context, token.start_index, token.length);
-    }
-    return match;
-}
-
 #define usage "usage: bici <com|run|script> <file...>"
 
 int main(int argc, char **argv) {
@@ -799,24 +772,48 @@ int main(int argc, char **argv) {
         }
 
         for_slice (Label_Reference *, reference, context.label_references) {
-            Label *match = find_label_by_name_via_token_index(&context, reference->token_id);
-            if (match == 0) return 1;
+            Label *source_label = 0, *destination_label = 0;
+            Label **to_match[] = { &source_label, &destination_label };
+            Token_Id match_against[] = { reference->token_id, reference->destination_label_token_id };
+            usize match_count = reference->is_patch ? 2 : 1;
+
+            for (usize i = 0; i < match_count; i += 1) {
+                Label **match = to_match[i];
+                Token_Id token_id = match_against[i];
+                String asm = context.asm;
+                Array_Label labels = context.labels;
+                Array_Token tokens = context.tokens;
+
+                Token token = tokens.data[token_id];
+                String reference_string = string_range(asm, token.start_index, token.start_index + token.length);
+
+                for_slice (Label *, label, labels) {
+                    Token label_token = tokens.data[label->token_id];
+                    String label_string = string_range(asm, label_token.start_index, label_token.start_index + label_token.length);
+
+                    if (!string_equal(reference_string, label_string)) continue;
+                    *match = label;
+                    break;
+                }
+
+                if (*match == 0) {
+                    log_error("no such label '%'", fmt(String, reference_string));
+                    return parse_error(&context, token.start_index, token.length);
+                }
+            }
 
             if (reference->is_patch) {
-                Label *destination_label = find_label_by_name_via_token_index(&context, reference->destination_label_token_id);
-                if (destination_label == 0) return 1;
-
                 u16 *location_to_patch = (u16 *)&rom.data[destination_label->address];
-                write_u16_swap_bytes(location_to_patch, match->address);
+                write_u16_swap_bytes(location_to_patch, source_label->address);
             } else switch (reference->width) {
                 case 1: {
                     u8 *location_to_patch = &rom.data[reference->destination_address];
-                    assert(match->address <= 255);
-                    *location_to_patch = (u8)match->address;
+                    assert(source_label->address <= 255);
+                    *location_to_patch = (u8)source_label->address;
                 } break;
                 case 2: {
                     u16 *location_to_patch = (u16 *)&rom.data[reference->destination_address];
-                    write_u16_swap_bytes(location_to_patch, match->address);
+                    write_u16_swap_bytes(location_to_patch, source_label->address);
                 } break;
                 default: unreachable;
             }

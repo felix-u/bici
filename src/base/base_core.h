@@ -144,7 +144,7 @@ typedef Array(void) Array_void;
 typedef Array(u8) Array_u8;
 
 #define for_slice(ptr_type, name, slice)\
-    for (ptr_type name = slice.data; name < slice.data + slice.count; name += 1)
+    for (ptr_type name = slice.data; (name == 0 ? false : name < slice.data + slice.count); name += 1)
 
 #define array_count(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define array_size(arr) ((arr).capacity * sizeof(*((arr).data)))

@@ -1,9 +1,8 @@
-org 0x00 console_print:
-org 0x10 screen:
-    org 0x10 [init]
-    org 0x11 pixel:
-    org 0x12 [update]
-    org 0x14 [quit]
+include "header.asm"
+
+patch init_routine, init
+patch update_routine, update
+patch quit_routine, quit
 
 org 0x100
 

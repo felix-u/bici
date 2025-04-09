@@ -321,7 +321,6 @@ structdef(Input_File) { String name, bytes; Array_Token tokens; };
 
 structdef(Assembler_Context) {
     Array_Input_File files;
-    File_Id file_id;
     Array_Label labels;
     Array_Label_Reference label_references;
     Array_Scoped_Reference scoped_references;
@@ -359,8 +358,7 @@ static String token_lexeme(Assembler_Context *context, Token_Id token_id) {
     return token_string;
 }
 
-static int parse_error(Assembler_Context *context, u32 token_start_index, u8 token_length) {
-    File_Id file_id = context->file_id;
+static int parse_error(Assembler_Context *context, File_Id file_id, u32 token_start_index, u8 token_length) {
     String text = context->files.data[file_id].bytes;
     String file_name = context->files.data[file_id].name;
     // TODO(felix): print line and column, and highlight error in line
@@ -429,15 +427,15 @@ int main(int argc, char **argv) {
         Input_File main_file = { .bytes = input_bytes, .name = string_from_cstring(input_filepath), .tokens = { .arena = &arena } };
         array_push(&context.files, &main_file);
 
-        structdef(File_Cursor) { File_Id file_id; u32 asm_cursor; Token_Id token_id; };
+        structdef(File_Cursor) { Token_Id token_id; u32 asm_cursor; };
         Array_File_Cursor file_stack = { .arena = &arena };
         File_Cursor main_file_cursor = {0};
         array_push(&file_stack, &main_file_cursor);
 
         while (file_stack.count > 0) {
             File_Cursor file_cursor = slice_pop_assume_not_empty(file_stack);
-            context.file_id = file_cursor.file_id;
-            Input_File *file = &context.files.data[context.file_id];
+            File_Id file_id = file_cursor.token_id.file_id;
+            Input_File *file = &context.files.data[file_id];
             String asm = file->bytes;
 
             for (u32 asm_cursor = file_cursor.asm_cursor; asm_cursor < asm.count;) {
@@ -461,14 +459,14 @@ int main(int argc, char **argv) {
 
                         if (asm_cursor + 1 == asm.count || asm.data[asm_cursor + 1] != 'x') {
                             log_error("expected 'x' after '0' to begin hexadecimal literal");
-                            return parse_error(&context, asm_cursor + 1, 1);
+                            return parse_error(&context, file_id, asm_cursor + 1, 1);
                         }
                         asm_cursor += 2;
                         start_index = asm_cursor;
 
                         if (asm_cursor == asm.count) {
                             log_error("expected hexadecimal digits following '0x'");
-                            return parse_error(&context, 0, 0);
+                            return parse_error(&context, file_id, 0, 0);
                         }
 
                         for (; asm_cursor < asm.count; asm_cursor += 1) {
@@ -476,7 +474,7 @@ int main(int argc, char **argv) {
                             if (ascii_is_hexadecimal(c)) continue;
                             if (ascii_is_whitespace(c)) break;
                             log_error("expected hexadecimal digits here");
-                            return parse_error(&context, asm_cursor, 1);
+                            return parse_error(&context, file_id, asm_cursor, 1);
                         }
                     } break;
                     case ';': {
@@ -498,13 +496,13 @@ int main(int argc, char **argv) {
                             if (c == '"') break;
                             if (c == '\n') {
                                 log_error("expected '\"' to close string before newline");
-                                return parse_error(&context, start_index, (u8)(asm_cursor - start_index));
+                                return parse_error(&context, file_id, start_index, (u8)(asm_cursor - start_index));
                             }
                         }
 
                         if (asm_cursor == asm.count) {
                             log_error("expected '\"' to close string before end of file");
-                            return parse_error(&context, start_index, (u8)(asm_cursor - start_index));
+                            return parse_error(&context, file_id, start_index, (u8)(asm_cursor - start_index));
                         }
 
                         assert(asm.data[asm_cursor] == '"');
@@ -520,19 +518,19 @@ int main(int argc, char **argv) {
                             if (ascii_is_whitespace(c)) break;
                             if (c != '2' && c != 'k' && c != 'r') {
                                 log_error("only characters '2', 'k', and 'r' are valid op modes");
-                                return parse_error(&context, asm_cursor, 1);
+                                return parse_error(&context, file_id, asm_cursor, 1);
                             }
                         }
 
                         usize length = asm_cursor - start_index;
                         if (length == 0 || length > 3) {
                             log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %", fmt(usize, length));
-                            return parse_error(&context, start_index, (u8)length);
+                            return parse_error(&context, file_id, start_index, (u8)length);
                         }
                     } break;
                     default: {
                         log_error("invalid syntax '%'", fmt(char, asm.data[asm_cursor]));
-                        return parse_error(&context, asm_cursor, 1);
+                        return parse_error(&context, file_id, asm_cursor, 1);
                     }
                 }
 
@@ -557,7 +555,7 @@ int main(int argc, char **argv) {
                         case token_kind_symbol: case ']': case '$': case token_kind_hexadecimal: case token_kind_string: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
                     };
                 }
@@ -575,13 +573,13 @@ int main(int argc, char **argv) {
                     case '}': {
                         if (context.scoped_references.count == 0) {
                             log_error("'}' has no matching '{'");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
                         Scoped_Reference reference = slice_pop_assume_not_empty(context.scoped_references);
                         if (reference.is_relative) {
                             log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
                         u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
@@ -590,7 +588,7 @@ int main(int argc, char **argv) {
                     case '[': {
                         if (context.insertion_mode.is_active) {
                             log_error("cannot enter insertion mode while already in insertion mode");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
                         context.insertion_mode.is_active = true;
 
@@ -606,20 +604,20 @@ int main(int argc, char **argv) {
                     case ']': {
                         if (!context.insertion_mode.is_active) {
                             log_error("']' has no matching '['");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
                         if (context.insertion_mode.has_relative_reference) {
                             Scoped_Reference reference = slice_pop_assume_not_empty(context.scoped_references);
                             if (!reference.is_relative) {
                                 log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
-                                return parse_error(&context, token.start_index, token.length);
+                                return parse_error(&context, file_id, token.start_index, token.length);
                             }
 
                             usize relative_difference = rom.count - reference.address - 1;
                             if (relative_difference > 255) {
                                 log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
-                                return parse_error(&context, token.start_index, token.length);
+                                return parse_error(&context, file_id, token.start_index, token.length);
                             }
 
                             u8 *location_to_patch = &rom.data[reference.address];
@@ -635,7 +633,7 @@ int main(int argc, char **argv) {
                                 String label_string = token_lexeme(&context, label->token_id);
                                 if (string_equal(label_string, token_string)) {
                                     log_error("redefinition of label '%'", fmt(String, token_string));
-                                    return parse_error(&context, token.start_index, token.length);
+                                    return parse_error(&context, file_id, token.start_index, token.length);
                                 }
                             }
 
@@ -675,7 +673,7 @@ int main(int argc, char **argv) {
                                     case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
                                     default: {
                                         log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
-                                        return parse_error(&context, next.start_index, next.length);
+                                        return parse_error(&context, file_id, next.start_index, next.length);
                                     }
                                 }
 
@@ -698,7 +696,7 @@ int main(int argc, char **argv) {
                                     if (width == 1) {
                                         if (value > 255) {
                                             log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (% is greater than 255); did you mean to use mode '.2'?", fmt(u16, value));
-                                            return parse_error(&context, next.start_index, next.length);
+                                            return parse_error(&context, file_id, next.start_index, next.length);
                                         }
                                         rom.data[rom.count] = (u8)value;
                                         rom.count += 1;
@@ -717,7 +715,7 @@ int main(int argc, char **argv) {
                         if (string_equal(token_string, string("org"))) {
                             if (next.kind != token_kind_hexadecimal) {
                                 log_error("expected numeric literal (byte offset) after directive 'org'");
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
                             // TODO(felix): bounds check
                             u16 value = (u16)int_from_hex_string(next_string);
@@ -728,7 +726,7 @@ int main(int argc, char **argv) {
                         } else if (string_equal(token_string, string("patch"))) {
                             if (next.kind != token_kind_symbol) {
                                 log_error("expected label to indicate destination offset as first argument to directive 'patch'");
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -737,14 +735,14 @@ int main(int argc, char **argv) {
                             next = *token_get(&context, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
                                 log_error("expected ',' after between first and second arguments to directive 'patch'");
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             next = *token_get(&context, token_id_shift(file_token_id, 1));
                             if (next.kind != token_kind_symbol) {
                                 log_error("expected label to indicate address as second argument to directive 'patch'");
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -753,13 +751,13 @@ int main(int argc, char **argv) {
                         } else if (string_equal(token_string, string("include"))) {
                             if (next.kind != token_kind_string) {
                                 log_error("expected string following directive 'include'");
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
 
                             char *include_filepath = cstring_from_string(&arena, next_string);
                             if (string_equal(string_from_cstring(include_filepath), file->name)) {
                                 log_error("cyclic inclusion of file '%'", fmt(String, file->name));
-                                return parse_error(&context, next.start_index, next.length);
+                                return parse_error(&context, file_id, next.start_index, next.length);
                             }
                             String include_bytes = file_read_bytes_relative_path(&arena, include_filepath, 0x10000);
                             if (include_bytes.count == 0) return 1;
@@ -768,10 +766,10 @@ int main(int argc, char **argv) {
                             File_Id new_file_id = (File_Id)context.files.count;
                             array_push(&context.files, &new_file);
 
-                            File_Cursor current = { .file_id = context.file_id, .asm_cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
+                            File_Cursor current = { .asm_cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
                             array_push(&file_stack, &current);
 
-                            File_Cursor next_file = { .file_id = new_file_id, .asm_cursor = 0, .token_id = { .file_id = new_file_id } };
+                            File_Cursor next_file = { .asm_cursor = 0, .token_id = { .file_id = new_file_id } };
                             array_push(&file_stack, &next_file);
                             goto switch_file;
                         }
@@ -783,7 +781,7 @@ int main(int argc, char **argv) {
                     case token_kind_hexadecimal: {
                         if (!context.insertion_mode.is_active) {
                             log_error("standalone hexadecimal literals are only supported in insertion mode (e.g. in [ ... ])");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
                         // TODO(felix): bounds check
@@ -809,7 +807,7 @@ int main(int argc, char **argv) {
                     case token_kind_string: {
                         if (!context.insertion_mode.is_active) {
                             log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
-                            return parse_error(&context, token.start_index, token.length);
+                            return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
                         assert(rom.count + token_string.count <= 0x10000);
@@ -818,7 +816,7 @@ int main(int argc, char **argv) {
                     } break;
                     default: {
                         log_error("invalid syntax");
-                        return parse_error(&context, token.start_index, token.length);
+                        return parse_error(&context, file_id, token.start_index, token.length);
                     }
                 }
             }
@@ -827,7 +825,7 @@ int main(int argc, char **argv) {
                 Scoped_Reference reference = context.scoped_references.data[0];
                 Token token = *token_get(&context, reference.token_id);
                 log_error("anonymous reference ('{') without matching '}'");
-                return parse_error(&context, token.start_index, token.length);
+                return parse_error(&context, file_id, token.start_index, token.length);
             }
 
             switch_file:;
@@ -857,7 +855,7 @@ int main(int argc, char **argv) {
 
                 if (*match == 0) {
                     log_error("no such label '%'", fmt(String, reference_string));
-                    return parse_error(&context, token.start_index, token.length);
+                    return parse_error(&context, token_id.file_id, token.start_index, token.length);
                 }
             }
 

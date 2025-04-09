@@ -265,9 +265,12 @@ static u8 byte_from_instruction(Vm_Instruction instruction) {
     return byte;
 }
 
-static void write_u16_swap_bytes(u16 *location, u16 value) {
-    u16 swapped = (u16)((value << 8) | (value >> 8));
-    *location = swapped;
+static void write_u16_swap_bytes(Array_u8 rom, usize index, u16 value) {
+    assert(index + 1 < rom.capacity);
+    u8 byte2 = (u8)(value);
+    u8 byte1 = (u8)(value >> 8);
+    rom.data[index] = byte1;
+    rom.data[index + 1] = byte2;
 }
 
 static force_inline bool is_starting_symbol_character(u8 c) {
@@ -412,10 +415,10 @@ int main(int argc, char **argv) {
     usize max_filesize = 0x10000;
     String input_bytes = file_read_bytes_relative_path(&arena, input_filepath, max_filesize);
 
-    String rom = { .data = (u8[0x10000]){0} };
+    Array_u8 rom = { .data = (u8[0x10000]){0}, .capacity = 0x10000 };
 
     bool should_compile = command == command_compile || command == command_script;
-    if (!should_compile) rom = input_bytes;
+    if (!should_compile) rom = (Array_u8)array_from_slice(input_bytes);
     else {
         Assembler_Context context = {
             .files = { .arena = &arena },
@@ -582,8 +585,7 @@ int main(int argc, char **argv) {
                             return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
-                        u16 *location_to_patch = (u16 *)(&rom.data[reference.address]);
-                        write_u16_swap_bytes(location_to_patch, (u16)rom.count);
+                        write_u16_swap_bytes(rom, reference.address, (u16)rom.count);
                     } break;
                     case '[': {
                         if (context.insertion_mode.is_active) {
@@ -702,7 +704,7 @@ int main(int argc, char **argv) {
                                         rom.count += 1;
                                     } else {
                                         assert(width == 2);
-                                        write_u16_swap_bytes((u16 *)(&rom.data[rom.count]), value);
+                                        write_u16_swap_bytes(rom, rom.count, value);
                                         rom.count += 2;
                                     }
                                 }
@@ -797,7 +799,7 @@ int main(int argc, char **argv) {
 
                         bool is_short = true;
                         if (is_short) {
-                            write_u16_swap_bytes((u16 *)(&rom.data[rom.count]), value);
+                            write_u16_swap_bytes(rom, rom.count, value);
                             rom.count += 2;
                             break;
                         }
@@ -860,8 +862,7 @@ int main(int argc, char **argv) {
             }
 
             if (reference->is_patch) {
-                u16 *location_to_patch = (u16 *)&rom.data[destination_label->address];
-                write_u16_swap_bytes(location_to_patch, source_label->address);
+                write_u16_swap_bytes(rom, destination_label->address, source_label->address);
             } else switch (reference->width) {
                 case 1: {
                     u8 *location_to_patch = &rom.data[reference->destination_address];
@@ -869,8 +870,7 @@ int main(int argc, char **argv) {
                     *location_to_patch = (u8)source_label->address;
                 } break;
                 case 2: {
-                    u16 *location_to_patch = (u16 *)&rom.data[reference->destination_address];
-                    write_u16_swap_bytes(location_to_patch, source_label->address);
+                    write_u16_swap_bytes(rom, reference->destination_address, source_label->address);
                 } break;
                 default: unreachable;
             }
@@ -879,7 +879,7 @@ int main(int argc, char **argv) {
         if (command == command_compile) {
             assert(argc == 4);
             char *output_path = argv[3];
-            file_write_bytes_to_relative_path(output_path, rom);
+            file_write_bytes_to_relative_path(output_path, bit_cast(String) rom);
         }
     }
 

@@ -4,8 +4,6 @@ patch init_routine, init
 patch update_routine, update
 patch quit_routine, quit
 
-org 0x100
-
 update: break
 quit: break
 

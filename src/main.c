@@ -258,15 +258,15 @@ static bool instruction_takes_immediate(Vm_Instruction instruction) {
 
 static u8 byte_from_instruction(Vm_Instruction instruction) {
     if (vm_opcode_is_special(instruction.opcode)) return instruction.opcode;
-    u8 byte = instruction.opcode
+    u8 byte = (u8)(instruction.opcode
         | (instruction.mode.keep << 7)
         | (instruction.mode.stack << 6)
-        | (instruction.mode.size << 5);
+        | (instruction.mode.size << 5));
     return byte;
 }
 
 static void write_u16_swap_bytes(u16 *location, u16 value) {
-    u16 swapped = (value << 8) | (value >> 8);
+    u16 swapped = (u16)((value << 8) | (value >> 8));
     *location = swapped;
 }
 
@@ -286,27 +286,23 @@ enumdef(Token_Kind, u8) {
 };
 
 typedef u8 File_Id;
+#define max_file_id 255
 
-// TODO(felix): should not contain file_id
 structdef(Token) {
     u32 start_index;
     u8 length;
     Token_Kind kind;
     u16 value;
-    File_Id file_id;
 };
 
-// TODO(felix): should contain file id as well
-typedef u32 Token_Id;
+structdef(Token_Id) { File_Id file_id; i32 index; };
 
 structdef(Label) {
-    File_Id file_id; // TODO(felix): remove
     Token_Id token_id;
     u16 address;
 };
 
 structdef(Label_Reference) {
-    File_Id file_id; // TODO(felix): remove
     Token_Id token_id;
     union { u16 destination_address; Token_Id destination_label_token_id; };
     u8 width;
@@ -332,11 +328,33 @@ structdef(Assembler_Context) {
     Insertion_Mode insertion_mode;
 };
 
-static String token_lexeme(Assembler_Context *context, File_Id file_id, Token_Id token_id) {
-    Input_File file = context->files.data[file_id];
-    Array_Token tokens = file.tokens;
-    Token token = tokens.data[token_id];
-    String asm = context->files.data[file_id].bytes;
+static Token_Id token_id_shift(Token_Id token_id, i32 shift) {
+    Token_Id result = token_id;
+    result.index += shift;
+    return result;
+}
+
+static Input_File *token_get_file(Assembler_Context *context, Token_Id token_id) {
+    File_Id file_id = token_id.file_id;
+    Input_File *file = &context->files.data[file_id];
+    return file;
+}
+
+static Token *token_get(Assembler_Context *context, Token_Id token_id) {
+    Input_File file = *token_get_file(context, token_id);
+    i32 index = token_id.index;
+    if (index < 0 || (usize)index >= file.tokens.count) {
+        static Token nil_token = {0};
+        return &nil_token;
+    }
+    Token *token = &file.tokens.data[index];
+    return token;
+}
+
+static String token_lexeme(Assembler_Context *context, Token_Id token_id) {
+    Token token = *token_get(context, token_id);
+    Input_File *file = token_get_file(context, token_id);
+    String asm = file->bytes;
     String token_string = string_range(asm, token.start_index, token.start_index + token.length);
     return token_string;
 }
@@ -530,12 +548,9 @@ int main(int argc, char **argv) {
                 array_push(&file->tokens, &token);
             }
 
-            // NOTE(felix): we can do lookahead by one token without a bounds check
-            array_ensure_capacity(&file->tokens, file->tokens.count + 1);
-
-            for (Token_Id file_token_id = file_cursor.token_id; file_token_id < file->tokens.count; file_token_id += 1) {
-                Token token = file->tokens.data[file_token_id];
-                String token_string = token_lexeme(&context, context.file_id, file_token_id);
+            for (Token_Id file_token_id = file_cursor.token_id; (usize)file_token_id.index < file->tokens.count; file_token_id.index += 1) {
+                Token token = *token_get(&context, file_token_id);
+                String token_string = token_lexeme(&context, file_token_id);
 
                 if (context.insertion_mode.is_active) {
                     switch (token.kind) {
@@ -547,8 +562,9 @@ int main(int argc, char **argv) {
                     };
                 }
 
-                Token next = file->tokens.data[file_token_id + 1];
-                String next_string = token_lexeme(&context, context.file_id, file_token_id + 1);
+                Token_Id next_id = token_id_shift(file_token_id, 1);
+                Token next = *token_get(&context, next_id);
+                String next_string = token_lexeme(&context, next_id);
 
                 switch (token.kind) {
                     case '{': {
@@ -584,7 +600,7 @@ int main(int argc, char **argv) {
                             Scoped_Reference reference = { .address = (u16)rom.count, .is_relative = true };
                             array_push(&context.scoped_references, &reference);
                             rom.count += 1;
-                            file_token_id += 1;
+                            file_token_id = token_id_shift(file_token_id, 1);
                         }
                     } break;
                     case ']': {
@@ -616,17 +632,17 @@ int main(int argc, char **argv) {
                         bool is_label = next.kind == ':';
                         if (is_label) {
                             for_slice (Label *, label, context.labels) {
-                                String label_string = token_lexeme(&context, label->file_id, label->token_id);
+                                String label_string = token_lexeme(&context, label->token_id);
                                 if (string_equal(label_string, token_string)) {
                                     log_error("redefinition of label '%'", fmt(String, token_string));
                                     return parse_error(&context, token.start_index, token.length);
                                 }
                             }
 
-                            Label new_label = { .token_id = file_token_id, .file_id = context.file_id, .address = (u16)rom.count };
+                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count };
                             array_push(&context.labels, &new_label);
 
-                            file_token_id += 1;
+                            file_token_id = token_id_shift(file_token_id, 1);
                             break;
                         }
 
@@ -646,7 +662,7 @@ int main(int argc, char **argv) {
                                         default: unreachable;
                                     }
                                 }
-                                file_token_id += 1;
+                                file_token_id = token_id_shift(file_token_id, 1);
                             }
 
                             u8 byte = byte_from_instruction(instruction);
@@ -654,7 +670,7 @@ int main(int argc, char **argv) {
                             rom.count += 1;
 
                             if (instruction_takes_immediate(instruction)) {
-                                next = file->tokens.data[file_token_id + 1];
+                                next = *token_get(&context, token_id_shift(file_token_id, 1));
                                 switch (next.kind) {
                                     case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
                                     default: {
@@ -669,12 +685,12 @@ int main(int argc, char **argv) {
                                 if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
 
                                 if (next.kind == token_kind_symbol) {
-                                    Label_Reference reference = { .token_id = file_token_id + 1, .file_id = context.file_id, .destination_address = (u16)rom.count, .width = width };
+                                    Label_Reference reference = { .token_id = token_id_shift(file_token_id, 1), .destination_address = (u16)rom.count, .width = width };
                                     array_push(&context.label_references, &reference);
                                     rom.count += reference.width;
                                 } else {
                                     assert(next.kind == token_kind_hexadecimal);
-                                    next_string = token_lexeme(&context, context.file_id, file_token_id + 1);
+                                    next_string = token_lexeme(&context, token_id_shift(file_token_id, 1));
 
                                     // TODO(felix): bounds check
                                     u16 value = (u16)int_from_hex_string(next_string);
@@ -692,7 +708,7 @@ int main(int argc, char **argv) {
                                         rom.count += 2;
                                     }
                                 }
-                                file_token_id += 1;
+                                file_token_id = token_id_shift(file_token_id, 1);
                             }
 
                             break;
@@ -707,7 +723,7 @@ int main(int argc, char **argv) {
                             u16 value = (u16)int_from_hex_string(next_string);
                             rom.count = value;
 
-                            file_token_id += 1;
+                            file_token_id = token_id_shift(file_token_id, 1);
                             break;
                         } else if (string_equal(token_string, string("patch"))) {
                             if (next.kind != token_kind_symbol) {
@@ -715,23 +731,23 @@ int main(int argc, char **argv) {
                                 return parse_error(&context, next.start_index, next.length);
                             }
 
-                            file_token_id += 1;
-                            Label_Reference reference = { .is_patch = true, .file_id = context.file_id, .destination_label_token_id = file_token_id };
+                            file_token_id = token_id_shift(file_token_id, 1);
+                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id };
 
-                            next = file->tokens.data[file_token_id + 1];
+                            next = *token_get(&context, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
                                 log_error("expected ',' after between first and second arguments to directive 'patch'");
                                 return parse_error(&context, next.start_index, next.length);
                             }
 
-                            file_token_id += 1;
-                            next = file->tokens.data[file_token_id + 1];
+                            file_token_id = token_id_shift(file_token_id, 1);
+                            next = *token_get(&context, token_id_shift(file_token_id, 1));
                             if (next.kind != token_kind_symbol) {
                                 log_error("expected label to indicate address as second argument to directive 'patch'");
                                 return parse_error(&context, next.start_index, next.length);
                             }
 
-                            file_token_id += 1;
+                            file_token_id = token_id_shift(file_token_id, 1);
                             reference.token_id = file_token_id;
                             array_push(&context.label_references, &reference);
                         } else if (string_equal(token_string, string("include"))) {
@@ -741,6 +757,10 @@ int main(int argc, char **argv) {
                             }
 
                             char *include_filepath = cstring_from_string(&arena, next_string);
+                            if (string_equal(string_from_cstring(include_filepath), file->name)) {
+                                log_error("cyclic inclusion of file '%'", fmt(String, file->name));
+                                return parse_error(&context, next.start_index, next.length);
+                            }
                             String include_bytes = file_read_bytes_relative_path(&arena, include_filepath, 0x10000);
                             if (include_bytes.count == 0) return 1;
 
@@ -748,17 +768,15 @@ int main(int argc, char **argv) {
                             File_Id new_file_id = (File_Id)context.files.count;
                             array_push(&context.files, &new_file);
 
-                            File_Cursor current = { .file_id = context.file_id, .asm_cursor = (u32)asm.count, .token_id = file_token_id + 2 };
+                            File_Cursor current = { .file_id = context.file_id, .asm_cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
                             array_push(&file_stack, &current);
 
-                            File_Cursor next_file = { .file_id = new_file_id, .asm_cursor = 0, .token_id = 0 };
+                            File_Cursor next_file = { .file_id = new_file_id, .asm_cursor = 0, .token_id = { .file_id = new_file_id } };
                             array_push(&file_stack, &next_file);
                             goto switch_file;
-
-                            // print("TODO(felix): tokenise include\n"); // TODO(felix): rmeove
                         }
 
-                        Label_Reference reference = { .file_id = context.file_id, .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2 };
+                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2 };
                         array_push(&context.label_references, &reference);
                         rom.count += reference.width;
                     } break;
@@ -807,7 +825,7 @@ int main(int argc, char **argv) {
 
             if (context.scoped_references.count != 0) {
                 Scoped_Reference reference = context.scoped_references.data[0];
-                Token token = file->tokens.data[reference.token_id];
+                Token token = *token_get(&context, reference.token_id);
                 log_error("anonymous reference ('{') without matching '}'");
                 return parse_error(&context, token.start_index, token.length);
             }
@@ -826,14 +844,12 @@ int main(int argc, char **argv) {
                 Label **match = to_match[i];
 
                 Token_Id token_id = match_against[i];
-                Input_File file = context.files.data[reference->file_id];
-                Array_Token tokens = file.tokens;
-                Token token = tokens.data[token_id];
+                Token token = *token_get(&context, token_id);
 
-                String reference_string = token_lexeme(&context, token.file_id, token_id);
+                String reference_string = token_lexeme(&context, token_id);
 
                 for_slice (Label *, label, labels) {
-                    String label_string = token_lexeme(&context, label->file_id, label->token_id);
+                    String label_string = token_lexeme(&context, label->token_id);
                     if (!string_equal(reference_string, label_string)) continue;
                     *match = label;
                     break;
@@ -876,9 +892,9 @@ int main(int argc, char **argv) {
         Vm vm = {0};
         memcpy(vm.memory, rom.data, rom.count);
 
-        Arena persistent_arena = arena_init(8 * 1024 * 1024);
-        Arena_Temp temp = arena_temp_begin(&persistent_arena);
-        String_Builder builder = { .arena = &persistent_arena };
+        Arena *persistent_arena = &arena;
+        Arena_Temp temp = arena_temp_begin(persistent_arena);
+        String_Builder builder = { .arena = persistent_arena };
         {
             string_builder_print(&builder, "MEMORY ===\n");
             for (u16 token_id = 0x100; token_id < rom.count; token_id += 1) {
@@ -905,7 +921,7 @@ int main(int argc, char **argv) {
         arena_temp_end(temp);
 
         Gfx_Render_Context *gfx = &vm.gfx;
-        *gfx = gfx_window_create(&persistent_arena, "bici", vm_screen_width, vm_screen_height);
+        *gfx = gfx_window_create(persistent_arena, "bici", vm_screen_width, vm_screen_height);
         gfx->font = gfx_font_default_3x5;
 
         // TODO(felix): program should control this

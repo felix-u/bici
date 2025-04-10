@@ -1,8 +1,8 @@
 include "header.asm"
 
-patch init_routine, init
-patch update_routine, update
-patch quit_routine, quit
+patch screen_init, init
+patch screen_update, update
+patch screen_quit, quit
 
 update: break
 quit: break
@@ -17,7 +17,7 @@ init:
             dup.2
             jsi load_coordinates_at_address
             push 0x06
-            push pixel
+            push screen_pixel
             write
 
             push.2 0x2

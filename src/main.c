@@ -15,8 +15,8 @@ static u32 screen_palette[screen_colour_count] = {
     [screen_c3a] = 0xffffffff, [screen_c3b] = 0xffffffff,
 };
 
-#define vm_screen_width 256
-#define vm_screen_height 256
+#define vm_screen_initial_width 256
+#define vm_screen_initial_height 256
 
 #define vm_for_opcode(action)\
     /*     name,   byte, is_immediate */\
@@ -64,9 +64,14 @@ enumdef(Vm_Device, u8) {
 
 enum Vm_Screen_Action {
     vm_screen_init   = 0x0,
-    vm_screen_pixel  = 0x1,
     vm_screen_update = 0x2,
     vm_screen_quit   = 0x4,
+    vm_screen_width  = 0x6,
+    vm_screen_height = 0x8,
+    vm_screen_x      = 0xa,
+    vm_screen_y      = 0xc,
+    vm_screen_pixel  = 0xe,
+    vm_screen_sprite = 0xf,
 };
 
 // B = mode_bytes, b = mode_bits
@@ -138,7 +143,7 @@ enum Vm_Screen_Action {
                     Screen_Colour colour = vm_pop8(vm);\
                     if (colour >= screen_colour_count) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, screen_colour_count));\
                     u16 y = vm_pop16(vm), x = vm_pop16(vm);\
-                    if (x >= vm_screen_width || y >= vm_screen_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_width, .base = 16), fmt(u64, vm_screen_height, .base = 16));\
+                    if (x >= vm_screen_initial_width || y >= vm_screen_initial_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_initial_width, .base = 16), fmt(u64, vm_screen_initial_height, .base = 16));\
                     gfx_set_pixel(&vm->gfx, x, y, screen_palette[colour]);\
                 } break;\
                 default: panic("[write] invalid action #% for screen device", fmt(u64, action, .base = 16));\
@@ -771,6 +776,12 @@ int main(int argc, char **argv) {
                             u16 value = (u16)int_from_hex_string(next_string);
                             bool is_relative = token_string.data[0] == 'r';
                             if (is_relative) value += (u16)rom.count;
+
+                            if (value <= rom.count) {
+                                log_error("new offset % is less than or equal to current offset %", fmt(usize, value), fmt(usize, rom.count));
+                                return parse_error(&context, file_id, next.start_index, next.length);
+                            }
+
                             rom.count = value;
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -982,7 +993,7 @@ int main(int argc, char **argv) {
         }
 
         Gfx_Render_Context *gfx = &vm.gfx;
-        *gfx = gfx_window_create(persistent_arena, "bici", vm_screen_width, vm_screen_height);
+        *gfx = gfx_window_create(persistent_arena, "bici", vm_screen_initial_width, vm_screen_initial_height);
         gfx->font = gfx_font_default_3x5;
 
         // TODO(felix): program should control this

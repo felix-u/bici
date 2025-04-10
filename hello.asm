@@ -1,8 +1,8 @@
 include "header.asm"
 
-patch init_routine, init
-patch update_routine, update
-patch quit_routine, quit
+patch screen_init, init
+patch screen_update, update
+patch screen_quit, quit
 
 init:
     push.2 hello_world

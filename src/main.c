@@ -894,15 +894,15 @@ int main(int argc, char **argv) {
 
                 String reference_string = token_lexeme(&context, token_id);
 
-                for_slice (Label *, label, context.labels) {
+                Label parent = context.labels.data[reference->parent_id];
+                for_slice (Label *, label, parent.children) {
                     String label_string = token_lexeme(&context, label->token_id);
                     if (!string_equal(reference_string, label_string)) continue;
                     *match = label;
                     goto done;
                 }
 
-                Label parent = context.labels.data[reference->parent_id];
-                for_slice (Label *, label, parent.children) {
+                for_slice (Label *, label, context.labels) {
                     String label_string = token_lexeme(&context, label->token_id);
                     if (!string_equal(reference_string, label_string)) continue;
                     *match = label;
@@ -946,32 +946,37 @@ int main(int argc, char **argv) {
         memcpy(vm.memory, rom.data, rom.count);
 
         Arena *persistent_arena = &arena;
-        Arena_Temp temp = arena_temp_begin(persistent_arena);
-        String_Builder builder = { .arena = persistent_arena };
-        {
-            string_builder_print(&builder, "MEMORY ===\n");
-            for (u16 token_id = 0x100; token_id < rom.count; token_id += 1) {
-                u8 byte = vm.memory[token_id];
 
-                String mode_string = string("");
-                if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
-                    case 0x1: mode_string = string("2"); break;
-                    case 0x2: mode_string = string("r"); break;
-                    case 0x3: mode_string = string("r2"); break;
-                    case 0x4: mode_string = string("k"); break;
-                    case 0x5: mode_string = string("k2"); break;
-                    case 0x6: mode_string = string("kr"); break;
-                    case 0x7: mode_string = string("kr2"); break;
+        // TODO(felix): make configurable via command-line argument
+        bool print_memory = false;
+        if (print_memory) {
+            Arena_Temp temp = arena_temp_begin(persistent_arena);
+            String_Builder builder = { .arena = persistent_arena };
+            {
+                string_builder_print(&builder, "MEMORY ===\n");
+                for (u16 token_id = 0x100; token_id < rom.count; token_id += 1) {
+                    u8 byte = vm.memory[token_id];
+
+                    String mode_string = string("");
+                    if (!vm_opcode_is_special(byte)) switch ((byte & 0xe0) >> 5) {
+                        case 0x1: mode_string = string("2"); break;
+                        case 0x2: mode_string = string("r"); break;
+                        case 0x3: mode_string = string("r2"); break;
+                        case 0x4: mode_string = string("k"); break;
+                        case 0x5: mode_string = string("k2"); break;
+                        case 0x6: mode_string = string("kr"); break;
+                        case 0x7: mode_string = string("kr2"); break;
+                    }
+
+                    string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
+                        fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
+                    );
                 }
-
-                string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
-                    fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
-                );
+                string_builder_print(&builder, "\nRUN ===\n");
             }
-            string_builder_print(&builder, "\nRUN ===\n");
+            os_write(bit_cast(String) builder);
+            arena_temp_end(temp);
         }
-        os_write(bit_cast(String) builder);
-        arena_temp_end(temp);
 
         Gfx_Render_Context *gfx = &vm.gfx;
         *gfx = gfx_window_create(persistent_arena, "bici", vm_screen_width, vm_screen_height);

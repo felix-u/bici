@@ -303,13 +303,17 @@ structdef(Token_Id) { File_Id file_id; i32 index; };
 structdef(Label) {
     Token_Id token_id;
     u16 address;
+    Array_Label children;
 };
+
+typedef u32 Label_Id;
 
 structdef(Label_Reference) {
     Token_Id token_id;
     union { u16 destination_address; Token_Id destination_label_token_id; };
     u8 width;
     bool is_patch;
+    Label_Id parent_id;
 };
 
 structdef(Scoped_Reference) {
@@ -427,6 +431,9 @@ int main(int argc, char **argv) {
             .scoped_references = { .arena = &arena },
         };
 
+        Label nil_label = { .children.arena = &arena };
+        array_push(&context.labels, &nil_label);
+
         Input_File main_file = { .bytes = input_bytes, .name = string_from_cstring(input_filepath), .tokens = { .arena = &arena } };
         array_push(&context.files, &main_file);
 
@@ -485,7 +492,7 @@ int main(int argc, char **argv) {
                         asm_cursor += 1;
                         continue;
                     } break;
-                    case ':': case '$': case '{': case '}': case '[': case ']': case ',': {
+                    case ':': case '$': case '{': case '}': case '[': case ']': case ',': case '/': {
                         kind = asm.data[asm_cursor];
                         asm_cursor += 1;
                     } break;
@@ -549,6 +556,7 @@ int main(int argc, char **argv) {
                 array_push(&file->tokens, &token);
             }
 
+            bool parsing_relative_label = false;
             for (Token_Id file_token_id = file_cursor.token_id; (usize)file_token_id.index < file->tokens.count; file_token_id.index += 1) {
                 Token token = *token_get(&context, file_token_id);
                 String token_string = token_lexeme(&context, file_token_id);
@@ -628,7 +636,21 @@ int main(int argc, char **argv) {
 
                         context.insertion_mode = (Insertion_Mode){0};
                     } break;
+                    case '/': {
+                        if (next.kind != token_kind_symbol) {
+                            log_error("expected relative label following '/'");
+                            return parse_error(&context, file_id, next.start_index, next.length);
+                        }
+                        parsing_relative_label = true;
+                    } break;
                     case token_kind_symbol: {
+                        if (parsing_relative_label) {
+                            if (next.kind != ':') {
+                                log_error("expected ':' ending relative label definition");
+                                return parse_error(&context, file_id, next.start_index, next.length);
+                            }
+                        }
+
                         bool is_label = next.kind == ':';
                         if (is_label) {
                             for_slice (Label *, label, context.labels) {
@@ -639,8 +661,28 @@ int main(int argc, char **argv) {
                                 }
                             }
 
-                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count };
-                            array_push(&context.labels, &new_label);
+                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count, .children.arena = &arena };
+
+                            Array_Label *labels = 0;
+                            if (parsing_relative_label) {
+                                Label *parent = &slice_get_last_assume_not_empty(context.labels);
+                                Array_Label *parent_labels = &parent->children;
+                                labels = parent_labels;
+
+                                for_slice (Label *, label, *parent_labels) {
+                                    String label_string = token_lexeme(&context, label->token_id);
+                                    if (string_equal(label_string, token_string)) {
+                                        log_error("redefinition of label '%'", fmt(String, token_string));
+                                        return parse_error(&context, file_id, token.start_index, token.length);
+                                    }
+                                }
+
+                                parsing_relative_label = false;
+                            } else {
+                                labels = &context.labels;
+                            }
+
+                            array_push(labels, &new_label);
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
@@ -685,7 +727,12 @@ int main(int argc, char **argv) {
                                 if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
 
                                 if (next.kind == token_kind_symbol) {
-                                    Label_Reference reference = { .token_id = token_id_shift(file_token_id, 1), .destination_address = (u16)rom.count, .width = width };
+                                    Label_Reference reference = {
+                                        .token_id = token_id_shift(file_token_id, 1),
+                                        .destination_address = (u16)rom.count,
+                                        .width = width,
+                                        .parent_id = (Label_Id)(context.labels.count - 1),
+                                    };
                                     array_push(&context.label_references, &reference);
                                     rom.count += reference.width;
                                 } else {
@@ -732,7 +779,7 @@ int main(int argc, char **argv) {
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
-                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id };
+                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id, .parent_id = (Label_Id)(context.labels.count - 1) };
 
                             next = *token_get(&context, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
@@ -776,7 +823,7 @@ int main(int argc, char **argv) {
                             goto switch_file;
                         }
 
-                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2 };
+                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2, .parent_id = (Label_Id)(context.labels.count - 1) };
                         array_push(&context.label_references, &reference);
                         rom.count += reference.width;
                     } break;
@@ -839,7 +886,6 @@ int main(int argc, char **argv) {
             Token_Id match_against[] = { reference->token_id, reference->destination_label_token_id };
             usize match_count = reference->is_patch ? 2 : 1;
 
-            Array_Label labels = context.labels;
             for (usize i = 0; i < match_count; i += 1) {
                 Label **match = to_match[i];
 
@@ -848,13 +894,22 @@ int main(int argc, char **argv) {
 
                 String reference_string = token_lexeme(&context, token_id);
 
-                for_slice (Label *, label, labels) {
+                for_slice (Label *, label, context.labels) {
                     String label_string = token_lexeme(&context, label->token_id);
                     if (!string_equal(reference_string, label_string)) continue;
                     *match = label;
-                    break;
+                    goto done;
                 }
 
+                Label parent = context.labels.data[reference->parent_id];
+                for_slice (Label *, label, parent.children) {
+                    String label_string = token_lexeme(&context, label->token_id);
+                    if (!string_equal(reference_string, label_string)) continue;
+                    *match = label;
+                    goto done;
+                }
+
+                done:
                 if (*match == 0) {
                     log_error("no such label '%'", fmt(String, reference_string));
                     return parse_error(&context, token_id.file_id, token.start_index, token.length);

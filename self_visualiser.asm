@@ -11,7 +11,7 @@ quit: break
 
 init:
     push.2 0x0
-    while:
+    /while:
         dup.2
         push.2 EOF
         lt.2

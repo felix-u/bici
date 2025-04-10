@@ -1,5 +1,3 @@
-; TODO: relative/local labels (to make loops nicer)
-
 include "header.asm"
 
 patch init_routine, init

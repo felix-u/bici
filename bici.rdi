@@ -3,6 +3,11 @@
 /// watches ///////////////////////////////////////////////////////////////////
 
 watch: "locals"
+watch:
+{
+  name: "vm.palette"
+  view_rule: "hex"
+}
 
 /// targets ///////////////////////////////////////////////////////////////////
 
@@ -24,6 +29,7 @@ recent_file: "src/base/base_core.c"
 recent_file: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/misc/amd64/chkstk.asm"
 recent_file: "src/base/base_arena.c"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.cxx"
+recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.inl"
 recent_file: "src/main.c"
 
 /// exception code filters ////////////////////////////////////////////////////

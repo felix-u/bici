@@ -1,13 +1,16 @@
 include "header.asm"
 
-patch screen_init, init
-patch screen_update, update
-patch screen_quit, quit
+patch system_start, start
+start:
+    push.2 0x000
+    push system_colour_0 write
+    push.2 0xfff
+    push system_colour_1 write
+    push.2 0xf00
+    push system_colour_2 write
+    push.2 0x0ff
+    push system_colour_3 write
 
-update: break
-quit: break
-
-init:
     push.2 0x0
     /while:
         dup.2
@@ -16,7 +19,7 @@ init:
         jni {
             dup.2
             jsi load_coordinates_at_address
-            push 0x06
+            push 0x01
             push screen_pixel
             write
 

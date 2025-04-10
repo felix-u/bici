@@ -58,8 +58,8 @@ static u32 screen_palette[screen_colour_count] = {
     /* UNUSED      0xe0, 0)   NO MODE (== push;kr2)*/\
 
 enumdef(Vm_Device, u8) {
-    vm_device_console = 0x00,
-    vm_device_screen = 0x10,
+    vm_device_console = 0x10,
+    vm_device_screen = 0x20,
 };
 
 enum Vm_Screen_Action {
@@ -761,13 +761,16 @@ int main(int argc, char **argv) {
                             break;
                         }
 
-                        if (string_equal(token_string, string("org"))) {
+                        if (string_equal(token_string, string("org")) || string_equal(token_string, string("rorg"))) {
                             if (next.kind != token_kind_hexadecimal) {
-                                log_error("expected numeric literal (byte offset) after directive 'org'");
+                                log_error("expected numeric literal (byte offset) after directive '%'", fmt(String, token_string));
                                 return parse_error(&context, file_id, next.start_index, next.length);
                             }
+
                             // TODO(felix): bounds check
                             u16 value = (u16)int_from_hex_string(next_string);
+                            bool is_relative = token_string.data[0] == 'r';
+                            if (is_relative) value += (u16)rom.count;
                             rom.count = value;
 
                             file_token_id = token_id_shift(file_token_id, 1);

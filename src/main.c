@@ -260,94 +260,93 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
             } break;
             case vm_opcode_size_short: switch (instruction.opcode) {
-                /* TODO(felix): for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */\
-                case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:\
-                    panic("reached full-byte opcodes in generic switch case");\
-                case vm_opcode_push:   vm_push16(vm, vm_load16(vm, vm->program_counter + 1)); add = 2 + 1; break;\
-                case vm_opcode_drop:   discard(vm_pop16(vm)); break;\
-                case vm_opcode_nip:    { u16 c = vm_pop16(vm); vm_pop16(vm); u16 a = vm_pop16(vm); vm_push16(vm, a); vm_push16(vm, c); } break;\
-                case vm_opcode_swap:   { u16 c = vm_pop16(vm), b = vm_pop16(vm); vm_push16(vm, c); vm_push16(vm, b); } break;\
-                case vm_opcode_rot:    { u16 c = vm_pop16(vm), b = vm_pop16(vm), a = vm_pop16(vm); vm_push16(vm, b); vm_push16(vm, c); vm_push16(vm, a); } break;\
-                case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 1)); break;\
-                case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 2)); break;\
-                case vm_opcode_eq:     vm_push8(vm, vm_pop16(vm) == vm_pop16(vm)); break;\
-                case vm_opcode_neq:    vm_push8(vm, vm_pop16(vm) != vm_pop16(vm)); break;\
-                case vm_opcode_gt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left > right); } break;\
-                case vm_opcode_lt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left < right); } break;\
-                case vm_opcode_add:    vm_push16(vm, vm_pop16(vm) + vm_pop16(vm)); break;\
-                case vm_opcode_sub:    { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push16(vm, left - right); } break;\
-                case vm_opcode_mul:    vm_push16(vm, vm_pop16(vm) * vm_pop16(vm)); break;\
-                case vm_opcode_div:    { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push16(vm, right == 0 ? 0 : (left / right)); } break;\
-                case vm_opcode_inc:    vm_push16(vm, vm_pop16(vm) + 1); break;\
-                case vm_opcode_not:    vm_push16(vm, ~vm_pop16(vm)); break;\
-                case vm_opcode_and:    vm_push16(vm, vm_pop16(vm) & vm_pop16(vm)); break;\
-                case vm_opcode_or:     vm_push16(vm, vm_pop16(vm) | vm_pop16(vm)); break;\
-                case vm_opcode_xor:    vm_push16(vm, vm_pop16(vm) ^ vm_pop16(vm)); break;\
-                case vm_opcode_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push16(vm, (u16)(vm_pop16(vm) << l >> r)); } break;\
-                case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;\
-                case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop16(vm)) { vm->program_counter = addr; add = 0; } } break;\
-                case vm_opcode_jst:    {\
-                    vm->active_stack = stack_return;\
-                    vm_push16(vm, vm->program_counter + 1);\
-                    vm->active_stack = stack_param;\
-                    vm->program_counter = vm_pop16(vm);\
-                    add = 0;\
-                } break;\
-                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = stack_return; vm_push16(vm, val); vm->active_stack = stack_param; } break;\
-                case vm_opcode_load:   { u16 addr = vm_pop16(vm); u16 val = vm_load16(vm, addr); vm_push16(vm, val); } break;\
-                case vm_opcode_store:  { u16 addr = vm_pop16(vm); u16 val = vm_pop16(vm); vm_store16(vm, addr, val); } break;\
-                case vm_opcode_read:   {\
-                    u8 vm_device_and_action = vm_pop8(vm);\
-                    Vm_Device device = vm_device_and_action & 0xf0;\
-                    u8 action = vm_device_and_action & 0x0f;\
-                    switch (device) {\
-                        case vm_device_screen: switch (action) {\
-                            default: panic("[read] invalid action #% for screen device", fmt(u64, action, .base = 16));\
-                        } break;\
-                        default: panic("invalid device #% for operation 'read'", fmt(u64, device, .base = 16));\
-                    }\
-                } break;\
-                case vm_opcode_write:  {\
-                    u8 vm_device_and_action = vm_pop8(vm);\
-                    Vm_Device device = vm_device_and_action & 0xf0;\
-                    u8 action = vm_device_and_action & 0x0f;\
-                    switch (device) {\
-                        case vm_device_system: switch (action) {\
-                            case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {\
-                                u16 colour = vm_pop16(vm);\
-                                u32 r = ((u32)colour & 0x0f00) >> 16;\
-                                u32 g = ((u32)colour & 0x00f0) >> 8;\
-                                u32 b = ((u32)colour & 0x000f) >> 0;\
-                                u32 rgb = (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;\
-                                vm->palette[action - vm_system_colour_0] = rgb;\
-                                /* TODO(felix): remove */ print("WROTE COLOUR %\n", fmt(u32, rgb, .base = 16));\
-                            }; break;\
-                            default: panic("[write] invalid action #% for system device", fmt(u8, action, .base = 16));\
-                        } break;\
-                        case vm_device_console: switch (action) {\
-                            case vm_console_print: {\
-                                assert(vm->current_mode.size == vm_opcode_size_byte);\
-                                u16 str_addr = vm_pop16(vm);\
-                                u8 str_count = vm_load8(vm, str_addr);\
-                                String str = { .data = vm->memory + str_addr + 1, .count = str_count };\
-                                print("%", fmt(String, str));\
-                            } break;\
-                            default: panic("[write] invalid action #% for console device", fmt(u64, action, .base = 16));\
-                        } break;\
-                        case vm_device_screen: switch (action) {\
-                            case vm_screen_pixel: {\
-                                u8 colour = vm_pop8(vm);\
-                                if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));\
-                                u16 y = vm_pop16(vm), x = vm_pop16(vm);\
-                                if (x >= vm_screen_initial_width || y >= vm_screen_initial_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_initial_width, .base = 16), fmt(u64, vm_screen_initial_height, .base = 16));\
-                                /* TODO(felix): remove */ print("COLOUR %\n", fmt(u32, vm->palette[colour], .base = 16));\
-                                gfx_set_pixel(&vm->gfx, x, y, vm->palette[colour]);\
-                            } break;\
-                            default: panic("[write] invalid action #% for screen device", fmt(u8, action, .base = 16));\
-                        } break;\
-                        default: panic("[write] invalid device #%", fmt(u8, device, .base = 16));\
-                    }\
-                } break;\
+                /* TODO(felix): for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */
+                case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
+                    panic("reached full-byte opcodes in generic switch case");
+                case vm_opcode_push:   vm_push16(vm, vm_load16(vm, vm->program_counter + 1)); add = 2 + 1; break;
+                case vm_opcode_drop:   discard(vm_pop16(vm)); break;
+                case vm_opcode_nip:    { u16 c = vm_pop16(vm); vm_pop16(vm); u16 a = vm_pop16(vm); vm_push16(vm, a); vm_push16(vm, c); } break;
+                case vm_opcode_swap:   { u16 c = vm_pop16(vm), b = vm_pop16(vm); vm_push16(vm, c); vm_push16(vm, b); } break;
+                case vm_opcode_rot:    { u16 c = vm_pop16(vm), b = vm_pop16(vm), a = vm_pop16(vm); vm_push16(vm, b); vm_push16(vm, c); vm_push16(vm, a); } break;
+                case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 1)); break;
+                case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 2)); break;
+                case vm_opcode_eq:     vm_push8(vm, vm_pop16(vm) == vm_pop16(vm)); break;
+                case vm_opcode_neq:    vm_push8(vm, vm_pop16(vm) != vm_pop16(vm)); break;
+                case vm_opcode_gt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left > right); } break;
+                case vm_opcode_lt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left < right); } break;
+                case vm_opcode_add:    vm_push16(vm, vm_pop16(vm) + vm_pop16(vm)); break;
+                case vm_opcode_sub:    { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push16(vm, left - right); } break;
+                case vm_opcode_mul:    vm_push16(vm, vm_pop16(vm) * vm_pop16(vm)); break;
+                case vm_opcode_div:    { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push16(vm, right == 0 ? 0 : (left / right)); } break;
+                case vm_opcode_inc:    vm_push16(vm, vm_pop16(vm) + 1); break;
+                case vm_opcode_not:    vm_push16(vm, ~vm_pop16(vm)); break;
+                case vm_opcode_and:    vm_push16(vm, vm_pop16(vm) & vm_pop16(vm)); break;
+                case vm_opcode_or:     vm_push16(vm, vm_pop16(vm) | vm_pop16(vm)); break;
+                case vm_opcode_xor:    vm_push16(vm, vm_pop16(vm) ^ vm_pop16(vm)); break;
+                case vm_opcode_shift:  { u8 shift = vm_pop8(vm), r = shift & 0x0f, l = (shift & 0xf0) >> 4; vm_push16(vm, (u16)(vm_pop16(vm) << l >> r)); } break;
+                case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;
+                case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop16(vm)) { vm->program_counter = addr; add = 0; } } break;
+                case vm_opcode_jst:    {
+                    vm->active_stack = stack_return;
+                    vm_push16(vm, vm->program_counter + 1);
+                    vm->active_stack = stack_param;
+                    vm->program_counter = vm_pop16(vm);
+                    add = 0;
+                } break;
+                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = stack_return; vm_push16(vm, val); vm->active_stack = stack_param; } break;
+                case vm_opcode_load:   { u16 addr = vm_pop16(vm); u16 val = vm_load16(vm, addr); vm_push16(vm, val); } break;
+                case vm_opcode_store:  { u16 addr = vm_pop16(vm); u16 val = vm_pop16(vm); vm_store16(vm, addr, val); } break;
+                case vm_opcode_read:   {
+                    u8 vm_device_and_action = vm_pop8(vm);
+                    Vm_Device device = vm_device_and_action & 0xf0;
+                    u8 action = vm_device_and_action & 0x0f;
+                    switch (device) {
+                        case vm_device_screen: switch (action) {
+                            default: panic("[read] invalid action #% for screen device", fmt(u64, action, .base = 16));
+                        } break;
+                        default: panic("invalid device #% for operation 'read'", fmt(u64, device, .base = 16));
+                    }
+                } break;
+                case vm_opcode_write:  {
+                    u8 vm_device_and_action = vm_pop8(vm);
+                    Vm_Device device = vm_device_and_action & 0xf0;
+                    u8 action = vm_device_and_action & 0x0f;
+                    switch (device) {
+                        case vm_device_system: switch (action) {
+                            case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {
+                                u16 colour = vm_pop16(vm);
+                                u32 r = ((u32)colour & 0x0f00) >> 8;
+                                u32 g = ((u32)colour & 0x00f0) >> 4;
+                                u32 b = ((u32)colour & 0x000f) >> 0;
+                                u32 rgb = (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;
+                                usize index = (action - vm_system_colour_0) / 2;
+                                vm->palette[index] = rgb;
+                            }; break;
+                            default: panic("[write] invalid action #% for system device", fmt(u8, action, .base = 16));
+                        } break;
+                        case vm_device_console: switch (action) {
+                            case vm_console_print: {
+                                assert(vm->current_mode.size == vm_opcode_size_byte);
+                                u16 str_addr = vm_pop16(vm);
+                                u8 str_count = vm_load8(vm, str_addr);
+                                String str = { .data = vm->memory + str_addr + 1, .count = str_count };
+                                print("%", fmt(String, str));
+                            } break;
+                            default: panic("[write] invalid action #% for console device", fmt(u64, action, .base = 16));
+                        } break;
+                        case vm_device_screen: switch (action) {
+                            case vm_screen_pixel: {
+                                u8 colour = vm_pop8(vm);
+                                if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
+                                u16 y = vm_pop16(vm), x = vm_pop16(vm);
+                                if (x >= vm_screen_initial_width || y >= vm_screen_initial_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_initial_width, .base = 16), fmt(u64, vm_screen_initial_height, .base = 16));
+                                gfx_set_pixel(&vm->gfx, x, y, vm->palette[colour]);
+                            } break;
+                            default: panic("[write] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                        } break;
+                        default: panic("[write] invalid device #%", fmt(u8, device, .base = 16));
+                    }
+                } break;
                 default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
             } break;
             default: unreachable;

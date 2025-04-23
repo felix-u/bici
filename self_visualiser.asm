@@ -3,13 +3,13 @@ include "header.asm"
 patch system_start, start
 start:
     push.2 0x000
-    push system_colour_0 write
+    push system_colour_0 write.2
     push.2 0xfff
-    push system_colour_1 write
+    push system_colour_1 write.2
     push.2 0xf00
-    push system_colour_2 write
+    push system_colour_2 write.2
     push.2 0x0ff
-    push system_colour_3 write
+    push system_colour_3 write.2
 
     push.2 0x0
     /while:

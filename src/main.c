@@ -284,7 +284,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 r = ((rgb & 0xf00000) >> 20);
                                 u16 g = ((rgb & 0x00f000) >> 12);
                                 u16 b = ((rgb & 0x0000f0) >> 4);
-                                u16 packed = (r << 8) | (g << 4) | b;
+                                u16 packed = (u16)((r << 8) | (g << 4) | b);
                                 vm_push16(vm, packed);
                             } break;
                             default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));

@@ -19,6 +19,10 @@ start:
         jni {
             dup.2
             jsi load_coordinates_at_address
+
+            push screen_y write.2
+            push screen_x write.2
+
             push 0x01
             push screen_pixel
             write

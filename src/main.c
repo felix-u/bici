@@ -114,6 +114,7 @@ structdef(Vm) {
     Vm_Instruction_Mode current_mode;
     u32 palette[4];
     Gfx_Render_Context gfx;
+    u16 screen_x, screen_y;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -210,22 +211,24 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
+                    // u8 to_push = 0; // TODO(felix)
                     discard(action);
                     switch (device) {
                         default: panic("[read.1] invalid device #%", fmt(u64, device, .base = 16));
                     }
+                    // vm_push8(vm, to_push); // TODO(felix)
                 } break;
                 case vm_opcode_write:  {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
+                    u8 argument = vm_pop8(vm);
                     switch (device) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_pixel: {
-                                u8 colour = vm_pop8(vm);
+                                u8 colour = argument;
                                 if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
-                                u16 y = vm_pop16(vm), x = vm_pop16(vm);
-                                if (x >= vm_screen_initial_width || y >= vm_screen_initial_height) panic("[write:screen/pixel] coordinate #%x#% is outside screen bounds #%x#%", fmt(u64, x, .base = 16), fmt(u64, y, .base = 16), fmt(u64, vm_screen_initial_width, .base = 16), fmt(u64, vm_screen_initial_height, .base = 16));
+                                u16 y = vm->screen_y, x = vm->screen_x;
                                 gfx_set_pixel(&vm->gfx, x, y, vm->palette[colour]);
                             } break;
                             default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
@@ -276,6 +279,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
+                    u16 to_push = 0;
                     switch (device) {
                         case vm_device_screen: switch (action) {
                             case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {
@@ -284,22 +288,23 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 r = ((rgb & 0xf00000) >> 20);
                                 u16 g = ((rgb & 0x00f000) >> 12);
                                 u16 b = ((rgb & 0x0000f0) >> 4);
-                                u16 packed = (u16)((r << 8) | (g << 4) | b);
-                                vm_push16(vm, packed);
+                                to_push = (u16)((r << 8) | (g << 4) | b);
                             } break;
                             default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));
                         } break;
                         default: panic("[read.2] invalid device #%", fmt(u64, device, .base = 16));
                     }
+                    vm_push16(vm, to_push);
                 } break;
                 case vm_opcode_write:  {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
+                    u16 argument = vm_pop16(vm);
                     switch (device) {
                         case vm_device_system: switch (action) {
                             case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {
-                                u16 colour = vm_pop16(vm);
+                                u16 colour = argument;
                                 u32 r = ((u32)colour & 0x0f00) >> 8;
                                 u32 g = ((u32)colour & 0x00f0) >> 4;
                                 u32 b = ((u32)colour & 0x000f) >> 0;
@@ -311,12 +316,25 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         case vm_device_console: switch (action) {
                             case vm_console_print: {
-                                u16 str_addr = vm_pop16(vm);
+                                u16 str_addr = argument;
                                 u8 str_count = vm_load8(vm, str_addr);
                                 String str = { .data = vm->memory + str_addr + 1, .count = str_count };
                                 print("%", fmt(String, str));
                             } break;
                             default: panic("[write.2] invalid action #% for console device", fmt(u64, action, .base = 16));
+                        } break;
+                        case vm_device_screen: switch (action) {
+                            case vm_screen_x: {
+                                u16 x = argument;
+                                assert(x < vm_screen_initial_width);
+                                vm->screen_x = x;
+                            } break;
+                            case vm_screen_y: {
+                                u16 y = argument;
+                                assert(y < vm_screen_initial_height);
+                                vm->screen_y = y;
+                            } break;
+                            default: panic("[write.2] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
                         default: panic("[write.2] invalid device #%", fmt(u8, device, .base = 16));
                     }

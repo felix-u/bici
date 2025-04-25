@@ -9,19 +9,40 @@ watch:
   view_rule: "hex"
 }
 
+watch: "value"
+watch:
+{
+  name: "number_string"
+  view_rule: "slice"
+}
+
+watch: "base_value"
+watch:
+{
+  name: "result"
+  view_rule: "hex"
+}
+
+watch: "base"
+watch: "digit"
+watch:
+{
+  name: "value_unbounded"
+  view_rule: "hex"
+}
+
 /// targets ///////////////////////////////////////////////////////////////////
 
 target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script self_visualiser.asm"
+  arguments: "script hello.asm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////
 
 recent_file: "src/base/base_gfx.c"
-recent_file: "src/base/base_strings.c"
 recent_file: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"
 recent_file: "../../../../../appfolders/raddbg/minkernel/crts/ucrt/inc/corecrt_internal_strtox.h"
 recent_file: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/eh/frame.cpp"
@@ -30,6 +51,7 @@ recent_file: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/misc/amd64/chkstk.asm
 recent_file: "src/base/base_arena.c"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.cxx"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.inl"
+recent_file: "src/base/base_strings.c"
 recent_file: "src/main.c"
 
 /// exception code filters ////////////////////////////////////////////////////

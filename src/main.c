@@ -72,6 +72,7 @@ enum Vm_Screen_Action {
     vm_screen_y      = 0x8,
     vm_screen_pixel  = 0xa,
     vm_screen_sprite = 0xb,
+    vm_screen_data   = 0xc,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -115,6 +116,7 @@ structdef(Vm) {
     u32 palette[4];
     Gfx_Render_Context gfx;
     u16 screen_x, screen_y;
+    u8 *screen_data;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -231,6 +233,30 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 y = vm->screen_y, x = vm->screen_x;
                                 gfx_set_pixel(&vm->gfx, x, y, vm->palette[colour]);
                             } break;
+                            case vm_screen_sprite: {
+                                u8 two_bits_per_pixel = argument & 0x80;
+                                u8 use_background_layer = argument & 0x40;
+                                u8 flip_y = argument & 0x20;
+                                u8 flip_x = argument & 0x10;
+                                u8 colours = argument & 0x0f;
+
+                                // TODO(felix)
+                                assert(!two_bits_per_pixel);
+                                assert(!use_background_layer);
+                                assert(!flip_y);
+                                assert(!flip_x);
+                                discard(colours);
+
+                                u8 *sprite = vm->screen_data;
+                                for (u8 row = 0; row < 8; row += 1, sprite += 1) {
+                                    for (u8 column = 0; column < 8; column += 1) {
+                                        u8 shift = 7 - column;
+                                        u8 colour = (*sprite & (1 << shift)) >> shift;
+                                        if (!use_background_layer && colour == 0) continue;
+                                        gfx_set_pixel(&vm->gfx, vm->screen_x + column, vm->screen_y + row, vm->palette[colour]);
+                                    }
+                                }
+                            } break;
                             default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
                         default: panic("[write.1] invalid device #%", fmt(u8, device, .base = 16));
@@ -334,6 +360,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 assert(y < vm_screen_initial_height);
                                 vm->screen_y = y;
                             } break;
+                            case vm_screen_data: {
+                                u16 address = argument;
+                                vm->screen_data = (u8 *)(vm->memory + address);
+                            } break;
                             default: panic("[write.2] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
                         default: panic("[write.2] invalid device #%", fmt(u8, device, .base = 16));
@@ -379,7 +409,7 @@ enumdef(Token_Kind, u8) {
     token_kind_ascii_delimiter = 128,
 
     token_kind_symbol,
-    token_kind_hexadecimal,
+    token_kind_number,
     token_kind_string,
     token_kind_opmode,
 
@@ -394,6 +424,7 @@ structdef(Token) {
     u8 length;
     Token_Kind kind;
     u16 value;
+    u8 base;
 };
 
 structdef(Token_Id) { File_Id file_id; i32 index; };
@@ -552,6 +583,8 @@ int main(int argc, char **argv) {
 
                 u32 start_index = asm_cursor;
                 Token_Kind kind = 0;
+                u16 value = 0;
+                u8 base = 0;
                 if (is_starting_symbol_character(asm.data[asm_cursor])) {
                     kind = token_kind_symbol;
                     asm_cursor += 1;
@@ -563,27 +596,38 @@ int main(int argc, char **argv) {
                     }
                 } else switch (asm.data[asm_cursor]) {
                     case '0': {
-                        kind = token_kind_hexadecimal;
+                        kind = token_kind_number;
 
-                        if (asm_cursor + 1 == asm.count || asm.data[asm_cursor + 1] != 'x') {
-                            log_error("expected 'x' after '0' to begin hexadecimal literal");
+                        if (asm_cursor + 1 == asm.count || (asm.data[asm_cursor + 1] != 'x' && asm.data[asm_cursor + 1] != 'b')) {
+                            log_error("expected 'x' or 'b' after '0' to begin binary or hexadecimal literal");
                             return parse_error(&context, file_id, asm_cursor + 1, 1);
                         }
+                        u8 base_char = asm.data[asm_cursor + 1];
                         asm_cursor += 2;
                         start_index = asm_cursor;
 
                         if (asm_cursor == asm.count) {
-                            log_error("expected hexadecimal digits following '0x'");
-                            return parse_error(&context, file_id, 0, 0);
+                            log_error("expected digits following '0%'", fmt(char, base_char));
+                            return parse_error(&context, file_id, asm_cursor - 2, 2);
                         }
 
                         for (; asm_cursor < asm.count; asm_cursor += 1) {
                             u8 c = asm.data[asm_cursor];
-                            if (ascii_is_hexadecimal(c)) continue;
+                            if (base_char == 'x' && ascii_is_hexadecimal(c)) continue;
+                            if (base_char == 'b' && (c == '0' || c == '1')) continue;
                             if (ascii_is_whitespace(c)) break;
-                            log_error("expected hexadecimal digits here");
+                            log_error("expected base_char % digit", fmt(char, base_char));
                             return parse_error(&context, file_id, asm_cursor, 1);
                         }
+
+                        base = base_char == 'b' ? 2 : 16;
+                        String number_string = string_range(asm, start_index, asm_cursor);
+                        usize value_unbounded = int_from_string_base(number_string, base);
+                        if (value_unbounded >= 0x10000) {
+                            log_error("0d% is too large to fit in 16 bits", fmt(usize, value_unbounded));
+                            return parse_error(&context, file_id, start_index, (u8)(asm_cursor - start_index));
+                        }
+                        value = (u16)value_unbounded;
                     } break;
                     case ';': {
                         while (asm_cursor < asm.count && asm.data[asm_cursor] != '\n') asm_cursor += 1;
@@ -650,6 +694,8 @@ int main(int argc, char **argv) {
                     .start_index = start_index,
                     .length = (u8)length,
                     .kind = kind,
+                    .value = value,
+                    .base = base,
                 };
                 array_push(&file->tokens, &token);
             }
@@ -661,7 +707,7 @@ int main(int argc, char **argv) {
 
                 if (context.insertion_mode.is_active) {
                     switch (token.kind) {
-                        case token_kind_symbol: case ']': case '$': case token_kind_hexadecimal: case token_kind_string: break;
+                        case token_kind_symbol: case ']': case '$': case token_kind_number: case token_kind_string: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
                             return parse_error(&context, file_id, token.start_index, token.length);
@@ -812,7 +858,7 @@ int main(int argc, char **argv) {
                             if (instruction_takes_immediate(instruction)) {
                                 next = *token_get(&context, token_id_shift(file_token_id, 1));
                                 switch (next.kind) {
-                                    case token_kind_symbol: case token_kind_hexadecimal: case '{': break;
+                                    case token_kind_symbol: case token_kind_number: case '{': break;
                                     default: {
                                         log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
                                         return parse_error(&context, file_id, next.start_index, next.length);
@@ -834,11 +880,9 @@ int main(int argc, char **argv) {
                                     array_push(&context.label_references, &reference);
                                     rom.count += reference.width;
                                 } else {
-                                    assert(next.kind == token_kind_hexadecimal);
+                                    assert(next.kind == token_kind_number);
                                     next_string = token_lexeme(&context, token_id_shift(file_token_id, 1));
-
-                                    // TODO(felix): bounds check
-                                    u16 value = (u16)int_from_hex_string(next_string);
+                                    u16 value = next.value;
 
                                     if (width == 1) {
                                         if (value > 255) {
@@ -860,13 +904,12 @@ int main(int argc, char **argv) {
                         }
 
                         if (string_equal(token_string, string("org")) || string_equal(token_string, string("rorg"))) {
-                            if (next.kind != token_kind_hexadecimal) {
+                            if (next.kind != token_kind_number) {
                                 log_error("expected numeric literal (byte offset) after directive '%'", fmt(String, token_string));
                                 return parse_error(&context, file_id, next.start_index, next.length);
                             }
 
-                            // TODO(felix): bounds check
-                            u16 value = (u16)int_from_hex_string(next_string);
+                            u16 value = next.value;
                             bool is_relative = token_string.data[0] == 'r';
                             if (is_relative) value += (u16)rom.count;
 
@@ -896,7 +939,7 @@ int main(int argc, char **argv) {
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             next = *token_get(&context, token_id_shift(file_token_id, 1));
-                            if (next.kind != token_kind_symbol && next.kind != token_kind_hexadecimal) {
+                            if (next.kind != token_kind_symbol && next.kind != token_kind_number) {
                                 log_error("expected label or numeric literal to indicate address as second argument to directive 'patch'");
                                 return parse_error(&context, file_id, next.start_index, next.length);
                             }
@@ -934,16 +977,15 @@ int main(int argc, char **argv) {
                         array_push(&context.label_references, &reference);
                         rom.count += reference.width;
                     } break;
-                    case token_kind_hexadecimal: {
+                    case token_kind_number: {
                         if (!context.insertion_mode.is_active) {
-                            log_error("standalone hexadecimal literals are only supported in insertion mode (e.g. in [ ... ])");
+                            log_error("standalone numerber literals are only supported in insertion mode (e.g. in [ ... ])");
                             return parse_error(&context, file_id, token.start_index, token.length);
                         }
 
-                        // TODO(felix): bounds check
-                        u16 value = (u16)int_from_hex_string(token_string);
+                        u16 value = token.value;
 
-                        bool is_byte = token_string.count <= 2;
+                        bool is_byte = (token.base == 16 && token_string.count <= 2) || (token.base == 2 && token_string.count <= 8);
                         if (is_byte) {
                             assert(value < 256);
                             rom.data[rom.count] = (u8)value;
@@ -1000,9 +1042,8 @@ int main(int argc, char **argv) {
                 Token token = *token_get(&context, token_id);
                 String reference_string = token_lexeme(&context, token_id);
 
-                if (token.kind == token_kind_hexadecimal) {
-                    // TODO(felix): bounds check
-                    u16 value = (u16)int_from_hex_string(reference_string);
+                if (token.kind == token_kind_number) {
+                    u16 value = token.value;
                     static Label dummy = {0};
                     dummy.address = value;
                     source_label = &dummy;

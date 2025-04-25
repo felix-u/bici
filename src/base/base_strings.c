@@ -1,9 +1,13 @@
-static usize int_from_hex_string(String s) {
+static usize int_from_string_base(String s, usize base) {
     usize result = 0, magnitude = s.count;
     for (usize i = 0; i < s.count; i += 1, magnitude -= 1) {
-        usize hex_digit = decimal_from_hex_digit_table[s.data[i]];
-        for (usize j = 1; j < magnitude; j += 1) hex_digit *= 16;
-        result += hex_digit;
+        result *= base;
+        usize digit = decimal_from_hex_digit_table[s.data[i]];
+        if (digit >= base) {
+            log_error("digit '%' is invalid in base %", fmt(char, s.data[i]), fmt(usize, base));
+            return 0;
+        }
+        result += digit;
     }
     return result;
 }

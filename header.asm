@@ -20,6 +20,7 @@ org 0x20 screen:
     screen_y:      rorg 0x2
     screen_pixel:  rorg 0x1
     screen_sprite: rorg 0x1
+    screen_data:   rorg 0x2
 
 org 0x30
 

@@ -23,7 +23,11 @@ org 0x20 screen:
     screen_data:   rorg 0x2
     screen_auto:   rorg 0x1
 
-org 0x30
+org 0x30 mouse:
+    mouse_x: rorg 0x2
+    mouse_y: rorg 0x2
+
+org 0x40
 
 org 0x100
 

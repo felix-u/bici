@@ -43,9 +43,10 @@
     /* UNUSED      0xe0, 0)   NO MODE (== push;kr2)*/\
 
 enumdef(Vm_Device, u8) {
-    vm_device_system = 0x00,
+    vm_device_system  = 0x00,
     vm_device_console = 0x10,
-    vm_device_screen = 0x20,
+    vm_device_screen  = 0x20,
+    vm_device_mouse   = 0x30,
 };
 
 enumdef(Vm_System_Action, u8) {
@@ -74,6 +75,11 @@ enum Vm_Screen_Action {
     vm_screen_sprite = 0xb,
     vm_screen_data   = 0xc,
     vm_screen_auto   = 0xe,
+};
+
+enumdef(Vm_Mouse_Action, u8) {
+    vm_mouse_x = 0x0,
+    vm_mouse_y = 0x2,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -230,10 +236,22 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     switch (device) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_pixel: {
-                                u8 colour = argument;
+                                u8 fill_x = argument & 0x80;
+                                u8 fill_y = argument & 0x40;
+
+                                u8 colour = argument & 0x0f;
                                 if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
+                                u32 rgb = vm->palette[colour];
+
                                 u16 y = vm->screen_y, x = vm->screen_x;
-                                gfx_set_pixel(&vm->gfx, x, y, vm->palette[colour]);
+
+                                if (fill_x && fill_y) {
+                                    gfx_draw_rectangle(&vm->gfx, x, y, vm_screen_initial_width - x, vm_screen_initial_width - y, rgb);
+                                } else if (fill_x) {
+                                    unreachable;
+                                } else if (fill_y) {
+                                    unreachable;
+                                } else gfx_set_pixel(&vm->gfx, x, y, rgb);
                             } break;
                             case vm_screen_sprite: {
                                 u8 two_bits_per_pixel = argument & 0x80;

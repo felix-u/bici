@@ -3,9 +3,17 @@ include "header.asm"
 patch system_start, start
 start:
     ; palette
-    push.2 0xfff
+    push.2 0xeeb
+    push system_colour_0
+    write.2
+    push.2 0x000
     push system_colour_1
     write.2
+
+    ; clear background
+    push 0b11000000
+    push screen_pixel
+    write
 
     push.2 alphabet
     push.2 0x10

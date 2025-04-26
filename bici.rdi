@@ -31,6 +31,24 @@ watch:
   view_rule: "hex"
 }
 
+watch:
+{
+  name: "rgb"
+  view_rule: "hex"
+}
+
+watch:
+{
+  name: "vm.gfx.pixels"
+  view_rule: "bitmap:(w:640, h:360, fmt:rgba32)"
+}
+
+watch:
+{
+  name: "rgba"
+  view_rule: "hex"
+}
+
 /// targets ///////////////////////////////////////////////////////////////////
 
 target:
@@ -42,7 +60,6 @@ target:
 
 /// recent_files //////////////////////////////////////////////////////////////
 
-recent_file: "src/base/base_gfx.c"
 recent_file: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"
 recent_file: "../../../../../appfolders/raddbg/minkernel/crts/ucrt/inc/corecrt_internal_strtox.h"
 recent_file: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/eh/frame.cpp"
@@ -53,6 +70,7 @@ recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.cxx"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.inl"
 recent_file: "src/base/base_strings.c"
 recent_file: "src/main.c"
+recent_file: "src/base/base_gfx.c"
 
 /// exception code filters ////////////////////////////////////////////////////
 

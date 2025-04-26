@@ -761,9 +761,6 @@ static void gfx_draw_line(Gfx_Render_Context *gfx, V2 start, V2 end, f32 thickne
 
 static inline void gfx_set_pixel(Gfx_Render_Context *gfx, i32 x, i32 y, u32 rgb) {
     // TODO(felix): alpha blending (probably should have two set_pixel functions)
-    if ((rgb & 0x000000ff) < 0xff) {
-        rgb |= 0xff;
-    }
 
     i32 width = (i32)gfx->frame_info.virtual_window_size.x;
     i32 height = (i32)gfx->frame_info.virtual_window_size.y;

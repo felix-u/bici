@@ -25,3 +25,75 @@ org 0x20 screen:
 org 0x30
 
 org 0x100
+
+; TODO(felix): mechanism to conditionally include? to decrease binary size for programs not using the font,
+;              while keeping the fonts in this file
+
+font:
+    rorg 0x208 ; skip to 'A' * 8 (bytes per glyph)
+    /A: [
+        0b01111110
+        0b11000011
+        0b11000011
+        0b11111111
+        0b11000011
+        0b11000011
+        0b11000011
+        0b11000011
+    ]
+    /B: [
+        0b11111110
+        0b11000011
+        0b11000011
+        0b11111110
+        0b11000011
+        0b11000011
+        0b11000011
+        0b11111110
+    ]
+    /C: [
+        0b01111110
+        0b11000011
+        0b11000000
+        0b11000000
+        0b11000000
+        0b11000000
+        0b11000011
+        0b01111110
+    ]
+    /D: [
+        0b11111100
+        0b11000110
+        0b11000011
+        0b11000011
+        0b11000011
+        0b11000011
+        0b11000110
+        0b11111100
+    ]
+
+draw_character: ; (character: u8, x, y: u16 -> _)
+    push screen_y write.2
+    push screen_x write.2
+
+    ; cast character to u16
+    push 0x0
+    swap
+
+    ; byte offset from beginning of font sprites
+    push.2 0x8
+    mul.2
+
+    ; address of glyph
+    push.2 font
+    add.2
+
+    push screen_data
+    write.2
+
+    ; draw sprite
+    push 0x0
+    push screen_sprite
+    write
+
+    jmp.r

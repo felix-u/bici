@@ -1,7 +1,7 @@
 #include "base/base.c"
 
-#define vm_screen_initial_width 256
-#define vm_screen_initial_height 256
+#define vm_screen_initial_width 640
+#define vm_screen_initial_height 360
 
 #define vm_for_opcode(action)\
     /*     name,   byte, is_immediate */\
@@ -242,7 +242,6 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
                                 // TODO(felix)
                                 assert(!two_bits_per_pixel);
-                                assert(!use_background_layer);
                                 assert(!flip_y);
                                 assert(!flip_x);
                                 discard(colours);

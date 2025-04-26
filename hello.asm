@@ -14,20 +14,20 @@ start:
     push system_colour_1
     write.2
 
-    ; coordinate
-    push.2 0x10 dup.2
-    push screen_x write.2
-    push screen_y write.2
+    push 0x41 ; 'A'
+    push.2 0x10
+    push.2 0x10
+    jsi draw_character
 
-    ; sprite data
-    push.2 sprite
-    push screen_data
-    write.2
+    push 0x42 ; 'B'
+    push.2 0x19
+    push.2 0x10
+    jsi draw_character
 
-    ; draw sprite
-    push 0x0
-    push screen_sprite
-    write
+    push 0x44
+    push.2 0x22
+    push.2 0x10
+    jsi draw_character
 
     break
 

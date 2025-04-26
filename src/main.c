@@ -1179,6 +1179,7 @@ int main(int argc, char **argv) {
 
         Gfx_Render_Context *gfx = &vm.gfx;
         *gfx = gfx_window_create(persistent_arena, "bici", vm_screen_initial_width, vm_screen_initial_height);
+        ShowCursor(false);
         gfx->font = gfx_font_default_3x5;
 
         // TODO(felix): program should control this

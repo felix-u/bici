@@ -3,10 +3,10 @@ include "header.asm"
 patch system_start, start
 start:
     ; palette
-    push.2 0x033 push system_colour_0 write.2
-    push.2 0x29d push system_colour_1 write.2
-    push.2 0xd38 push system_colour_2 write.2
-    push.2 0xabb push system_colour_3 write.2
+    push.2 0x4b8 push system_colour_0 write.2
+    push.2 0x335 push system_colour_1 write.2
+    push.2 0xefe push system_colour_2 write.2
+    push.2 0x489 push system_colour_3 write.2
 
     break
 

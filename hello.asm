@@ -24,12 +24,19 @@ start:
     push.2 0x10
     jsi draw_character
 
-    push 0x44
+    push 0x43 ; 'C'
     push.2 0x22
     push.2 0x10
     jsi draw_character
 
+    push.2 alphabet
+    push.2 0x10
+    push.2 0x30
+    jsi draw_text
+
     break
+
+alphabet: [$ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
 
 hello_world: [$ "Hello, World!" 0x0a ]
 

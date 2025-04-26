@@ -97,3 +97,51 @@ draw_character: ; (character: u8, x, y: u16 -> _)
     write
 
     jmp.r
+
+draw_text: ; (string_address, x, y: u16 -> _)
+    push.2 y store.2
+    push.2 x store.2
+
+    inc.2
+    push.2 address store.2
+
+    push.2 0x0
+    /loop:
+        dup.2
+        push.2 0x4
+        lt.2
+        jni {
+            dup.2
+            push.2 index store.2
+
+            dup.2
+
+            ; load address
+            push.2 address load.2
+
+            ; add to current offset and load character
+            add.2
+            load
+
+            ; draw character
+
+            push.2 x load.2
+            push.2 index load.2
+            push.2 0x9 mul.2
+            add.2
+
+            push.2 y load.2
+
+            jsi draw_character
+
+            inc.2
+            jmi loop
+        }
+        drop.2
+
+    jmp.r
+
+    /index: rorg 0x2
+    /address: rorg 0x2
+    /x: rorg 0x2
+    /y: rorg 0x2

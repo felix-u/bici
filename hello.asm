@@ -17,8 +17,22 @@ start:
     push.2 0x20
     jsi draw_text
 
+    push.2 punctuation
+    push.2 0x10
+    push.2 0x30
+    jsi draw_text
+
+    push.2 numbers
+    push.2 0x10
+    push.2 0x40
+    jsi draw_text
+
     break
 
 alphabet: [$ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
 
-hello: [$ "HELLO WORLD" ]
+hello: [$ "HELLO, WORLD!" ]
+
+punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~"  ]
+
+numbers: [$ "0123456789" ]

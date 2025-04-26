@@ -126,7 +126,8 @@ structdef(Vm) {
     Gfx_Render_Context gfx;
     u16 screen_x, screen_y;
     u8 *screen_data;
-    bool screen_auto_x, screen_auto_y;
+    bool screen_auto_x, screen_auto_y, screen_auto_address;
+    u8 screen_auto_extra_sprite_count;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -248,6 +249,9 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     switch (device) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_pixel: {
+                                if (vm->screen_x >= vm_screen_initial_width) break;
+                                if (vm->screen_y >= vm_screen_initial_height) break;
+
                                 u8 fill_x = argument & 0x80;
                                 u8 fill_y = argument & 0x40;
 
@@ -266,6 +270,9 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 } else gfx_set_pixel(&vm->gfx, x, y, rgb);
                             } break;
                             case vm_screen_sprite: {
+                                if (vm->screen_x >= vm_screen_initial_width) break;
+                                if (vm->screen_y >= vm_screen_initial_height) break;
+
                                 u8 two_bits_per_pixel = argument & 0x80;
                                 u8 use_background_layer = argument & 0x40;
                                 u8 flip_y = argument & 0x20;
@@ -296,6 +303,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             case vm_screen_auto: {
                                 vm->screen_auto_x = argument & 0x01;
                                 vm->screen_auto_y = (argument & 0x02) >> 1;
+                                vm->screen_auto_address = (argument & 0x04) >> 1;
+                                vm->screen_auto_extra_sprite_count = (argument & 0xf0) >> 4;
                             } break;
                             default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
@@ -405,12 +414,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_x: {
                                 u16 x = argument;
-                                assert(x < vm_screen_initial_width);
                                 vm->screen_x = x;
                             } break;
                             case vm_screen_y: {
                                 u16 y = argument;
-                                assert(y < vm_screen_initial_height);
                                 vm->screen_y = y;
                             } break;
                             case vm_screen_data: {

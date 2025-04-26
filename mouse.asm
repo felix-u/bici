@@ -16,6 +16,9 @@ update:
     push mouse_left_button read
     push 0b11110000 and
     jni end_set_mouse_colour
+        push.2 message_left_click
+        push.2 message store.2
+
         ; if current_mouse_colour < last_mouse_colour
         push.2 current_mouse_colour load.2
         dup.2
@@ -37,6 +40,9 @@ update:
     push mouse_right_button read
     push 0b11110000 and
     jni end_set_background_colour
+        push.2 message_right_click
+        push.2 message store.2
+
         ; if current_background_colour < last_background_colour
         push.2 current_background_colour load.2
         dup.2
@@ -61,18 +67,19 @@ update:
     push screen_pixel
     write
 
-    push mouse_x read.2
-    push screen_x write.2
+    push.2 message_header
+    push.2 0x10 dup.2
+    push.2 current_mouse_colour load.2 load
+    jsi draw_text
 
-    push mouse_y read.2
-    push screen_y write.2
+    push.2 message load.2
+    push.2 0x10
+    push.2 0x20
+    push.2 current_mouse_colour load.2 load
+    jsi draw_text
 
-    push.2 mouse_cursor_sprite
-    push screen_data write.2
-
-    push.2 current_mouse_colour load.2
-    load
-    push screen_sprite write
+    push.2 current_mouse_colour load.2 load
+    jsi draw_default_mouse_cursor_at_mouse
 
     break
 
@@ -80,14 +87,8 @@ update:
     /current_mouse_colour: [ first_mouse_colour ]
     /first_background_colour: [ 0b11000000 /last_background_colour: 0b11000011 ]
     /current_background_colour: [ first_background_colour ]
-
-mouse_cursor_sprite: [
-    0b10000000
-    0b11000000
-    0b11100000
-    0b11110000
-    0b11111000
-    0b11100000
-    0b01010000
-    0b00010000
-]
+    /message_header: [$ "LAST ACTION:" ]
+    /message: [ message_none ]
+    /message_none: [$ "NONE" ]
+    /message_left_click: [$ "LEFT CLICK" ]
+    /message_right_click: [$ "RIGHT CLICK" ]

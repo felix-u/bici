@@ -33,7 +33,9 @@ org 0x40
 
 org 0x100
 
-draw_text: ; (string_address, x, y: u16 -> _)
+draw_text: ; (string_address, x, y: u16, text_colour: u8 -> _)
+    push.2 text_colour store
+
     push screen_y write.2
     push screen_x write.2
 
@@ -85,7 +87,7 @@ draw_text: ; (string_address, x, y: u16 -> _)
             write.2
 
             ; draw
-            push 0b00000100
+            push.2 text_colour load
             push screen_sprite
             write
 
@@ -96,9 +98,35 @@ draw_text: ; (string_address, x, y: u16 -> _)
 
     jmp.r
 
+    /text_colour: rorg 0x1
     /count: rorg 0x2
     /index: rorg 0x2
     /address: rorg 0x2
+
+draw_default_mouse_cursor_at_mouse: ; (colour: u8 -> _)
+    push mouse_x read.2
+    push screen_x write.2
+
+    push mouse_y read.2
+    push screen_y write.2
+
+    push.2 mouse_cursor_sprite
+    push screen_data write.2
+
+    push screen_sprite write
+
+    jmp.r
+
+mouse_cursor_sprite: [
+    0b10000000
+    0b11000000
+    0b11100000
+    0b11110000
+    0b11111000
+    0b11100000
+    0b01010000
+    0b00010000
+]
 
 ; TODO(felix): mechanism to conditionally include? to decrease binary size for programs not using the font,
 ;              while keeping the fonts in this file

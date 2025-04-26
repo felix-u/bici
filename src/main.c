@@ -80,6 +80,8 @@ enum Vm_Screen_Action {
 enumdef(Vm_Mouse_Action, u8) {
     vm_mouse_x = 0x0,
     vm_mouse_y = 0x2,
+    vm_mouse_left_button = 0x4,
+    vm_mouse_right_button = 0x5,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -221,12 +223,22 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
-                    // u8 to_push = 0; // TODO(felix)
-                    discard(action);
+                    u8 to_push = 0;
                     switch (device) {
+                        case vm_device_mouse: switch (action) {
+                            case vm_mouse_left_button: {
+                                if (vm->gfx.frame_info.mouse_left_clicked) to_push |= 0xf0;
+                                if (vm->gfx.frame_info.mouse_left_down)    to_push |= 0x0f;
+                            } break;
+                            case vm_mouse_right_button: {
+                                if (vm->gfx.frame_info.mouse_right_clicked) to_push |= 0xf0;
+                                if (vm->gfx.frame_info.mouse_right_down)    to_push |= 0x0f;
+                            } break;
+                            default: panic("[read.1] invalid action #% for mouse device", fmt(u8, action, .base = 16));
+                        } break;
                         default: panic("[read.1] invalid device #%", fmt(u64, device, .base = 16));
                     }
-                    // vm_push8(vm, to_push); // TODO(felix)
+                    vm_push8(vm, to_push);
                 } break;
                 case vm_opcode_write:  {
                     u8 vm_device_and_action = vm_pop8(vm);
@@ -258,13 +270,12 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u8 use_background_layer = argument & 0x40;
                                 u8 flip_y = argument & 0x20;
                                 u8 flip_x = argument & 0x10;
-                                u8 colours = argument & 0x0f;
+                                u8 colours[] = { argument & 0x03, (argument & 0x0c) >> 2 };
 
                                 // TODO(felix)
                                 assert(!two_bits_per_pixel);
                                 assert(!flip_y);
                                 assert(!flip_x);
-                                discard(colours);
 
                                 u16 column_count = min(8, vm_screen_initial_width - vm->screen_x);
                                 u16 row_count = min(8, vm_screen_initial_height - vm->screen_y);
@@ -275,7 +286,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                         u8 shift = 7 - column;
                                         u8 colour = (*sprite & (1 << shift)) >> shift;
                                         if (!use_background_layer && colour == 0) continue;
-                                        gfx_set_pixel(&vm->gfx, vm->screen_x + column, vm->screen_y + row, vm->palette[colour]);
+                                        gfx_set_pixel(&vm->gfx, vm->screen_x + column, vm->screen_y + row, vm->palette[colours[colour]]);
                                     }
                                 }
 
@@ -749,7 +760,7 @@ int main(int argc, char **argv) {
 
                 if (context.insertion_mode.is_active) {
                     switch (token.kind) {
-                        case token_kind_symbol: case ']': case '$': case token_kind_number: case token_kind_string: break;
+                        case token_kind_symbol: case ']': case '$': case '/': case token_kind_number: case token_kind_string: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
                             return parse_error(&context, file_id, token.start_index, token.length);

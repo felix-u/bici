@@ -26,6 +26,8 @@ org 0x20 screen:
 org 0x30 mouse:
     mouse_x: rorg 0x2
     mouse_y: rorg 0x2
+    mouse_left_button: rorg 0x1
+    mouse_right_button: rorg 0x1
 
 org 0x40
 
@@ -83,7 +85,7 @@ draw_text: ; (string_address, x, y: u16 -> _)
             write.2
 
             ; draw
-            push 0x0
+            push 0b00000100
             push screen_sprite
             write
 

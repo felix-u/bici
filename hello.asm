@@ -33,6 +33,6 @@ alphabet: [$ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
 
 hello: [$ "HELLO, WORLD!" ]
 
-punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~"  ]
+punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~" ]
 
 numbers: [$ "0123456789" ]

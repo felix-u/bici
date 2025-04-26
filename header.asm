@@ -29,7 +29,11 @@ org 0x30 mouse:
     mouse_left_button: rorg 0x1
     mouse_right_button: rorg 0x1
 
-org 0x40
+org 0x40 keyboard:
+    keyboard_key_value: rorg 0x1
+    keyboard_key_state: rorg 0x1
+
+org 0x50
 
 org 0x100
 

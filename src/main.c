@@ -43,10 +43,11 @@
     /* UNUSED      0xe0, 0)   NO MODE (== push;kr2)*/\
 
 enumdef(Vm_Device, u8) {
-    vm_device_system  = 0x00,
-    vm_device_console = 0x10,
-    vm_device_screen  = 0x20,
-    vm_device_mouse   = 0x30,
+    vm_device_system   = 0x00,
+    vm_device_console  = 0x10,
+    vm_device_screen   = 0x20,
+    vm_device_mouse    = 0x30,
+    vm_device_keyboard = 0x40,
 };
 
 enumdef(Vm_System_Action, u8) {
@@ -82,6 +83,11 @@ enumdef(Vm_Mouse_Action, u8) {
     vm_mouse_y = 0x2,
     vm_mouse_left_button = 0x4,
     vm_mouse_right_button = 0x5,
+};
+
+enumdef(Vm_Keyboard_Action, u8) {
+    vm_keyboard_key_value = 0x0,
+    vm_keyboard_key_state = 0x1,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -124,10 +130,13 @@ structdef(Vm) {
     Vm_Instruction_Mode current_mode;
     u32 palette[4];
     Gfx_Render_Context gfx;
+
     u16 screen_x, screen_y;
     u8 *screen_data;
     bool screen_auto_x, screen_auto_y, screen_auto_address;
     u8 screen_auto_extra_sprite_count;
+
+    u8 keyboard_key_value;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -237,6 +246,16 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             } break;
                             default: panic("[read.1] invalid action #% for mouse device", fmt(u8, action, .base = 16));
                         } break;
+                        case vm_device_keyboard: switch (action) {
+                            case vm_keyboard_key_state: {
+                                u8 key = vm->keyboard_key_value;
+                                bool key_down = vm->gfx.frame_info.key_is_down[key];
+                                if (key_down) to_push |= 0x0f;
+                                bool key_pressed = key_down && !vm->gfx.frame_info.key_was_down_last_frame[key];
+                                if (key_pressed) to_push |= 0xf0;
+                            } break;
+                            default: panic("[read.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
+                        } break;
                         default: panic("[read.1] invalid device #%", fmt(u64, device, .base = 16));
                     }
                     vm_push8(vm, to_push);
@@ -308,6 +327,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             } break;
                             default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
+                        case vm_device_keyboard: switch (action) {
+                            case vm_keyboard_key_value: vm->keyboard_key_value = argument; break;
+                            default: panic("[write.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
+                        } break;
                         default: panic("[write.1] invalid device #%", fmt(u8, device, .base = 16));
                     }
                 } break;
@@ -365,6 +388,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 b = ((rgb & 0x0000f0) >> 4);
                                 to_push = (u16)((r << 8) | (g << 4) | b);
                             } break;
+                            case vm_screen_width: to_push = vm_screen_initial_width; break;
+                            case vm_screen_height: to_push = vm_screen_initial_height; break;
                             default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));
                         } break;
                         case vm_device_mouse: {

@@ -55,7 +55,7 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script hello.asm"
+  arguments: "script mouse.asm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////
@@ -69,8 +69,8 @@ recent_file: "src/base/base_arena.c"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.cxx"
 recent_file: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.inl"
 recent_file: "src/base/base_strings.c"
-recent_file: "src/main.c"
 recent_file: "src/base/base_gfx.c"
+recent_file: "src/main.c"
 
 /// exception code filters ////////////////////////////////////////////////////
 

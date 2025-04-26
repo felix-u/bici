@@ -266,9 +266,12 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 assert(!flip_x);
                                 discard(colours);
 
+                                u16 column_count = min(8, vm_screen_initial_width - vm->screen_x);
+                                u16 row_count = min(8, vm_screen_initial_height - vm->screen_y);
+
                                 u8 *sprite = vm->screen_data;
-                                for (u8 row = 0; row < 8; row += 1, sprite += 1) {
-                                    for (u8 column = 0; column < 8; column += 1) {
+                                for (u8 row = 0; (u16)row < row_count; row += 1, sprite += 1) {
+                                    for (u8 column = 0; (u16)column < column_count; column += 1) {
                                         u8 shift = 7 - column;
                                         u8 colour = (*sprite & (1 << shift)) >> shift;
                                         if (!use_background_layer && colour == 0) continue;
@@ -343,6 +346,19 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 to_push = (u16)((r << 8) | (g << 4) | b);
                             } break;
                             default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));
+                        } break;
+                        case vm_device_mouse: {
+                            V2 virtual_over_real = v2_div(vm->gfx.frame_info.virtual_window_size, vm->gfx.frame_info.real_window_size);
+                            V2 virtual_mouse_position = v2_mul(vm->gfx.frame_info.real_mouse_position, virtual_over_real);
+                            switch (action) {
+                                case vm_mouse_x: {
+                                    to_push = (u16)virtual_mouse_position.x;
+                                } break;
+                                case vm_mouse_y: {
+                                    to_push = (u16)virtual_mouse_position.y;
+                                } break;
+                                default: panic("[read.2] invalid action #% for mouse device", fmt(u8, action, .base = 16));
+                            }
                         } break;
                         default: panic("[read.2] invalid device #%", fmt(u64, device, .base = 16));
                     }

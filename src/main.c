@@ -307,12 +307,14 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 row_count = min(8, vm_screen_initial_height - vm->screen_y);
 
                                 u8 *sprite = vm->screen_data;
-                                for (u8 row = 0; (u16)row < row_count; row += 1, sprite += 1) {
-                                    for (u8 column = 0; (u16)column < column_count; column += 1) {
-                                        u8 shift = 7 - column;
+                                for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
+                                    for (u16 column = 0; column < column_count; column += 1) {
+                                        u8 shift = 7 - (u8)column;
                                         u8 colour = (*sprite & (1 << shift)) >> shift;
                                         if (!use_background_layer && colour == 0) continue;
-                                        gfx_set_pixel(&vm->gfx, vm->screen_x + column, vm->screen_y + row, vm->palette[colours[colour]]);
+                                        u16 x = vm->screen_x + column;
+                                        u16 y = vm->screen_y + row;
+                                        gfx_set_pixel(&vm->gfx, x, y, vm->palette[colours[colour]]);
                                     }
                                 }
 

@@ -21,40 +21,18 @@ org 0x20 screen:
     screen_pixel:  rorg 0x1
     screen_sprite: rorg 0x1
     screen_data:   rorg 0x2
+    screen_auto:   rorg 0x1
 
 org 0x30
 
 org 0x100
 
-draw_character: ; (character: u8, x, y: u16 -> _)
+draw_text: ; (string_address, x, y: u16 -> _)
     push screen_y write.2
     push screen_x write.2
 
-    ; cast character to u16
-    push 0x0
-    swap
-
-    ; byte offset from beginning of font sprites
-    push.2 0x8
-    mul.2
-
-    ; address of glyph
-    push.2 font
-    add.2
-
-    push screen_data
-    write.2
-
-    ; draw sprite
-    push 0x0
-    push screen_sprite
-    write
-
-    jmp.r
-
-draw_text: ; (string_address, x, y: u16 -> _)
-    push.2 y store.2
-    push.2 x store.2
+    push 0b00000001
+    push screen_auto write
 
     ; store character count
     dup.2
@@ -86,16 +64,24 @@ draw_text: ; (string_address, x, y: u16 -> _)
             add.2
             load
 
-            ; draw character
+            ; cast character to u16
+            push 0x0
+            swap
 
-            push.2 x load.2
-            push.2 index load.2
-            push.2 0x8 mul.2
+            ; byte offset from beginning of font sprites
+            push.2 0x8
+            mul.2
+
+            ; address of glyph
+            push.2 font
             add.2
+            push screen_data
+            write.2
 
-            push.2 y load.2
-
-            jsi draw_character
+            ; draw
+            push 0x0
+            push screen_sprite
+            write
 
             inc.2
             jmi loop
@@ -107,14 +93,12 @@ draw_text: ; (string_address, x, y: u16 -> _)
     /count: rorg 0x2
     /index: rorg 0x2
     /address: rorg 0x2
-    /x: rorg 0x2
-    /y: rorg 0x2
 
 ; TODO(felix): mechanism to conditionally include? to decrease binary size for programs not using the font,
 ;              while keeping the fonts in this file
 
 font:
-    rorg 0x100 ; skip to ' ' * 8 (bytes per glyph)
+    rorg 0x100 ; skip to ' ' * 8 (bytes per glyph), i.e. the first visible ASCII character
     /space: rorg 0x8
     /exclamation: [
         rorg 0x1

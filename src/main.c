@@ -73,6 +73,7 @@ enum Vm_Screen_Action {
     vm_screen_pixel  = 0xa,
     vm_screen_sprite = 0xb,
     vm_screen_data   = 0xc,
+    vm_screen_auto   = 0xe,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -117,6 +118,7 @@ structdef(Vm) {
     Gfx_Render_Context gfx;
     u16 screen_x, screen_y;
     u8 *screen_data;
+    bool screen_auto_x, screen_auto_y;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -255,6 +257,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                         gfx_set_pixel(&vm->gfx, vm->screen_x + column, vm->screen_y + row, vm->palette[colour]);
                                     }
                                 }
+
+                                if (vm->screen_auto_x) vm->screen_x += 8;
+                                if (vm->screen_auto_y) vm->screen_y += 8;
+                            } break;
+                            case vm_screen_auto: {
+                                vm->screen_auto_x = argument & 0x01;
+                                vm->screen_auto_y = (argument & 0x02) >> 1;
                             } break;
                             default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;

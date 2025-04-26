@@ -26,52 +26,6 @@ org 0x30
 
 org 0x100
 
-; TODO(felix): mechanism to conditionally include? to decrease binary size for programs not using the font,
-;              while keeping the fonts in this file
-
-font:
-    rorg 0x208 ; skip to 'A' * 8 (bytes per glyph)
-    /A: [
-        0b01111110
-        0b11000011
-        0b11000011
-        0b11111111
-        0b11000011
-        0b11000011
-        0b11000011
-        0b11000011
-    ]
-    /B: [
-        0b11111110
-        0b11000011
-        0b11000011
-        0b11111110
-        0b11000011
-        0b11000011
-        0b11000011
-        0b11111110
-    ]
-    /C: [
-        0b01111110
-        0b11000011
-        0b11000000
-        0b11000000
-        0b11000000
-        0b11000000
-        0b11000011
-        0b01111110
-    ]
-    /D: [
-        0b11111100
-        0b11000110
-        0b11000011
-        0b11000011
-        0b11000011
-        0b11000011
-        0b11000110
-        0b11111100
-    ]
-
 draw_character: ; (character: u8, x, y: u16 -> _)
     push screen_y write.2
     push screen_x write.2
@@ -102,13 +56,22 @@ draw_text: ; (string_address, x, y: u16 -> _)
     push.2 y store.2
     push.2 x store.2
 
+    ; store character count
+    dup.2
+    load
+    push.2 count store
+
+    ; store address of first character
     inc.2
     push.2 address store.2
 
     push.2 0x0
     /loop:
         dup.2
-        push.2 0x4
+
+        push.2 count load
+        push 0x0 swap ; cast to u16
+
         lt.2
         jni {
             dup.2
@@ -127,7 +90,7 @@ draw_text: ; (string_address, x, y: u16 -> _)
 
             push.2 x load.2
             push.2 index load.2
-            push.2 0x9 mul.2
+            push.2 0x8 mul.2
             add.2
 
             push.2 y load.2
@@ -141,7 +104,54 @@ draw_text: ; (string_address, x, y: u16 -> _)
 
     jmp.r
 
+    /count: rorg 0x2
     /index: rorg 0x2
     /address: rorg 0x2
     /x: rorg 0x2
     /y: rorg 0x2
+
+; TODO(felix): mechanism to conditionally include? to decrease binary size for programs not using the font,
+;              while keeping the fonts in this file
+
+font:
+    rorg 0x208 ; skip to 'A' * 8 (bytes per glyph)
+    /A: [
+        0b00000000
+        0b01111100
+        0b11000110
+        0b11000110
+        0b11111110
+        0b11000110
+        0b11000110
+        0b11000110
+    ]
+    /B: [
+        0b00000000
+        0b11111100
+        0b11000110
+        0b11000110
+        0b11111100
+        0b11000110
+        0b11000110
+        0b11111100
+    ]
+    /C: [
+        0b00000000
+        0b01111100
+        0b11000110
+        0b11000000
+        0b11000000
+        0b11000000
+        0b11000110
+        0b01111100
+    ]
+    /D: [
+        0b00000000
+        0b11111000
+        0b11001100
+        0b11000110
+        0b11000110
+        0b11000110
+        0b11001100
+        0b11111000
+    ]

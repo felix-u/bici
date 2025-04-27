@@ -41,12 +41,20 @@ update:
     push 0b00000100
     jsi draw_text
 
+    push.2 alphabet_lowercase
+    push.2 0x10
+    push.2 0x50
+    push 0b00000100
+    jsi draw_text
+
     push 0b00000100
     jsi draw_default_mouse_cursor_at_mouse
 
     break
 
 alphabet: [$ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
+
+alphabet_lowercase: [$ "abcdefghijklmnopqrstuvwxyz" ]
 
 hello: [$ "HELLO, WORLD!" ]
 

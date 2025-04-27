@@ -282,7 +282,14 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
                                 u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
                                 u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
-                                gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
+
+                                if (fill_x && fill_y) {
+                                    gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
+                                } else if (fill_x) {
+                                    gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
+                                } else if (fill_y) {
+                                    unreachable;
+                                } else gfx_set_pixel(&vm->gfx, x, y, rgb);
                             } break;
                             case vm_screen_sprite: {
                                 if (vm->screen_x >= vm_screen_initial_width) break;

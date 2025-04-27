@@ -5,7 +5,7 @@ start:
     ; palette
     push.2 0xeee push system_colour_0 write.2
     push.2 0xccc push system_colour_1 write.2
-    push.2 0xccf push system_colour_2 write.2
+    push.2 0x3aa push system_colour_2 write.2
     push.2 0x000 push system_colour_3 write.2
 
     break

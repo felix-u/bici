@@ -55,7 +55,7 @@ target:
 {
   executable: "build/bici.exe"
   working_directory: "../bici"
-  arguments: "script keyboard.asm"
+  arguments: "script os.asm"
 }
 
 /// recent_files //////////////////////////////////////////////////////////////

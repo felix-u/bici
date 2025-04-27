@@ -33,7 +33,13 @@ org 0x40 keyboard:
     keyboard_key_value: rorg 0x1
     keyboard_key_state: rorg 0x1
 
-org 0x50
+org 0x50 file:
+    file_name:   rorg 0x2
+    file_ok:     rorg 0x1
+    file_length: rorg 0x2
+    file_read:   rorg 0x2
+
+org 0x60
 
 org 0x100
 

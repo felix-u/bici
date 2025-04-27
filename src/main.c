@@ -48,6 +48,7 @@ enumdef(Vm_Device, u8) {
     vm_device_screen   = 0x20,
     vm_device_mouse    = 0x30,
     vm_device_keyboard = 0x40,
+    vm_device_file     = 0x50,
 };
 
 enumdef(Vm_System_Action, u8) {
@@ -88,6 +89,13 @@ enumdef(Vm_Mouse_Action, u8) {
 enumdef(Vm_Keyboard_Action, u8) {
     vm_keyboard_key_value = 0x0,
     vm_keyboard_key_state = 0x1,
+};
+
+enumdef(Vm_File_Action, u8) {
+    vm_file_name   = 0x0,
+    vm_file_ok     = 0x2,
+    vm_file_length = 0x3,
+    vm_file_read   = 0x5,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -137,6 +145,11 @@ structdef(Vm) {
     u8 screen_auto_extra_sprite_count;
 
     u8 keyboard_key_value;
+
+    String file_name;
+    bool file_ok;
+    u16 file_length;
+    u16 file_read;
 };
 
 #define vm_stack vm->stacks[vm->active_stack].memory

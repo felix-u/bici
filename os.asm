@@ -61,22 +61,42 @@ update:
         dup push.2 current_program_label_index store
 
         ; draw floppy
-        push.2 0x10 push screen_x write.2
+        jsi current_program_label_x_coordinate push.2 0xc sub.2 push screen_x write.2
         jsi current_program_label_y_coordinate inc.2 push screen_y write.2
         push.2 floppy_icon_sprite push screen_data write.2
         push 0b01001101 push screen_sprite write
 
-        ; get address = default_programs + current index
+        ; save program name address address = default_programs + current index
         push 0x2 mul ; sizeof(address) = 2
-        push 0x0 swap ; cast to u16
+        jsi cast_u16_from_u8
         push.2 default_programs
         add.2 ; &default_programs[index]
+        load.2 push.2 current_program_name store.2
 
-        load.2
-        push.2 0x1c
+        ; draw file name
+        push.2 current_program_name load.2
+        jsi current_program_label_x_coordinate
         jsi current_program_label_y_coordinate
         push 0b00001100
         jsi draw_text
+
+        ; BEGIN CLICK CHECK ===================================================
+
+        jsi current_program_label_x_coordinate
+        jsi current_program_label_y_coordinate
+        push.2 current_program_name load.2
+        jsi mouse_in_text
+        push 0x16 mul ; (<< 4 = 0b00010000)
+
+        push mouse_left_button read
+        push 0b11110000 and
+
+        and jni {
+            push.2 current_program_name load.2 push console_print write.2
+            ; TODO - clicked on name!
+        }
+
+        ; END CLICK CHECK =====================================================
 
         inc
         jmi loop10
@@ -89,14 +109,17 @@ update:
 
     break
 
+    /current_program_name: rorg 0x2
     /current_program_label_index: rorg 0x1
+    /current_program_label_x_coordinate: ; (_ -> u16)
+        push.2 0x1c
+        jmp.r
     /current_program_label_y_coordinate: ; (_ -> u16)
         push.2 current_program_label_index load
-        push 0x0 swap
+        jsi cast_u16_from_u8
         push.2 0x10 mul.2
         push.2 0x20 add.2
         jmp.r
-
 
 default_program_count: [ 0x4 ]
 default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]

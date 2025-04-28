@@ -44,6 +44,60 @@ org 0x60
 
 org 0x100
 
+cast_u16_from_u8: ; (value: u8 -> u16)
+    push 0x0 swap
+    jmp.r
+
+string_width: ; (string_address: u16 -> u16)
+    load
+    jsi cast_u16_from_u8
+    push.2 0x8 mul.2
+    jmp.r
+
+mouse_in_rectangle: ; (x, y, width, height: u16 -> u8)
+    push.2 height store.2
+    push.2 width store.2
+    push.2 y store.2
+    push.2 x store.2
+
+    ; if mouse_x < x
+    push mouse_x read.2
+    push.2 x load.2
+    lt.2 jni { push 0x0 jmp.r }
+
+    ; if mouse_x > x + width
+    push mouse_x read.2
+    push.2 x load.2
+    push.2 width load.2
+    add.2
+    gt.2 jni { push 0x0 jmp.r }
+
+    ; if mouse_y < y
+    push mouse_y read.2
+    push.2 y load.2
+    lt.2 jni { push 0x0 jmp.r }
+
+    ; if mouse_y > y + height
+    push mouse_y read.2
+    push.2 y load.2
+    push.2 height load.2
+    add.2
+    gt.2 jni { push 0x0 jmp.r }
+
+    push 0x1
+    jmp.r
+
+    /x: rorg 0x2
+    /y: rorg 0x2
+    /width: rorg 0x2
+    /height: rorg 0x2
+
+mouse_in_text: ; (top_left_x, top_left_y, string_address: u16 -> u8)
+    jsi string_width
+    push.2 0x8
+    jsi mouse_in_rectangle
+    jmp.r
+
 draw_text: ; (string_address, x, y: u16, text_colour: u8 -> _)
     push.2 text_colour store
 

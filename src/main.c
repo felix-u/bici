@@ -53,10 +53,9 @@ enumdef(Vm_Device, u8) {
 
 enumdef(Vm_System_Action, u8) {
     vm_system_reserved = 0x0,
-    vm_system_working_stack = 0x2,
-    vm_system_return_stack = 0x3,
-    vm_system_start = 0x4,
-    vm_system_quit = 0x6,
+    vm_system_end      = 0x2,
+    vm_system_start    = 0x4,
+    vm_system_quit     = 0x6,
     vm_system_colour_0 = 0x8,
     vm_system_colour_1 = 0xa,
     vm_system_colour_2 = 0xc,
@@ -94,7 +93,7 @@ enumdef(Vm_Keyboard_Action, u8) {
 enumdef(Vm_File_Action, u8) {
     vm_file_name    = 0x0,
     vm_file_length  = 0x2,
-    vm_file_address = 0x4,
+    vm_file_cursor = 0x4,
     vm_file_read    = 0x6,
     vm_file_copy    = 0x8,
 };
@@ -132,6 +131,8 @@ structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size
 structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
 
 structdef(Vm) {
+    Arena *arena;
+
     u8 memory[0x10000];
     Vm_Stack stacks[2];
     Vm_Stack_Id active_stack;
@@ -147,11 +148,19 @@ structdef(Vm) {
 
     u8 keyboard_key_value;
 
+    u8 *file_bytes; // NOTE(felix): not exposed through device page
     String file_name;
-    bool file_ok;
     u16 file_length;
+    u16 file_cursor;
     u16 file_read;
 };
+
+static force_inline u16 get16(u8 *address) {
+    u16 result = 0;
+    result |= (u16)*address << 8;
+    result |= (u16)*(address + 1);
+    return result;
+}
 
 #define vm_stack vm->stacks[vm->active_stack].memory
 #define vm_sp vm->stacks[vm->active_stack].data
@@ -429,6 +438,19 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 default: panic("[read.2] invalid action #% for mouse device", fmt(u8, action, .base = 16));
                             }
                         } break;
+                        case vm_device_file: {
+                            assert(vm->file_name.count > 0);
+                            switch (action) {
+                                case vm_file_length: {
+                                    to_push = vm->file_length;
+                                } break;
+                                case vm_file_read: {
+                                    assert(vm->file_cursor < vm->file_length);
+                                    to_push = get16(&vm->file_bytes[vm->file_cursor]);
+                                } break;
+                                default: panic("[read.2] invalid action #% for file device", fmt(u8, action, .base = 16));
+                            }
+                        } break;
                         default: panic("[read.2] invalid device #%", fmt(u64, device, .base = 16));
                     }
                     vm_push16(vm, to_push);
@@ -474,6 +496,38 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 vm->screen_data = (u8 *)(vm->memory + address);
                             } break;
                             default: panic("[write.2] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                        } break;
+                        case vm_device_file: switch (action) {
+                            case vm_file_name: {
+                                u16 string_address = argument;
+                                u8 string_length = vm_load8(vm, string_address);
+                                String file_name = { .data = &vm->memory[string_address + 1], .count = string_length };
+                                vm->file_name = file_name;
+
+                                char *path_cstring = cstring_from_string(vm->arena, vm->file_name);
+                                String bytes = file_read_bytes_relative_path(vm->arena, path_cstring, 0xffff);
+
+                                vm->file_bytes = bytes.data;
+
+                                assert(bytes.count <= 0xffff);
+                                vm->file_length = (u16)bytes.count;
+                            } break;
+                            case vm_file_length: {
+                                assert(argument <= vm->file_length);
+                                vm->file_length = argument;
+                            } break;
+                            case vm_file_cursor: {
+                                assert(vm->file_name.count != 0);
+                                vm->file_cursor = argument;
+                            } break;
+                            case vm_file_copy: {
+                                assert(vm->file_name.count != 0);
+                                assert(vm->file_bytes != 0);
+                                assert(vm->file_length != 0);
+                                u16 address_to_copy_to = argument;
+                                memcpy(vm->memory + address_to_copy_to, vm->file_bytes, vm->file_length);
+                            } break;
+                            default: panic("[write.2] invalid action #% for file device", fmt(u8, action, .base = 16));
                         } break;
                         default: panic("[write.2] invalid device #%", fmt(u8, device, .base = 16));
                     }
@@ -1208,7 +1262,7 @@ int main(int argc, char **argv) {
     if (should_run) {
         if (rom.count == 0) return 1;
 
-        Vm vm = {0};
+        Vm vm = { .arena = &arena };
         memcpy(vm.memory, rom.data, rom.count);
 
         Arena *persistent_arena = &arena;
@@ -1255,8 +1309,8 @@ int main(int argc, char **argv) {
         u16 vm_on_system_start_pc = vm_load16(&vm, vm_device_system + vm_system_start);
         vm_run_to_break(&vm, vm_on_system_start_pc);
 
-        u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
         while (!gfx_window_should_close(gfx)) {
+            u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | vm_screen_update);
             vm_run_to_break(&vm, vm_on_screen_update_pc);
         }
 

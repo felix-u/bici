@@ -61,3 +61,6 @@ hello: [$ "HELLO, WORLD!" ]
 punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~" ]
 
 numbers: [$ "0123456789" ]
+
+EOF:
+org 0xffff

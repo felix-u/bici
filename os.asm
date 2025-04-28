@@ -92,10 +92,51 @@ update:
         push 0b11110000 and
 
         and jni {
+            ; TODO(felix): remove
             push.2 current_program_name load.2 push console_print write.2
-            ; TODO - clicked on name!
+
+            ; set up current file for querying
+            push.2 current_program_name load.2
+            push file_name write.2
+
+            ; error if file_length == 0
+            push file_length read.2
+            push.2 0x0 eq.2 jni {
+                ; TODO(felix): nicer solution here
+                push.2 error_file_not_found push console_print write.2
+                jmi end_click_check
+            }
+
+            ; error if file_length < 256
+            push file_length read.2
+            push.2 0x100 lt.2 jni {
+                ; TODO(felix): nicer solution here
+                push.2 error_file_invalid push console_print write.2
+                jmi end_click_check
+            }
+
+            ; we want to read file[system_end] to get the length of the rom
+            push.2 system_end
+            push file_cursor write.2
+            push file_read read.2
+
+            ; error if system_end < 256
+            dup.2 push.2 0x100 lt.2 jni {
+                ; TODO(felix): nicer solution here
+                drop.2
+                push.2 error_length_invalid push console_print write.2
+                jmi end_click_check
+            }
+
+            ; when we copy the file into memory, we only copy as much as we need to
+            push file_length write.2
+
+            ; copy
+            push.2 0x0 ; TODO(felix): we in fact need to do something else than overwriting the current ROM
+            push file_copy write.2
         }
 
+        /end_click_check:
         ; END CLICK CHECK =====================================================
 
         inc
@@ -120,6 +161,9 @@ update:
         push.2 0x10 mul.2
         push.2 0x20 add.2
         jmp.r
+    /error_file_not_found: [$ "File not found" 0xa ]
+    /error_file_invalid:   [$ "File invalid" 0xa ]
+    /error_length_invalid: [$ "Rom does not store valid length" 0xa ]
 
 default_program_count: [ 0x4 ]
 default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]
@@ -151,3 +195,5 @@ floppy_icon_sprite: [
     0b10000001
     0b11111111
 ]
+
+EOF:

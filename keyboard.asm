@@ -169,3 +169,6 @@ sprite: [
     0b01001110
     0b00111100
 ]
+
+EOF:
+org 0xffff

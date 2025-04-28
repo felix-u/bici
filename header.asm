@@ -1,13 +1,12 @@
 system:
     rorg 0x2 ; address 0 reserved
-    system_working_stack: rorg 0x1
-    system_return_stack:  rorg 0x1
-    system_start:         rorg 0x2
-    system_quit:          rorg 0x2
-    system_colour_0:      rorg 0x2
-    system_colour_1:      rorg 0x2
-    system_colour_2:      rorg 0x2
-    system_colour_3:      rorg 0x2
+    system_end:      rorg 0x2
+    system_start:    rorg 0x2
+    system_quit:     rorg 0x2
+    system_colour_0: rorg 0x2
+    system_colour_1: rorg 0x2
+    system_colour_2: rorg 0x2
+    system_colour_3: rorg 0x2
 
 org 0x10 console:
              console_print:
@@ -34,15 +33,17 @@ org 0x40 keyboard:
     keyboard_key_state: rorg 0x1
 
 org 0x50 file:
-    file_name:    rorg 0x2
-    file_length:  rorg 0x2
-    file_address: rorg 0x2
-    file_read:    rorg 0x2
-    file_copy:    rorg 0x2
+    file_name:   rorg 0x2
+    file_length: rorg 0x2
+    file_cursor: rorg 0x2
+    file_read:   rorg 0x2
+    file_copy:   rorg 0x2
 
 org 0x60
 
 org 0x100
+
+patch system_end, EOF
 
 cast_u16_from_u8: ; (value: u8 -> u16)
     push 0x0 swap

@@ -49,6 +49,12 @@ watch:
   view_rule: "hex"
 }
 
+watch:
+{
+  name: "vm.memory"
+  view_rule: "hex"
+}
+
 /// targets ///////////////////////////////////////////////////////////////////
 
 target:

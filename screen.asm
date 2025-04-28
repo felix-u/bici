@@ -54,3 +54,4 @@ smiley: [
 ]
 
 EOF:
+org 0xffff

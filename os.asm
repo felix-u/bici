@@ -86,7 +86,7 @@ update:
         jsi current_program_label_y_coordinate
         push.2 current_program_name load.2
         jsi mouse_in_text
-        push 0x16 mul ; (<< 4 = 0b00010000)
+        push 0x16 mul ; (<< 4 = 0b00010000 so that anding with the mouse click value works)
 
         push mouse_left_button read
         push 0b11110000 and

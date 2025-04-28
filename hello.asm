@@ -1,12 +1,7 @@
 include "header.asm"
 
-patch system_start, start
-start:
-    ; palette
-    push.2 0xeeb push system_colour_0 write.2
-    push.2 0x000 push system_colour_1 write.2
-
-    break
+patch system_colour_0, 0xeeb
+patch system_colour_1, 0x000
 
 patch screen_update, update
 update:

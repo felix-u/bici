@@ -1,13 +1,12 @@
 include "header.asm"
 
+patch system_colour_0, 0x451
+patch system_colour_1, 0x782
+patch system_colour_2, 0xab4
+patch system_colour_3, 0xdd6
+
 patch system_start, start
 start:
-    ; palette
-    push.2 0x451 push system_colour_0 write.2
-    push.2 0x782 push system_colour_1 write.2
-    push.2 0xab4 push system_colour_2 write.2
-    push.2 0xdd6 push system_colour_3 write.2
-
     push screen_width read.2
     push.2 0x8 sub.2
     push.2 0x2 div.2

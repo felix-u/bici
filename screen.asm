@@ -1,10 +1,7 @@
 include "header.asm"
 
-patch system_start, start
-start:
-    push.2 0xbcc push system_colour_0 write.2
-    push.2 0x332 push system_colour_3 write.2
-    break
+patch system_colour_0, 0xbcc
+patch system_colour_3, 0x332
 
 patch screen_update, update
 update:

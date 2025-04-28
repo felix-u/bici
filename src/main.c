@@ -138,7 +138,6 @@ structdef(Vm) {
     Vm_Stack_Id active_stack;
     u16 program_counter;
     Vm_Instruction_Mode current_mode;
-    u32 palette[4];
     Gfx_Render_Context gfx;
 
     // TODO(felix): remove
@@ -186,6 +185,17 @@ static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm
 static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!vm->current_mode.keep) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
+
+static inline u32 rgb_from_colour(Vm *vm, u8 colour_index) {
+    assert(colour_index < 4);
+    Vm_System_Action colour_offset = vm_system_colour_0 + colour_index * 2;
+    u16 colour = get16(&vm->memory[vm_device_system | colour_offset]);
+    u32 r = ((u32)colour & 0x0f00) >> 8;
+    u32 g = ((u32)colour & 0x00f0) >> 4;
+    u32 b = ((u32)colour & 0x000f) >> 0;
+    u32 rgb = (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;
+    return rgb;
+}
 
 static void vm_run_to_break(Vm *vm, u16 program_counter) {
     vm->program_counter = program_counter;
@@ -318,7 +328,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
                                     u8 colour = argument & 0x0f;
                                     if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
-                                    u32 rgb = vm->palette[colour];
+
+                                    u32 rgb = rgb_from_colour(vm, colour);
 
                                     u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
                                     u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
@@ -339,7 +350,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u8 use_background_layer = argument & 0x40;
                                     u8 flip_y = argument & 0x20;
                                     u8 flip_x = argument & 0x10;
-                                    u8 colours[] = { argument & 0x03, (argument & 0x0c) >> 2 };
+                                    u32 colours[] = { rgb_from_colour(vm, argument & 0x03), rgb_from_colour(vm, (argument & 0x0c) >> 2) };
 
                                     // TODO(felix)
                                     assert(!two_bits_per_pixel);
@@ -355,7 +366,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                             u8 shift = 7 - (u8)column;
                                             u8 colour = (*sprite & (1 << shift)) >> shift;
                                             if (!use_background_layer && colour == 0) continue;
-                                            gfx_set_pixel(&vm->gfx, x + column, y + row, vm->palette[colours[colour]]);
+                                            gfx_set_pixel(&vm->gfx, x + column, y + row, colours[colour]);
                                         }
                                     }
 
@@ -467,18 +478,6 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 action = vm_device_and_action & 0x0f;
                     u16 argument = vm_pop16(vm);
                     switch (device) {
-                        case vm_device_system: switch (action) {
-                            case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {
-                                u16 colour = argument;
-                                u32 r = ((u32)colour & 0x0f00) >> 8;
-                                u32 g = ((u32)colour & 0x00f0) >> 4;
-                                u32 b = ((u32)colour & 0x000f) >> 0;
-                                u32 rgb = (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;
-                                usize index = (action - vm_system_colour_0) / 2;
-                                vm->palette[index] = rgb;
-                            }; break;
-                            default: panic("[write.2] invalid action #% for system device", fmt(u8, action, .base = 16));
-                        } break;
                         case vm_device_console: switch (action) {
                             case vm_console_print: {
                                 u16 str_addr = argument;

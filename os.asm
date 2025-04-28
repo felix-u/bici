@@ -5,6 +5,8 @@ patch system_colour_1, 0xccc
 patch system_colour_2, 0x3aa
 patch system_colour_3, 0x000
 
+org 0xf000
+
 patch screen_update, update
 update:
     ; clear background
@@ -189,3 +191,4 @@ floppy_icon_sprite: [
 ]
 
 EOF:
+org 0xffff

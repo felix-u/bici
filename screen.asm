@@ -6,6 +6,8 @@ patch system_colour_3, 0x332
 patch screen_update, update
 update:
     ; clear background
+    push.2 0x0 push screen_x write.2
+    push.2 0x0 push screen_y write.2
     push 0b11000000
     push screen_pixel write
 
@@ -48,6 +50,7 @@ load_coordinates_at_address:
     jmp.r
 
 smiley: [
+    0x0 ; align
     0x8080 0x8380
     0x8084 0x8185 0x8285 0x8384
 ]

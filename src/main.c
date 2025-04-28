@@ -92,10 +92,11 @@ enumdef(Vm_Keyboard_Action, u8) {
 };
 
 enumdef(Vm_File_Action, u8) {
-    vm_file_name   = 0x0,
-    vm_file_ok     = 0x2,
-    vm_file_length = 0x3,
-    vm_file_read   = 0x5,
+    vm_file_name    = 0x0,
+    vm_file_length  = 0x2,
+    vm_file_address = 0x4,
+    vm_file_read    = 0x6,
+    vm_file_copy    = 0x8,
 };
 
 enumdef(Vm_Opcode, u8) {
@@ -239,7 +240,12 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     vm->program_counter = vm_pop16(vm);
                     add = 0;
                 } break;
-                case vm_opcode_stash:  { u8 val = vm_pop8(vm); vm->active_stack = stack_return; vm_push8(vm, val); vm->active_stack = stack_param; } break;
+                case vm_opcode_stash:  { // TODO(felix): fix
+                    u8 val = vm_pop8(vm);
+                    vm->active_stack = vm->active_stack == stack_param ? stack_return : stack_param;
+                    vm_push8(vm, val);
+                    vm->active_stack = vm->active_stack == stack_param ? stack_return : stack_param;
+                } break;
                 case vm_opcode_load:   { u16 addr = vm_pop16(vm); u8 val = vm_load8(vm, addr); vm_push8(vm, val); } break;
                 case vm_opcode_store:  { u16 addr = vm_pop16(vm); u8 val = vm_pop8(vm); vm_store8(vm, addr, val); } break;
                 case vm_opcode_read:   {

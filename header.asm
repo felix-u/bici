@@ -34,10 +34,11 @@ org 0x40 keyboard:
     keyboard_key_state: rorg 0x1
 
 org 0x50 file:
-    file_name:   rorg 0x2
-    file_ok:     rorg 0x1
-    file_length: rorg 0x2
-    file_read:   rorg 0x2
+    file_name:    rorg 0x2
+    file_length:  rorg 0x2
+    file_address: rorg 0x2
+    file_read:    rorg 0x2
+    file_copy:    rorg 0x2
 
 org 0x60
 

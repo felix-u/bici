@@ -140,20 +140,7 @@ structdef(Vm) {
     Vm_Instruction_Mode current_mode;
     Gfx_Render_Context gfx;
 
-    // TODO(felix): remove
-    u8 *screen_data;
-    bool screen_auto_x, screen_auto_y, screen_auto_address;
-    u8 screen_auto_extra_sprite_count;
-
-    // TODO(felix): remove
-    u8 keyboard_key_value;
-
-    u8 *file_bytes; // NOTE(felix): not exposed through device page
-    // TODO(felix): remove
-    String file_name;
-    u16 file_length;
-    u16 file_cursor;
-    u16 file_read;
+    u8 *file_bytes;
 };
 
 static force_inline u16 get16(u8 *address) {
@@ -293,7 +280,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         case vm_device_keyboard: switch (action) {
                             case vm_keyboard_key_state: {
-                                u8 key = vm->keyboard_key_value;
+                                u8 key = vm->memory[vm_device_keyboard | vm_keyboard_key_value];
                                 bool key_down = vm->gfx.frame_info.key_is_down[key];
                                 if (key_down) to_push |= 0x0f;
                                 bool key_pressed = key_down && !vm->gfx.frame_info.key_was_down_last_frame[key];
@@ -360,7 +347,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u16 column_count = min(8, vm_screen_initial_width - x);
                                     u16 row_count = min(8, vm_screen_initial_height - y);
 
-                                    u8 *sprite = vm->screen_data;
+                                    u8 *sprite = &vm->memory[get16(&vm->memory[vm_device_screen | vm_screen_data])];
                                     for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
                                         for (u16 column = 0; column < column_count; column += 1) {
                                             u8 shift = 7 - (u8)column;
@@ -370,22 +357,19 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                         }
                                     }
 
-                                    if (vm->screen_auto_x) x += 8;
-                                    if (vm->screen_auto_y) y += 8;
+                                    u8 auto_x = vm->memory[vm_device_screen | vm_screen_auto] & 0x01;
+                                    u8 auto_y = vm->memory[vm_device_screen | vm_screen_auto] & 0x02;
+                                    if (auto_x) x += 8;
+                                    if (auto_y) y += 8;
                                 } break;
-                                case vm_screen_auto: {
-                                    vm->screen_auto_x = argument & 0x01;
-                                    vm->screen_auto_y = (argument & 0x02) >> 1;
-                                    vm->screen_auto_address = (argument & 0x04) >> 1;
-                                    vm->screen_auto_extra_sprite_count = (argument & 0xf0) >> 4;
-                                } break;
+                                case vm_screen_auto: break;
                                 default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
                             }
                             set16(x_address, x);
                             set16(y_address, y);
                         } break;
                         case vm_device_keyboard: switch (action) {
-                            case vm_keyboard_key_value: vm->keyboard_key_value = argument; break;
+                            case vm_keyboard_key_value: break;
                             default: panic("[write.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
                         } break;
                         default: panic("[write.1] invalid device #%", fmt(u8, device, .base = 16));
@@ -435,7 +419,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 vm_device_and_action = vm_pop8(vm);
                     Vm_Device device = vm_device_and_action & 0xf0;
                     u8 action = vm_device_and_action & 0x0f;
-                    u16 to_push = 0;
+                    u16 to_push = get16(&vm->memory[vm_device_and_action]);
                     switch (device) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_width: to_push = vm_screen_initial_width; break;
@@ -456,20 +440,19 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             }
                         } break;
                         case vm_device_file: {
-                            assert(vm->file_name.count > 0);
+                            assert(get16(&vm->memory[vm_device_file | vm_file_name]) != 0);
                             switch (action) {
-                                case vm_file_length: {
-                                    to_push = vm->file_length;
-                                } break;
+                                case vm_file_length: break;
                                 case vm_file_read: {
-                                    assert(vm->file_cursor < vm->file_length);
-                                    to_push = get16(&vm->file_bytes[vm->file_cursor]);
+                                    assert(get16(&vm->memory[vm_device_file | vm_file_cursor]) < get16(&vm->memory[vm_device_file | vm_file_length]));
+                                    to_push = get16(&vm->file_bytes[get16(&vm->memory[vm_device_file | vm_file_cursor])]);
                                 } break;
                                 default: panic("[read.2] invalid action #% for file device", fmt(u8, action, .base = 16));
                             }
                         } break;
                         default: panic("[read.2] invalid device #%", fmt(u64, device, .base = 16));
                     }
+                    set16(&vm->memory[vm_device_and_action], to_push);
                     vm_push16(vm, to_push);
                 } break;
                 case vm_opcode_write:  {
@@ -494,10 +477,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             case vm_screen_y: {
                                 set16(&vm->memory[vm_device_screen | vm_screen_y], argument);
                             } break;
-                            case vm_screen_data: {
-                                u16 address = argument;
-                                vm->screen_data = (u8 *)(vm->memory + address);
-                            } break;
+                            case vm_screen_data: break;
                             default: panic("[write.2] invalid action #% for screen device", fmt(u8, action, .base = 16));
                         } break;
                         case vm_device_file: switch (action) {
@@ -505,30 +485,27 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 string_address = argument;
                                 u8 string_length = vm_load8(vm, string_address);
                                 String file_name = { .data = &vm->memory[string_address + 1], .count = string_length };
-                                vm->file_name = file_name;
 
-                                char *path_cstring = cstring_from_string(vm->arena, vm->file_name);
+                                char *path_cstring = cstring_from_string(vm->arena, file_name);
                                 String bytes = file_read_bytes_relative_path(vm->arena, path_cstring, 0xffff);
 
                                 vm->file_bytes = bytes.data;
 
                                 assert(bytes.count <= 0xffff);
-                                vm->file_length = (u16)bytes.count;
+                                set16(&vm->memory[vm_device_file | vm_file_length], (u16)bytes.count);
                             } break;
                             case vm_file_length: {
-                                assert(argument <= vm->file_length);
-                                vm->file_length = argument;
+                                assert(argument <= get16(&vm->memory[vm_device_file | vm_file_length]));
                             } break;
                             case vm_file_cursor: {
-                                assert(vm->file_name.count != 0);
-                                vm->file_cursor = argument;
+                                assert(get16(&vm->memory[vm_device_file | vm_file_name]) != 0);
                             } break;
                             case vm_file_copy: {
-                                assert(vm->file_name.count != 0);
+                                assert(get16(&vm->memory[vm_device_file | vm_file_name]) != 0);
                                 assert(vm->file_bytes != 0);
-                                assert(vm->file_length != 0);
+                                assert(get16(&vm->memory[vm_device_file | vm_file_length]) != 0);
                                 u16 address_to_copy_to = argument;
-                                memcpy(vm->memory + address_to_copy_to, vm->file_bytes, vm->file_length);
+                                memcpy(vm->memory + address_to_copy_to, vm->file_bytes, get16(&vm->memory[vm_device_file | vm_file_length]));
                             } break;
                             default: panic("[write.2] invalid action #% for file device", fmt(u8, action, .base = 16));
                         } break;

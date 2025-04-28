@@ -56,7 +56,7 @@ alphabet: [$ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
 
 alphabet_lowercase: [$ "abcdefghijklmnopqrstuvwxyz" ]
 
-hello: [$ "HELLO, WORLD!" ]
+hello: [$ "Hello, World!" ]
 
 punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~" ]
 

@@ -92,9 +92,6 @@ update:
         push 0b11110000 and
 
         and jni {
-            ; TODO(felix): remove
-            push.2 current_program_name load.2 push console_print write.2
-
             ; set up current file for querying
             push.2 current_program_name load.2
             push file_name write.2

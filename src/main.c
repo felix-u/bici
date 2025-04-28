@@ -141,14 +141,16 @@ structdef(Vm) {
     u32 palette[4];
     Gfx_Render_Context gfx;
 
-    u16 screen_x, screen_y;
+    // TODO(felix): remove
     u8 *screen_data;
     bool screen_auto_x, screen_auto_y, screen_auto_address;
     u8 screen_auto_extra_sprite_count;
 
+    // TODO(felix): remove
     u8 keyboard_key_value;
 
     u8 *file_bytes; // NOTE(felix): not exposed through device page
+    // TODO(felix): remove
     String file_name;
     u16 file_length;
     u16 file_cursor;
@@ -160,6 +162,11 @@ static force_inline u16 get16(u8 *address) {
     result |= (u16)*address << 8;
     result |= (u16)*(address + 1);
     return result;
+}
+
+static force_inline void set16(u8 *address, u16 value) {
+    *address = (u8)(value >> 8);
+    *(address + 1) = (u8)value;
 }
 
 #define vm_stack vm->stacks[vm->active_stack].memory
@@ -287,6 +294,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         default: panic("[read.1] invalid device #%", fmt(u64, device, .base = 16));
                     }
                     vm_push8(vm, to_push);
+                    // // TODO(felix): not sure about this. do I use the same address for different purposes depending on whether I'm reading or writing?
+                    // vm->memory[vm_device_and_action] = to_push;
                 } break;
                 case vm_opcode_write:  {
                     u8 vm_device_and_action = vm_pop8(vm);
@@ -294,71 +303,75 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u8 action = vm_device_and_action & 0x0f;
                     u8 argument = vm_pop8(vm);
                     switch (device) {
-                        case vm_device_screen: switch (action) {
-                            case vm_screen_pixel: {
-                                if (vm->screen_x >= vm_screen_initial_width) break;
-                                if (vm->screen_y >= vm_screen_initial_height) break;
+                        case vm_device_screen: {
+                            u8 *x_address = &vm->memory[vm_device_screen | vm_screen_x];
+                            u8 *y_address = &vm->memory[vm_device_screen | vm_screen_y];
+                            u16 x = get16(x_address);
+                            u16 y = get16(y_address);
+                            switch (action) {
+                                case vm_screen_pixel: {
+                                    if (x >= vm_screen_initial_width) break;
+                                    if (y >= vm_screen_initial_height) break;
 
-                                u8 fill_x = argument & 0x80;
-                                u8 fill_y = argument & 0x40;
+                                    u8 fill_x = argument & 0x80;
+                                    u8 fill_y = argument & 0x40;
 
-                                u8 colour = argument & 0x0f;
-                                if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
-                                u32 rgb = vm->palette[colour];
+                                    u8 colour = argument & 0x0f;
+                                    if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
+                                    u32 rgb = vm->palette[colour];
 
-                                u16 y = vm->screen_y, x = vm->screen_x;
+                                    u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
+                                    u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
 
-                                u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
-                                u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
+                                    if (fill_x && fill_y) {
+                                        gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
+                                    } else if (fill_x) {
+                                        gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
+                                    } else if (fill_y) {
+                                        unreachable;
+                                    } else gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                } break;
+                                case vm_screen_sprite: {
+                                    if (x >= vm_screen_initial_width) break;
+                                    if (y >= vm_screen_initial_height) break;
 
-                                if (fill_x && fill_y) {
-                                    gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
-                                } else if (fill_x) {
-                                    gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
-                                } else if (fill_y) {
-                                    unreachable;
-                                } else gfx_set_pixel(&vm->gfx, x, y, rgb);
-                            } break;
-                            case vm_screen_sprite: {
-                                if (vm->screen_x >= vm_screen_initial_width) break;
-                                if (vm->screen_y >= vm_screen_initial_height) break;
+                                    u8 two_bits_per_pixel = argument & 0x80;
+                                    u8 use_background_layer = argument & 0x40;
+                                    u8 flip_y = argument & 0x20;
+                                    u8 flip_x = argument & 0x10;
+                                    u8 colours[] = { argument & 0x03, (argument & 0x0c) >> 2 };
 
-                                u8 two_bits_per_pixel = argument & 0x80;
-                                u8 use_background_layer = argument & 0x40;
-                                u8 flip_y = argument & 0x20;
-                                u8 flip_x = argument & 0x10;
-                                u8 colours[] = { argument & 0x03, (argument & 0x0c) >> 2 };
+                                    // TODO(felix)
+                                    assert(!two_bits_per_pixel);
+                                    assert(!flip_y);
+                                    assert(!flip_x);
 
-                                // TODO(felix)
-                                assert(!two_bits_per_pixel);
-                                assert(!flip_y);
-                                assert(!flip_x);
+                                    u16 column_count = min(8, vm_screen_initial_width - x);
+                                    u16 row_count = min(8, vm_screen_initial_height - y);
 
-                                u16 column_count = min(8, vm_screen_initial_width - vm->screen_x);
-                                u16 row_count = min(8, vm_screen_initial_height - vm->screen_y);
-
-                                u8 *sprite = vm->screen_data;
-                                for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
-                                    for (u16 column = 0; column < column_count; column += 1) {
-                                        u8 shift = 7 - (u8)column;
-                                        u8 colour = (*sprite & (1 << shift)) >> shift;
-                                        if (!use_background_layer && colour == 0) continue;
-                                        u16 x = vm->screen_x + column;
-                                        u16 y = vm->screen_y + row;
-                                        gfx_set_pixel(&vm->gfx, x, y, vm->palette[colours[colour]]);
+                                    u8 *sprite = vm->screen_data;
+                                    for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
+                                        for (u16 column = 0; column < column_count; column += 1) {
+                                            u8 shift = 7 - (u8)column;
+                                            u8 colour = (*sprite & (1 << shift)) >> shift;
+                                            if (!use_background_layer && colour == 0) continue;
+                                            gfx_set_pixel(&vm->gfx, x + column, y + row, vm->palette[colours[colour]]);
+                                        }
                                     }
-                                }
 
-                                if (vm->screen_auto_x) vm->screen_x += 8;
-                                if (vm->screen_auto_y) vm->screen_y += 8;
-                            } break;
-                            case vm_screen_auto: {
-                                vm->screen_auto_x = argument & 0x01;
-                                vm->screen_auto_y = (argument & 0x02) >> 1;
-                                vm->screen_auto_address = (argument & 0x04) >> 1;
-                                vm->screen_auto_extra_sprite_count = (argument & 0xf0) >> 4;
-                            } break;
-                            default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                                    if (vm->screen_auto_x) x += 8;
+                                    if (vm->screen_auto_y) y += 8;
+                                } break;
+                                case vm_screen_auto: {
+                                    vm->screen_auto_x = argument & 0x01;
+                                    vm->screen_auto_y = (argument & 0x02) >> 1;
+                                    vm->screen_auto_address = (argument & 0x04) >> 1;
+                                    vm->screen_auto_extra_sprite_count = (argument & 0xf0) >> 4;
+                                } break;
+                                default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                            }
+                            set16(x_address, x);
+                            set16(y_address, y);
                         } break;
                         case vm_device_keyboard: switch (action) {
                             case vm_keyboard_key_value: vm->keyboard_key_value = argument; break;
@@ -366,6 +379,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         default: panic("[write.1] invalid device #%", fmt(u8, device, .base = 16));
                     }
+                    vm->memory[vm_device_and_action] = argument;
                 } break;
                 default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
             } break;
@@ -413,14 +427,6 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     u16 to_push = 0;
                     switch (device) {
                         case vm_device_screen: switch (action) {
-                            case vm_system_colour_0: case vm_system_colour_1: case vm_system_colour_2: case vm_system_colour_3: {
-                                usize index = (action - vm_system_colour_0) / 2;
-                                u32 rgb = vm->palette[index];
-                                u16 r = ((rgb & 0xf00000) >> 20);
-                                u16 g = ((rgb & 0x00f000) >> 12);
-                                u16 b = ((rgb & 0x0000f0) >> 4);
-                                to_push = (u16)((r << 8) | (g << 4) | b);
-                            } break;
                             case vm_screen_width: to_push = vm_screen_initial_width; break;
                             case vm_screen_height: to_push = vm_screen_initial_height; break;
                             default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));
@@ -484,12 +490,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         case vm_device_screen: switch (action) {
                             case vm_screen_x: {
-                                u16 x = argument;
-                                vm->screen_x = x;
+                                set16(&vm->memory[vm_device_screen | vm_screen_x], argument);
                             } break;
                             case vm_screen_y: {
-                                u16 y = argument;
-                                vm->screen_y = y;
+                                set16(&vm->memory[vm_device_screen | vm_screen_y], argument);
                             } break;
                             case vm_screen_data: {
                                 u16 address = argument;
@@ -531,6 +535,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         default: panic("[write.2] invalid device #%", fmt(u8, device, .base = 16));
                     }
+                    set16(&vm->memory[vm_device_and_action], argument);
                 } break;
                 default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
             } break;

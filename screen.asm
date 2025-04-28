@@ -4,7 +4,10 @@ patch system_start, start
 start:
     push.2 0xbcc push system_colour_0 write.2
     push.2 0x332 push system_colour_3 write.2
+    break
 
+patch screen_update, update
+update:
     ; clear background
     push 0b11000000
     push screen_pixel write
@@ -48,7 +51,6 @@ load_coordinates_at_address:
     jmp.r
 
 smiley: [
-    0x0 ; align
     0x8080 0x8380
     0x8084 0x8185 0x8285 0x8384
 ]

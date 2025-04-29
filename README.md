@@ -285,15 +285,91 @@ font:
     ; ...
 ```
 
-TODO(felix): header.asm
+### Local labels as variables
 
-TODO(felix): call and return
+I find it quite difficult to reason about three or more items on the stack. To make programming `bici` easier, I sometimes use local labels (i.e. `/label:`) combined with the `rorg` (relative compilation offset) directive to store named local variables *below* a routine's `break` or `jmp.r` (such that the stored values cannot be accidentally executed as code).
 
-TODO(felix): local labels after return as local variables
+I access these "local variables" with `push.2 variable_address load` and `push new_value push.2 variable_address store`.
 
-Recall the three special routines `system_start`, `system_quit`, and `screen_update`.
+You can see this pattern in several of my routines. For example, in [`draw_text`](https://github.com/felix-u/bici/blob/master/header.asm#L102):
+```asm
+draw_text: ; (string_address, x, y: u16, text_colour: u8 -> _)
+    push.2 text_colour store
+
+    ; [OMITTED]
+
+    ; store character count
+    dup.2
+    load
+    push.2 count store
+
+    ; store address of first character
+    inc.2
+    push.2 address store.2
+
+    push.2 0x0
+    /loop:
+        dup.2
+
+        push.2 count load
+        push 0x0 swap ; cast to u16
+
+        lt.2
+        jni {
+            dup.2
+            push.2 index store.2
+
+            dup.2
+
+            ; load address
+            push.2 address load.2
+
+            ; [OMITTED]
+
+            ; draw
+            push.2 text_colour load
+            push screen_sprite
+            write
+
+            ; [OMITTED]
+        }
+        drop.2
+
+    jmp.r
+
+    /text_colour: rorg 0x1
+    /count: rorg 0x2
+    /index: rorg 0x2
+    /address: rorg 0x2
+```
+
+This is definitely slower than stack manipulation, and I could also try `stash` to use both stacks at once. However, performance isn't a problem, and I think this is by far the more readable solution.
+
+### Special routines
+
+Recall the three special routines `system_start`, `system_quit`, and `screen_update`, which are executed by the emulator upon ROM load, upon quit, and once per frame, respectively. These routines end in `break` rather than `jmp.r`.
+
+To patch the correct device page addresses without having to redefine those values in every program, the special addresses are defined in `header.asm`, and programs use the `patch` directive as follows:
+```asm
+include "header.asm"
+
+patch system_start, start
+start:
+    ; ...
+    break
+
+patch system_quit, quit
+quit:
+    ; ...
+    break
+
+patch screen_update, update
+update:
+    ; ...
+    break
+```
+
 Because the `break` instruction has a byte value of `0`, and because the assembler guarantees that untouched bytes remain 0, all of these routines are optional. For example, if you don't patch `screen_update`, `bici` reads 0 and goes to execute at address 0 in the ROM. This address is reserved, and so contains a `0` byte - an immediate `break`. Therefore, unsupplied special routines are still executed, essentially as no-ops.
-
 
 
 ## Feature summary

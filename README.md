@@ -449,6 +449,7 @@ mouse_cursor_sprite: [
 ]
 ```
 where `0` corresponds either to transparency or `colour_0` (depending on the `use_background_layer` bit), and `1` corresponds to `colour_1`. As drawn by [`draw_default_mouse_cursor_at_mouse`](https://github.com/felix-u/bici/blob/master/header.asm#L172):
+
 ![Screenshot of mouse cursor sprite](./assets/mouse_cursor.png)
 
 ### Graphical ASCII text rendering

@@ -129,10 +129,10 @@ I've tried to emulate intel assembly syntax, with a few differences.
 
 * Instructions are compiled via their opcode, and may be suffixed with modes `.2kr` (any combination following `.`). For example, to jump to the topmost address on the return stack (i.e. to return), write `jmp.r`. Some instructions take an immediate, as in `push label_or_number`.
 * Number literals are either hexadecimal (`0x1234`) or binary (`0b01`).
-* There may be multiple instructions on one line, for compactness (most instructions take no arguments, operating on the stack)
+* There may be multiple instructions on one line, for compactness (most instructions take no arguments, operating on the stack).
 * Global labels are defined as `label:`, and local labels are defined as `/label:`. Local labels are only visible between the preceding global label and the next global label.
-* Comments are from any `;` character to the end of the line
-* A `{ ... }` pair will compile the 16-bit address of `}` at the location of `{`. Therefore, the equivalent of C's `if (1) { ... }` is `push 0x1 jni { ... }`.
+* Comments are from any `;` character to the end of the line.
+* A `{ ... }` pair will compile the 16-bit address of `}` at the location of `{`. Therefore, the equivalent of C's `if (1) { ... }` is `push 0x1 jni { ... }`, which is the same as `push 0x1 jni end ... end:`.
 * Any `[ ... ]` indicates insertion mode, where string literals (`"Hello"`) and numbers are compiled directly into the binary at the current compilation offset. If the opening `[` is suffixed with `$`, as in `[$ ... ]`, then the offset between the opening `[` and closing `]` (i.e. the total number of bytes inserted) is compiled at the location of `[$` as an 8-bit relative offset. This is useful for strings, as in `[$ "Hello" ]`, which is equivalent to `[ 0x5 "Hello" ]`.
 
 There are a few directives:
@@ -145,7 +145,54 @@ There are a few directives:
 
 ## Programming for `bici`
 
-TODO(felix): hello world
+### Hello, World!
+
+Using the `console_print` device:
+```asm
+include "header.asm"
+
+patch system_start, start
+start:
+    push.2 hello
+    push console_print
+    write.2
+    break
+
+    /hello: [$ "Hello, World!" ]
+
+EOF:
+```
+![Screenshot of console "Hello, World!"](./assets/hello_world_console.png)
+
+Using the `screen` devices for graphical text rendering:
+```asm
+include "header.asm"
+
+patch system_colour_0, 0xfa4
+patch system_colour_1, 0x100
+
+patch screen_update, update
+update:
+    ; clear background
+    push.2 0x0 push screen_x write.2
+    push.2 0x0 push screen_y write.2
+    push 0b11000000 ; set fill_x and fill_y bits to draw rectangle, with colour 0
+    push screen_pixel
+    write
+
+    push.2 hello
+    push.2 0x108 ; x
+    push.2 0xa0  ; y
+    push 0b00000100 ; text foreground = colour 01, background = colour 00 (transparent)
+    jsi draw_text ; helper routine defined in "header.asm" uses screen_sprite device
+
+    break
+
+    /hello: [$ "Hello, World!" ]
+
+EOF:
+```
+![Screenshot of graphical "Hello, World!"](./assets/hello_world_graphical.png)
 
 TODO(felix): routine parameter comment convention
 

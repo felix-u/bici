@@ -376,7 +376,7 @@ Because the `break` instruction has a byte value of `0`, and because the assembl
 
 This section chronicles what I achieved *during* the project. I already had the VM from last year, but with many missing features and a very limited assembler.
 
-The sections below correspond roughly to the bullet points in the [overview](#overview).
+The subheadings below correspond roughly to the bullet points in the [overview](#overview).
 
 ### Better assembler
 
@@ -386,7 +386,7 @@ The [assembly language reference](#assembly-language-reference) describes how to
 
 ### Lines, rectangles, and sprites
 
-Before the project, I only had the `screen_pixel` device to plot individual pixels, as in [`screen.asm`](./screen.asm)
+Before the project, I only had the `screen_pixel` device to plot individual pixels, as in [`screen.asm`](./screen.asm):
 ```asm
 ; ...
 jsi load_coordinates_at_address
@@ -401,16 +401,19 @@ write
 ```
 Firstly I added the `screen_x` and `screen_y` devices to regularise the `write` and `read` device interfaces (represented above).
 
-Then I defined the byte written by `screen_pixel` to be interpreted as follows:
+Then I defined the byte written to `screen_pixel` as follows:
 ```c
 bits {
-    fill_x: 1 // whether to continue drawing to the end of the row
-    fill_y: 1 // whether to continue drawing to the bottom of the column
-    unused: 4
     colour: 2 // index into palette
+    unused: 4
+    fill_y: 1 // whether to continue drawing to the bottom of the column
+    fill_x: 1 // whether to continue drawing to the end of the row
 }
 ```
-So `fill_x` by itself will draws a horizontal line, `fill_y` by itself draws a vertical line, and when both bits are set, we get a rectangle. This is how we can clear the background to our chosen colour on each frame:
+When neither of the fill bits are set, we set a single pixel. `fill_x` by itself will draws a horizontal line, which I used in [`os.asm`](./os.asm) to [draw the menu bar](https://github.com/felix-u/bici/blob/master/os.asm#L22):
+![Screenshot of OS menu bar](./assets/menu_bar.png)
+
+`fill_y` by itself draws a vertical line, and when both fill bits are set, we get a rectangle. This is how we can clear the background to our chosen colour on each frame:
 ```asm
 push.2 0x0 push screen_x write.2
 push.2 0x0 push screen_y write.2
@@ -418,8 +421,35 @@ push 0b11000000
 push screen_pixel write
 ```
 
-These two new features, along with the palette system (described [later](#fourcolour-palette)), yielded [`screen.asm`](./screen.asm), which plots itself by looping through its own bytes, treating each byte pair as a coordinate and colouring the corresponding pixel:
+Along with the palette system (described [later](#four-colour-palette)), these features yield [`screen.asm`](./screen.asm), which plots itself by looping through its own bytes, treating each byte pair as a coordinate and colouring the corresponding pixel:
 ![Screenshot of `screen.rom` running](./assets/screen.png)
+
+I then added `screen_sprite` to draw 8x8 sprites. It interprets its argument byte as follows:
+```c
+bits {
+    colour_0: 2
+    colour_1: 2
+    flip_x: 1 ; unimplemented
+    flip_y: 1 ; unimplemented
+    use_background_layer: 1
+    two_bits_per_pixel: 1 ; unimplemented
+}
+```
+So a 1-bit-per-pixel sprite takes the following form:
+```asm
+mouse_cursor_sprite: [
+    0b10000000
+    0b11000000
+    0b11100000
+    0b11110000
+    0b11111000
+    0b11100000
+    0b01010000
+    0b00010000
+]
+```
+where `0` corresponds either to transparency or `colour_0` (depending on the `use_background_layer` bit), and `1` corresponds to `colour_1`. As drawn by [`draw_default_mouse_cursor_at_mouse`](https://github.com/felix-u/bici/blob/master/header.asm#L172):
+![Screenshot of mouse cursor sprite](./assets/mouse_cursor.png)
 
 ### Graphical ASCII text rendering
 

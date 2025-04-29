@@ -65,7 +65,7 @@ bici script file.asm # compile and run in one go
 
 The `bici` CPU is 8-bit, with 16-bit operations. It has 64kb of memory and two 256-byte stacks: a working stack, for intermediate values and parameters, and a return stack which in practice is used as a call stack.
 
-`bici` has 35 opcodes. Each instruction is one byte, with a layout as follows:
+`bici` has 35 opcodes. Each instruction is one byte, consisting of a 5-bit opcode and 3 mode bits:
 ```cpp
 bits {
     opcode: 5
@@ -76,8 +76,57 @@ bits {
 ```
 ![Opcode slide](./assets/opcodes.png)
 
-Not all opcodes support all modes - 5 bits only allows for 32 operations, so to get 35, I used byte values where some of the 3 mode bits didn't make sense to be set. Since `push` takes an immediate, without popping any value, I used its `keep` variants (`push.k`, `push.2k`, and `push.kr`) as the byte values for 3 immediate jumps, which also have no use for the mode bits.
+5 bits only allows for 32 operations, but not all opcodes support all modes so to get 35, I "overloaded" operations which didn't need all their mode bits. Since `push` takes an immediate, without popping any value, I used its `keep` variants (`push.k`, `push.2k`, and `push.kr`) as the byte values for 3 immediate jumps, which also have no use for the mode bits.
 
+The opcode values are defined as an X-list, [here](https://github.com/felix-u/bici/blob/master/src/main.c#L6).
+
+In the following table, the left-to-right stack value notation corresponds to bottom-to-top positions. Unsuffixed values are assumed to be the bit-width indicated by the instruction's size mode bit, while `n`-suffixed values are `n` bits wide regardless of the instruction mode. `{ret: ...}` notation indicates return stack manipulation. `{}` notation indicates modification to `pc`, the program counter. `mem[]` notation indicates memory read.
+
+| Opcode | Stack before | Stack after                          | Takes immediate? |
+| ------ | ------------ | -----------                          | ---------------- |
+| break  |              |                                      | yes              |
+| push   |              | immediate                            |                  |
+| drop   | a b          | a                                    |                  |
+| nip    | a b          | b                                    |                  |
+| swap   | a b          | b a                                  |                  |
+| rot    | a b c        | b c a                                |                  |
+| dup    | a            | a a                                  |                  |
+| over   | a b          | a b a                                |                  |
+| eq     | a b          | (a == b)8                            |                  |
+| neq    | a b          | (a != b)8                            |                  |
+| gt     | a b          |  (a > b)8                            |                  |
+| lt     | a b          | (a < b)8                             |                  |
+| add    | a b          | (a + b)                              |                  |
+| sub    | a b          | (a - b)                              |                  |
+| mul    | a b          | (a * b)                              |                  |
+| div    | a b          | (a / b)                              |                  |
+| inc    | a            | (a + 1)                              |                  |
+| not    | a            | ~a                                   |                  |
+| and    | a b          | (a & b)                              |                  |
+| or     | a b          | (a \| b)                             |                  |
+| xor    | a b          | (a ^ b)                              |                  |
+| shift  | a b          | b << ((a & 0xf0) >> 4) >> (a & 0x0f) |                  |
+| jmp    | a.16         | { pc = a.16 }                        |                  |
+| jme    | a b.16       | if (a) { pc = b.16 }                 |                  |
+| jst    | a.16         |  {ret: pc} { pc = a.16 }             |                  |
+| jne    | a b.16       |  if (!a) { pc = b.16 }               |                  |
+| jni    | a            | if (!a) { pc = immediate.16 }        | yes              |
+| stash  | a            | {ret: a}                             |                  |
+| load   | a.16         | mem[a.16]                            |                  |
+| store  | a b.16       | mem[b.16] = a                        |                  |
+| read   | a            | mem[a]                               |                  |
+| write  | a b          | mem[b] = a                           |                  |
+| jmi    |              | { pc = immediate.16 }                | yes              |
+| jei    | a            | if (a) { pc = immediate.16 }         | yes              |
+| jsi    |              | {ret: pc} { pc = immediate.16 }      | yes              |
+
+Consider the 64kb address space of the CPU, and of any ROM. We can divide it into 256 256-byte pages. The first page - the 0 page, or the device page - is reserved for special device operations using the `read` and `write` operations.
+
+When interacting with the device page, we use `read` and `write` rather than `load` or `store` because the CPU intercepts these operations and may need to query the relevant values or perform device operations, before populating the relevant device page address or pushing a value from the device page onto the stack.
+
+Each device has 16 bytes reserved in the device page, which can be used for a combination of 8-bit and 16-bit values or operations. At the moment there are [6 devices](https://github.com/felix-u/bici/blob/master/src/main.c#L45): `system`, `console`, `screen`, `mouse`, `keyboard`, and `file` (implemented in [these](https://github.com/felix-u/bici/blob/master/src/main.c#L264) [portions](https://github.com/felix-u/bici/blob/master/src/main.c#L418) of the emulator).
+
+See the [`draw_text` routine](https://github.com/felix-u/bici/blob/master/header.asm#L102) in `header.asm` for an example of using the `screen` devices to render text.
 
 
 ## Assembly language reference

@@ -22,18 +22,9 @@ My goals for the project period were to add or achieve the following:
 11. [x] Said OS can run ROMs without any changes to them (i.e. the ROMs can run unchanged both on "bare metal" and in the OS)
 12. [ ] Said OS can window ROMs and run multiple ROMs concurrently, providing multitasking capability
 
+**The [feature summary](#feature-summary) goes in depth on these points, with GIFs and screenshots.**
+
 I've achieved every goal except the last. I know how to enable multitasking and provide a "real" OS experience, but it'll require a couple changes to the emulator (albeit without special-casing the OS) and some rather complex assembly routines. I think I could have managed it had I had a couple more days.
-
-The rest of the sections in this document contain:
-
-* [Codebase organisation](#codebase-organisation)
-* [Compilation and usage](#compilation-and-usage)
-* The [CPU reference](#cpu-reference)
-* The [assembly language reference](#assembly-language-reference)
-* An overview of [programming for `bici`](#programming-for-bici)
-* The [feature summary](#feature-summary), going in depth on the numbered points above, with GIFs
-* [Next steps](#next-steps)
-* [Inspiration](#inspiration)
 
 
 ## Codebase organisation
@@ -120,7 +111,7 @@ In the following table, the left-to-right stack value notation corresponds to bo
 | jei    | a            | if (a) { pc = immediate.16 }         | yes              |
 | jsi    |              | {ret: pc} { pc = immediate.16 }      | yes              |
 
-Consider the 64kb address space of the CPU, and of any ROM. We can divide it into 256 256-byte pages. The first page - the 0 page, or the device page - is reserved for special device operations using the `read` and `write` operations.
+The first 256-byte page of the 64kb address space - the 0 page, or the device page - is reserved for special device operations using the `read` and `write` operations.
 
 When interacting with the device page, we use `read` and `write` rather than `load` or `store` because the CPU intercepts these operations and may need to query the relevant values or perform device operations, before populating the relevant device page address or pushing a value from the device page onto the stack.
 
@@ -128,15 +119,45 @@ Each device has 16 bytes reserved in the device page, which can be used for a co
 
 See the [`draw_text` routine](https://github.com/felix-u/bici/blob/master/header.asm#L102) in `header.asm` for an example of using the `screen` devices to render text.
 
+When a ROM is executed, `bici` sets the program counter to the address stored at `system_start` in the device page and [executes](https://github.com/felix-u/bici/blob/master/src/main.c#L1291) until a `break` instruction is encountered.
+Then, every frame, `bici` reads the address at `screen_update` in the device page, and [executes](https://github.com/felix-u/bici/blob/master/src/main.c#L1295) from that address until `break`. Finally, upon emulator quit, `bici` [executes](https://github.com/felix-u/bici/blob/master/src/main.c#L1299) the address at `system_quit` in the device page until a `break`.
+
 
 ## Assembly language reference
 
-TODO(felix)
+I've tried to emulate intel assembly syntax, with a few differences.
+
+* Instructions are compiled via their opcode, and may be suffixed with modes `.2kr` (any combination following `.`). For example, to jump to the topmost address on the return stack (i.e. to return), write `jmp.r`. Some instructions take an immediate, as in `push label_or_number`.
+* Number literals are either hexadecimal (`0x1234`) or binary (`0b01`).
+* There may be multiple instructions on one line, for compactness (most instructions take no arguments, operating on the stack)
+* Global labels are defined as `label:`, and local labels are defined as `/label:`. Local labels are only visible between the preceding global label and the next global label.
+* Comments are from any `;` character to the end of the line
+* A `{ ... }` pair will compile the 16-bit address of `}` at the location of `{`. Therefore, the equivalent of C's `if (1) { ... }` is `push 0x1 jni { ... }`.
+* Any `[ ... ]` indicates insertion mode, where string literals (`"Hello"`) and numbers are compiled directly into the binary at the current compilation offset. If the opening `[` is suffixed with `$`, as in `[$ ... ]`, then the offset between the opening `[` and closing `]` (i.e. the total number of bytes inserted) is compiled at the location of `[$` as an 8-bit relative offset. This is useful for strings, as in `[$ "Hello" ]`, which is equivalent to `[ 0x5 "Hello" ]`.
+
+There are a few directives:
+
+* `include "file.asm"`, equivalent to C's `#include "file.c"`.
+* `org number` sets the compilation offset to `number`.
+* `rorg number` increments the compilation offset by `number`.
+* `patch label, label_or_number` compiles the value of `label_or_number` to the address of `label`, without changing the compilation offset. This allows device page labels to be defined in `header.asm` and then patched in assembly files which include it.
 
 
 ## Programming for `bici`
 
-TODO(felix)
+TODO(felix): hello world
+
+TODO(felix): routine parameter comment convention
+
+TODO(felix): header.asm
+
+TODO(felix): call and return
+
+TODO(felix): local labels after return as local variables
+
+Recall the three special routines `system_start`, `system_quit`, and `screen_update`.
+Because the `break` instruction has a byte value of `0`, and because the assembler guarantees that untouched bytes remain 0, all of these routines are optional. For example, if you don't patch `screen_update`, `bici` reads 0 and goes to execute at address 0 in the ROM. This address is reserved, and so contains a `0` byte - an immediate `break`. Therefore, unsupplied special routines are still executed, essentially as no-ops.
+
 
 
 ## Feature summary

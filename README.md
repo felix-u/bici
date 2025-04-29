@@ -22,9 +22,9 @@ My goals for the project period were to add or achieve the following:
 11. [x] Said OS can run ROMs without any changes to them (i.e. the ROMs can run unchanged both on "bare metal" and in the OS)
 12. [ ] Said OS can window ROMs and run multiple ROMs concurrently, providing multitasking capability
 
-I've achieved every goal except the last. I know how to enable multitasking and provide a "real" OS experience, but it'll require a couple changes to the emulator (albeit without special-casing the OS) and some rather complex assembly routines. I think I could have managed it by the deadline had I had a couple more deadlines. Still, I've done a lot in the time I had.
+I've achieved every goal except the last. I know how to enable multitasking and provide a "real" OS experience, but it'll require a couple changes to the emulator (albeit without special-casing the OS) and some rather complex assembly routines. I think I could have managed it had I had a couple more days.
 
-The rest of the sections in this document detail:
+The rest of the sections in this document contain:
 
 * [Codebase organisation](#codebase-organisation)
 * The [CPU reference](#cpu-reference)

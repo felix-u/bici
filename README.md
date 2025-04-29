@@ -194,7 +194,96 @@ EOF:
 ```
 ![Screenshot of graphical "Hello, World!"](./assets/hello_world_graphical.png)
 
-TODO(felix): routine parameter comment convention
+### Routine call & return convention
+
+Routines end in `jmp.r`, a jump to the topmost address on the return stack. A comment of the form `; (parameters -> results)` indicates what the routine expects on the stack, and what it will push.
+Example routine [from `header.asm`](https://github.com/felix-u/bici/blob/master/header.asm#L48):
+```asm
+cast_u16_from_u8: ; (value: u8 -> u16)
+    push 0x0 swap
+    jmp.r
+```
+
+Callers use `jsi`, or "jump stash return immediate", to stash the current program counter on the return stack and jump to the immediate address.
+Example call:
+```asm
+push 0x0 ; parameter = (u8)0
+jsi cast_u16_from_u8 ; stack now holds (u16)0
+```
+
+### `header.asm`
+
+For convenience, common labels and routines are defined in `header.asm`. This includes device page labels:
+```asm
+system:
+    rorg 0x2 ; address 0 reserved
+    system_end:      rorg 0x2
+    system_start:    rorg 0x2
+    system_quit:     rorg 0x2
+    system_colour_0: rorg 0x2
+    system_colour_1: rorg 0x2
+    system_colour_2: rorg 0x2
+    system_colour_3: rorg 0x2
+
+org 0x10 console:
+             console_print:
+
+org 0x20 screen:
+    screen_update: rorg 0x2
+    screen_width:  rorg 0x2
+    ; ...
+```
+the directive to begin user routines only after the first 256 (0x100) bytes, which is the reserved byte page:
+```asm
+org 0x100
+```
+the expectation that programs will declare an `EOF` label to indicate the size of the ROM:
+```asm
+patch system_end, EOF
+```
+helpful routines:
+```asm
+draw_default_mouse_cursor_at_mouse: ; (colour: u8 -> _)
+    push mouse_x read.2
+    push screen_x write.2
+
+    push mouse_y read.2
+    push screen_y write.2
+
+    push.2 mouse_cursor_sprite
+    push screen_data write.2
+
+    push screen_sprite write
+
+    jmp.r
+```
+and common sprites, such as the mouse cursor and the font:
+```asm
+font:
+    rorg 0x100 ; skip to ' ' * 8 (bytes per glyph), i.e. the first visible ASCII character
+    /space: rorg 0x8
+    /exclamation: [
+        rorg 0x1
+        0b00011000
+        0b00011000
+        0b00011000
+        0b00011000
+        0b00000000
+        0b00011000
+        0b00011000
+    ]
+    /double_quote: [
+        rorg 0x1
+        0b00000000
+        0b01101100
+        0b01101100
+        0b01101100
+        0b01101100
+        0b00000000
+        0b00000000
+    ]
+    ; ...
+```
 
 TODO(felix): header.asm
 

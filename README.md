@@ -233,11 +233,11 @@ org 0x20 screen:
     screen_width:  rorg 0x2
     ; ...
 ```
-the directive to begin user routines only after the first 256 (0x100) bytes, which is the reserved byte page:
+the directive to begin user routines only after the first 256 (0x100) bytes, which is the reserved device page:
 ```asm
 org 0x100
 ```
-the expectation that programs will declare an `EOF` label to indicate the size of the ROM:
+the expectation that programs will declare an `EOF` label indicating the size of the ROM, to store in the `system_end` port:
 ```asm
 patch system_end, EOF
 ```
@@ -287,7 +287,7 @@ font:
 
 ### Local labels as variables
 
-I find it quite difficult to reason about three or more items on the stack. To make programming `bici` easier, I sometimes use local labels (i.e. `/label:`) combined with the `rorg` (relative compilation offset) directive to store named local variables *below* a routine's `break` or `jmp.r` (such that the stored values cannot be accidentally executed as code).
+I find it quite difficult to reason about three or more items on the stack. To make programming `bici` easier, I sometimes use local labels (i.e. `/label:`) to store named local variables *below* a routine's `break` or `jmp.r` (such that the stored values cannot be accidentally executed as code). The `rorg` (relative compilation offset) directive allows me reserve the correct number of bytes for each variable.
 
 I access these "local variables" with `push.2 variable_address load` and `push new_value push.2 variable_address store`.
 
@@ -373,6 +373,79 @@ Because the `break` instruction has a byte value of `0`, and because the assembl
 
 
 ## Feature summary
+
+This section chronicles what I achieved *during* the project. I already had the VM from last year, but with many missing features and a very limited assembler.
+
+The sections below correspond roughly to the bullet points in the [overview](#overview).
+
+### Better assembler
+
+The [assembly language reference](#assembly-language-reference) describes how to use my assembly language. I completely rewrote the assembler for this project, going from a weird bespoke syntax to a much more typical look and feel, with convenience features in the form of directives and substantially better error checking and reporting.
+
+![Compilation error screenshot](./assets/compile_error.png)
+
+### Lines, rectangles, and sprites
+
+Before the project, I only had the `screen_pixel` device to plot individual pixels, as in [`screen.asm`](./screen.asm)
+```asm
+; ...
+jsi load_coordinates_at_address
+
+push screen_y write.2
+push screen_x write.2
+
+push 0x03
+push screen_pixel
+write
+; ...
+```
+Firstly I added the `screen_x` and `screen_y` devices to regularise the `write` and `read` device interfaces (represented above).
+
+Then I defined the byte written by `screen_pixel` to be interpreted as follows:
+```c
+bits {
+    fill_x: 1 // whether to continue drawing to the end of the row
+    fill_y: 1 // whether to continue drawing to the bottom of the column
+    unused: 4
+    colour: 2 // index into palette
+}
+```
+So `fill_x` by itself will draws a horizontal line, `fill_y` by itself draws a vertical line, and when both bits are set, we get a rectangle. This is how we can clear the background to our chosen colour on each frame:
+```asm
+push.2 0x0 push screen_x write.2
+push.2 0x0 push screen_y write.2
+push 0b11000000
+push screen_pixel write
+```
+
+These two new features, along with the palette system (described [later](#fourcolour-palette)), yielded [`screen.asm`](./screen.asm), which plots itself by looping through its own bytes, treating each byte pair as a coordinate and colouring the corresponding pixel:
+![Screenshot of `screen.rom` running](./assets/screen.png)
+
+### Graphical ASCII text rendering
+
+TODO(felix)
+
+### Mouse interaction
+
+TODO(felix)
+
+### Keyboard interaction
+
+TODO(felix)
+
+### Filesystem interaction
+
+TODO(felix)
+
+### Four-colour palette
+
+TODO(felix)
+
+### Transparency
+
+TODO(felix)
+
+### Operating system
 
 TODO(felix)
 

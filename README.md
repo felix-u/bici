@@ -27,8 +27,10 @@ I've achieved every goal except the last. I know how to enable multitasking and 
 The rest of the sections in this document contain:
 
 * [Codebase organisation](#codebase-organisation)
+* [Compilation and usage](#compilation-and-usage)
 * The [CPU reference](#cpu-reference)
 * The [assembly language reference](#assembly-language-reference)
+* An overview of [programming for `bici`](#programming-for-bici)
 * The [feature summary](#feature-summary), going in depth on the numbered points above, with GIFs
 * [Next steps](#next-steps)
 * [Inspiration](#inspiration)
@@ -36,7 +38,27 @@ The rest of the sections in this document contain:
 
 ## Codebase organisation
 
-TODO(felix)
+This is a monorepo containing the code for the assembler, emulator, example ROMs, and OS.
+
+The assembler and emulator are written in C11. I don't use any libraries, and my personal standard library's software renderer interfaces with Win32 directly.
+
+The code for the assembler begins [here](https://github.com/felix-u/bici/blob/master/src/main.c#L700) and the code for the emulator begins [here](https://github.com/felix-u/bici/blob/master/src/main.c#L1290).
+
+The assembly code for the example programs are in [`hello.asm`](./hello.asm), [`keyboard.asm`](./keyboard.asm), [`mouse.asm`](./mouse.asm), and [`screen.asm`](./screen.asm). The OS is implemented in [`os.asm`](./os.asm). For convenience, all assembly programs include [`header.asm`](./header.asm), which I elaborate on [later](#programming-for-bici).
+
+
+## Compilation and usage
+
+I want to get my software renderer up and running on Linux and web in the near future, but for now I've only implemented it for Win32, so that's the only compilation target for `bici`.
+
+With the MSVC toolchain installed, run `build.bat`. You can also run `build.bat clang`. Either of these commands will produce `build/bici.exe`.
+
+Usage: `bici <com|run|script> <file...>`, meaning one of:
+```sh
+bici com file.asm file.rom
+bici run file.rom
+bici script file.asm # compile and run in one go
+```
 
 
 ## CPU reference
@@ -45,6 +67,11 @@ TODO(felix)
 
 
 ## Assembly language reference
+
+TODO(felix)
+
+
+## Programming for `bici`
 
 TODO(felix)
 

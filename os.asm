@@ -5,7 +5,8 @@ patch system_colour_1, 0xccc
 patch system_colour_2, 0x3aa
 patch system_colour_3, 0x000
 
-org 0xf000
+org 0x8000
+OS_START:
 
 patch screen_update, update
 update:
@@ -109,6 +110,8 @@ update:
                 jmi end_click_check
             }
 
+            ; TODO(felix): check if ROM fits
+
             ; we want to read file[system_end] to get the length of the rom
             push.2 system_end
             push file_cursor write.2
@@ -127,7 +130,10 @@ update:
 
             ; copy
             push.2 0x0 ; TODO(felix): we in fact need to do something else than overwriting the current ROM
+            ; jsi get_new_program_memory_location
             push file_copy write.2
+
+            jsi save_current_program_routine_addresses
         }
 
         /end_click_check:
@@ -189,6 +195,21 @@ floppy_icon_sprite: [
     0b10000001
     0b11111111
 ]
+
+save_current_program_routine_addresses: ; (_ -> _)
+    ; TODO(felix): get actual current program
+    push.2 program_1_memory push.2 program_memory store.2
+
+    jmp.r
+
+    /program_memory: rorg 0x2
+
+get_new_program_memory_location: ; (_ -> u16)
+    push.2 program_1_memory
+    jmp.r
+
+program_1:
+    program_1_memory:
 
 EOF:
 org 0xffff

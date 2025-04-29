@@ -63,7 +63,21 @@ bici script file.asm # compile and run in one go
 
 ## CPU reference
 
-TODO(felix)
+The `bici` CPU is 8-bit, with 16-bit operations. It has 64kb of memory and two 256-byte stacks: a working stack, for intermediate values and parameters, and a return stack which in practice is used as a call stack.
+
+`bici` has 35 opcodes. Each instruction is one byte, with a layout as follows:
+```cpp
+bits {
+    opcode: 5
+    size:   1 // 0 if 8-bit, 1 if 16-bit
+    stack:  1 // 0 if working stack, 1 if return stack
+    keep:   1 // 0 if parameters are popped, 1 if parameters are kept
+}
+```
+![Opcode slide](./assets/opcodes.png)
+
+Not all opcodes support all modes - 5 bits only allows for 32 operations, so to get 35, I used byte values where some of the 3 mode bits didn't make sense to be set. Since `push` takes an immediate, without popping any value, I used its `keep` variants (`push.k`, `push.2k`, and `push.kr`) as the byte values for 3 immediate jumps, which also have no use for the mode bits.
+
 
 
 ## Assembly language reference

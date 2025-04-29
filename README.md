@@ -5,6 +5,8 @@ TODO(felix): gif showing usage
 
 ## Overview
 
+**The [feature summary](#feature-summary) goes in depth on the points below, with GIFs and screenshots.**
+
 I began this project with a working emulator, but with no interaction capability and with the only output mechanisms being console prints and plotting individual pixels on the screen. The assembly language was weird and limited.
 
 My goals for the project period were to add or achieve the following:
@@ -21,8 +23,6 @@ My goals for the project period were to add or achieve the following:
 10. [x] Said OS can act as a loader for ROMs
 11. [x] Said OS can run ROMs without any changes to them (i.e. the ROMs can run unchanged both on "bare metal" and in the OS)
 12. [ ] Said OS can window ROMs and run multiple ROMs concurrently, providing multitasking capability
-
-**The [feature summary](#feature-summary) goes in depth on these points, with GIFs and screenshots.**
 
 I've achieved every goal except the last. I know how to enable multitasking and provide a "real" OS experience, but it'll require a couple changes to the emulator (albeit without special-casing the OS) and some rather complex assembly routines. I think I could have managed it had I had a couple more days.
 

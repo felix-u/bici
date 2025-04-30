@@ -572,11 +572,21 @@ default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]
 
 ### Four-colour palette
 
-TODO(felix)
+This feature is used by all example programs. I added one 16-bit port to the `system` device for each of the 4 system palette colours, which are written in `r4g4b4` (4 bits per channel) format:
+```asm
+patch system_colour_0, 0xeee
+patch system_colour_1, 0xccc
+patch system_colour_2, 0x3aa
+patch system_colour_3, 0x000
+```
+
+Since the palette is read directly from memory on any draw operaton, the palette can be updated dynamically, and even during a frame render, but I haven't used this feature for anything.
 
 ### Transparency
 
-TODO(felix)
+As [aforementioned](#lines-rectangles-and-sprites) the various graphical devices can draw to the background, where the `0` colour is drawn from the palette, or to the foreground, where any instance of a `0` colour is skipped for transparency. This allows us to draw non-square shapes within the 8x8 sprite area, correctly overlapping text, the mouse cursor, and anything else which might be transparent.
+
+![Gif demonstrating transparency in `os.asm`](./assets/transparency.gif)
 
 ### Operating system
 

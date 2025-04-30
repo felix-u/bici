@@ -410,7 +410,7 @@ bits {
     fill_x: 1 // whether to continue drawing to the end of the row
 }
 ```
-When neither of the fill bits are set, we set a single pixel. `fill_x` by itself will draws a horizontal line, which I used in [`os.asm`](./os.asm) to [draw the menu bar](https://github.com/felix-u/bici/blob/master/os.asm#L22):
+When neither of the fill bits are set, we set a single pixel. `fill_x` by itself draws a horizontal line, which I used in [`os.asm`](./os.asm) to [draw the menu bar](https://github.com/felix-u/bici/blob/master/os.asm#L22):
 ![Screenshot of OS menu bar](./assets/menu_bar.png)
 
 `fill_y` by itself draws a vertical line, and when both fill bits are set, we get a rectangle. This is how we can clear the background to our chosen colour on each frame:
@@ -429,10 +429,10 @@ I then added `screen_sprite` to draw 8x8 sprites. It interprets its argument byt
 bits {
     colour_0: 2
     colour_1: 2
-    flip_x: 1 ; unimplemented
-    flip_y: 1 ; unimplemented
+    flip_x: 1 // unimplemented
+    flip_y: 1 // unimplemented
     use_background_layer: 1
-    two_bits_per_pixel: 1 ; unimplemented
+    two_bits_per_pixel: 1 // unimplemented
 }
 ```
 So a 1-bit-per-pixel sprite takes the following form:
@@ -454,11 +454,75 @@ where `0` corresponds either to transparency or `colour_0` (depending on the `us
 
 ### Graphical ASCII text rendering
 
-TODO(felix)
+The sprite drawing capability translates naturally to monospace ASCII text rendering: we simply store every glyph as an 8x8 sprite, and index into the sprite array by character value. The [`draw_text` routine](https://github.com/felix-u/bici/blob/master/header.asm#L102) in [`header.asm`](./header.asm) is tested with all visible ASCII characters in the [`hello.asm`](./hello.asm) test program:
+
+![Screenshot of `hello.asm` running](./assets/hello.png)
 
 ### Mouse interaction
 
-TODO(felix)
+Next I added mouse interaction. I decided [`draw_default_mouse_cursor_at_mouse`](https://github.com/felix-u/bici/blob/master/header.asm#L172) would be helpful to have in [`header.asm`](./header.asm), which reads from the new `mouse_x` and `mouse_y` devices:
+```asm
+draw_default_mouse_cursor_at_mouse: ; (colour: u8 -> _)
+    push mouse_x read.2 ; get mouse x coordinate
+    push screen_x write.2
+
+    push mouse_y read.2 ; get mouse y coordinate
+    push screen_y write.2
+
+    push.2 mouse_cursor_sprite
+    push screen_data write.2
+
+    push screen_sprite write
+
+    jmp.r
+```
+
+Adding the following to [`hello.asm`](https://github.com/felix-u/bici/blob/master/hello.asm#L45) gives us a movable cursor:
+```asm
+push 0b00000100
+jsi draw_default_mouse_cursor_at_mouse
+```
+
+![Gif of `hello.asm` with dynamic mouse cursor](./assets/hello.gif)
+
+The `mouse_left_button` and `mouse_right_button` ports each contain a byte, which when `read` is filled as follows:
+```c
+bits {
+    is_clicked: 4
+    is_held:    4
+}
+```
+
+I tested this functionality in [`mouse.asm`](./assets/mouse.asm) by changing the foreground colour upon left click, the background colour upon right click, and by playing a sin wave animation upon left button hold:
+```asm
+; if left click
+push mouse_left_button read
+push 0b11110000 and
+jni end_set_mouse_colour
+    ; change cursor colour
+/end_set_mouse_colour:
+
+; if right click
+push mouse_right_button read
+push 0b11110000 and
+jni end_set_background_colour
+    ; change background colour
+/end_set_background_colour:
+
+; ...
+
+; if left down
+push mouse_left_button read
+push 0b00001111 and
+jni end_draw_sin_wave
+    ; draw sin wave at mouse
+/end_draw_sin_wave:
+
+push.2 current_mouse_colour load.2 load
+jsi draw_default_mouse_cursor_at_mouse
+```
+
+![Gif of `mouse.asm`](./assets/mouse.gif)
 
 ### Keyboard interaction
 

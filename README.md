@@ -488,8 +488,8 @@ jsi draw_default_mouse_cursor_at_mouse
 The `mouse_left_button` and `mouse_right_button` ports each contain a byte, which when `read` is filled as follows:
 ```c
 bits {
-    is_clicked: 4
     is_held:    4
+    is_clicked: 4
 }
 ```
 
@@ -526,7 +526,25 @@ jsi draw_default_mouse_cursor_at_mouse
 
 ### Keyboard interaction
 
-TODO(felix)
+Keyboard interaction was a similar story: I added the `keyboard` device and two ports for it: `keyboard_key_value`, for writing the keycode, and the readable `keyboard_key_state`, laid out the same as the mouse button ports:
+```c
+bits {
+    is_held:    4
+    is_pressed: 4
+}
+```
+
+I wrote a [`key_down` routine](https://github.com/felix-u/bici/blob/master/keyboard.asm#L152) in [`keyboard.asm`](./keyboard.asm):
+```asm
+key_down: ; (key: u8 -> u8)
+    push keyboard_key_value write
+    push keyboard_key_state read
+    push 0b00001111 and
+    jmp.r
+```
+which I used to implement this demo, where the ball responds to the WASD keys (and, for fun, animates to the mouse position on left click):
+
+![Gif of `keyboard.asm`](./assets/keyboard.gif)
 
 ### Filesystem interaction
 

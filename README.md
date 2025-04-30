@@ -378,6 +378,8 @@ This section chronicles what I achieved *during* the project. I already had the 
 
 The subheadings below correspond roughly to the bullet points in the [overview](#overview).
 
+All the new "devices" are implemented in the handling for `vm_opcode_write` and `vm_opcode_read` in the emulator.
+
 ### Better assembler
 
 The [assembly language reference](#assembly-language-reference) describes how to use my assembly language. I completely rewrote the assembler for this project, going from a weird bespoke syntax to a much more typical look and feel, with convenience features in the form of directives and substantially better error checking and reporting.
@@ -548,7 +550,25 @@ which I used to implement this demo, where the ball responds to the WASD keys (a
 
 ### Filesystem interaction
 
-TODO(felix)
+I knew a `file` device would be necessary for the operating system. I decided to implement the file ports to be used as follows:
+
+* A 16-bit string address is written to `file_name`, upon which the implementation attempts to load the corresponding file
+* A 16-bit value is read from `file_length` to check that the file was loaded
+* A 16-bit value can be written to `file_cursor`, to then `read` an 8-bit or 16-bit value at the position indicated, using the `file_read` port
+* `file_length` can be written to, in order to limit the number of bytes copied when using...
+* ... `file_copy`, which copies the file contents into the VM's memory at the indicated address
+
+This sequence of operations is [used in `os.asm`](https://github.com/felix-u/bici/blob/master/os.asm#L93) to render labels for, and load on click, the ROMs indicated by these local variables:
+```asm
+default_program_count: [ 0x4 ]
+default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]
+    /hello_rom: [$ "hello.rom" ]
+    /keyboard_rom: [$ "keyboard.rom" ]
+    /mouse_rom: [$ "mouse.rom" ]
+    /screen_rom: [$ "screen.rom" ]
+```
+
+![Screenshot of file labels in `os.asm`](./assets/files.png)
 
 ### Four-colour palette
 

@@ -1,6 +1,15 @@
 # bici - emulator & OS for fictional 8-bit CPU with 64kb memory
 
-TODO(felix): gif showing usage
+<table>
+  <tr>
+    <td><img src="assets/os_hello.gif"></td>
+    <td><img src="assets/os_keyboard.gif"></td>
+  </tr>
+  <tr>
+    <td><img src="assets/os_mouse.gif"></td>
+    <td><img src="assets/os_screen.gif"></td>
+  </tr>
+</table>
 
 
 ## Overview
@@ -558,15 +567,7 @@ I knew a `file` device would be necessary for the operating system. I decided to
 * `file_length` can be written to, in order to limit the number of bytes copied when using...
 * ... `file_copy`, which copies the file contents into the VM's memory at the indicated address
 
-This sequence of operations is [used in `os.asm`](https://github.com/felix-u/bici/blob/master/os.asm#L93) to render labels for, and load on click, the ROMs indicated by these local variables:
-```asm
-default_program_count: [ 0x4 ]
-default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]
-    /hello_rom: [$ "hello.rom" ]
-    /keyboard_rom: [$ "keyboard.rom" ]
-    /mouse_rom: [$ "mouse.rom" ]
-    /screen_rom: [$ "screen.rom" ]
-```
+This sequence of operations is [used in `os.asm`](https://github.com/felix-u/bici/blob/master/os.asm#L93) to render labels for, and load on click, the demo ROMs:
 
 ![Screenshot of file labels in `os.asm`](./assets/files.png)
 
@@ -590,14 +591,105 @@ As [aforementioned](#lines-rectangles-and-sprites) the various graphical devices
 
 ### Operating system
 
-TODO(felix)
+`tinyOS`, implemented in [`os.asm`](./os.asm), is just another ROM. It boots exactly the same way as any other program, and nothing in the VM is hard-wired to recognise it as "special" or provide bespoke features.
+
+![Screenshot of OS](./assets/os.png)
+
+To handle the file listing, the OS enumerates a [`/programs` table](https://github.com/felix-u/bici/blob/master/os.asm#L168):
+```asm
+default_program_count: [ 0x4 ]
+default_programs: [ hello_rom keyboard_rom mouse_rom screen_rom ]
+    /hello_rom: [$ "hello.rom" ]
+    /keyboard_rom: [$ "keyboard.rom" ]
+    /mouse_rom: [$ "mouse.rom" ]
+    /screen_rom: [$ "screen.rom" ]
+```
+
+For each entry, we draw a floppy disc sprite (or my best attempt at one, anyway), the filename, and use a [mouse hit test routine](https://github.com/felix-u/bici/blob/master/header.asm#L96) to [check whether we should load the corresponding ROM](https://github.com/felix-u/bici/blob/master/os.asm#L89).
+
+![Screenshot of file picker in tinyOS](./assets/files.png)
+
+Currently, the logic for program loading is functional but incomplete:
+```asm
+; set up current file for querying
+push.2 current_program_name load.2
+push file_name write.2
+
+; error if file_length == 0
+push file_length read.2
+push.2 0x0 eq.2 jni {
+    ; TODO(felix): nicer solution here
+    push.2 error_file_not_found push console_print write.2
+    jmi end_click_check
+}
+
+; error if file_length < 256
+push file_length read.2
+push.2 0x100 lt.2 jni {
+    ; TODO(felix): nicer solution here
+    push.2 error_file_invalid push console_print write.2
+    jmi end_click_check
+}
+
+; TODO(felix): check if ROM fits
+
+; we want to read file[system_end] to get the length of the rom
+push.2 system_end
+push file_cursor write.2
+push file_read read.2
+
+; error if system_end < 256
+dup.2 push.2 0x100 lt.2 jni {
+    ; TODO(felix): nicer solution here
+    drop.2
+    push.2 error_length_invalid push console_print write.2
+    jmi end_click_check
+}
+
+; when we copy the file into memory, we only copy as much as we need to
+push file_length write.2
+
+; copy
+push.2 0x0 ; TODO(felix): we in fact need to do something else than overwriting the current ROM
+; jsi get_new_program_memory_location
+push file_copy write.2
+
+jsi save_current_program_routine_addresses
+```
+
+To go through the steps in order:
+
+* We load the file, with some length checks
+* We get the length of the ROM by reading the 16-bit value stored in the `system_end` port in its device page
+* We set `file_length` so that we only copy the indicated ROM length, which may be padded with additional zeroes
+* We copy the new ROM into memory, *overriding the current device page*
+
+Because `tinyOS` is [compiled at a 32kb offset](https://github.com/felix-u/bici/blob/master/os.asm#L8), any ROM shorter than 32kb can be loaded without clobbering the OS code. After the ROM contents are copied into memory, the OS `screen_update` routine finished executing as usual. But when the CPU reads the `screen_update` routine address from the device page, it reads the new value, jumping to the routine of the new ROM. The same is the case with the colour palette, `system_quit` routine, and other device page values.
+
+This allows the OS to correctly load our demo programs, though currently it does not run their `system_start` routines:
+
+![Gif of `hello.rom` running from `tinyOS`](./assets/os_hello.gif)
+
+![Gif of `keyboard.rom` running from `tinyOS`](./assets/os_keyboard.gif)
+
+![Gif of `mouse.rom` running from `tinyOS`](./assets/os_mouse.gif)
+
+![Gif of `screen.rom` running from `tinyOS`](./assets/os_screen.gif)
 
 
 ## Next steps
 
-TODO(felix)
+The remaining checkbox in the overview is cooperative multitasking.
+
+`tinyOS` should load ROMs into memory, but not switch immediately. Instead, it should store the addresses of their special routines, and run the ROMs in a *managed* fashion, making sure to execute the `system_start` and `system_quit` routines as appropriate, and executing `screen_update` once per frame *per program*.
+
+To enable this management, along with windowing, `tinyOS` will need to use a CPU device port not yet implemented: the `system_interrupt` routine. This routine will be executed before every `read` and after each `write`, so that it can intercept a ROM's device operations and limit its draw area, not pass input to an obscured/minimised window, etc. Every time the OS switches execution to a different ROM, its memory will have to be copied to the beginning of the address space, then copied back.
+
+Probably, `tinyOS` should be compiled to the end of the address space and grow downwards towards 0. It should be able to run as many ROMs as possible while no one ROM is large enough that it clobbers another ROM, or the OS itself, when written to the beginning of the address space.
+
+With this system, `tinyOS` would preserve its capacity to run ROMs without requiring changes to the ROMs themselves, which would still be written for "bare metal". `bici` could the be ported to technically or artificially constrained devices such as graphing calculators, microprocessors, web browsers, e-readers, and mobile phones, with tinyOS hosting an assembler/compiler and other development tools. ROMs would be small enough to "export" via QR code.
 
 
 ## Inspiration
 
-TODO(felix): link uxn & varvara
+All code is mine and I've taken `bici` in its own direction, but I was initially inspired by [uxn](https://100r.co/site/uxn.html) and [varvara](https://wiki.xxiivv.com/site/varvara.html) and have referenced these systems for some of my architectural decisions.

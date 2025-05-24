@@ -150,6 +150,8 @@ typedef Array(u8) Array_u8;
 
 #define discard(expression) (void)(expression)
 
+// TODO(felix): raddebugger view definitions
+
 #define enumdef(Name, type)\
     typedef type Name;\
     typedef Slice(Name) Slice_##Name;\

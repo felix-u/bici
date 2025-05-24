@@ -638,7 +638,7 @@ static String token_lexeme(Assembler_Context *context, Token_Id token_id) {
     return token_string;
 }
 
-static int parse_error(Assembler_Context *context, File_Id file_id, u32 token_start_index, u8 token_length) {
+static u8 parse_error(Assembler_Context *context, File_Id file_id, u32 token_start_index, u8 token_length) {
     String text = context->files.data[file_id].bytes;
     String file_name = context->files.data[file_id].name;
     // TODO(felix): print line and column, and highlight error in line
@@ -649,8 +649,12 @@ static int parse_error(Assembler_Context *context, File_Id file_id, u32 token_st
 
 #define usage "usage: bici <com|run|script> <file...>"
 
-int main(int argc, char **argv) {
-    if (argc < 3) {
+static u8 program(void) {
+    Arena arena = arena_init(8 * 1024 * 1024);
+
+    Slice_String arguments = os_get_arguments(&arena);
+
+    if (arguments.count < 3) {
         log_error("%", fmt(cstring, usage));
         return 1;
     }
@@ -660,23 +664,23 @@ int main(int argc, char **argv) {
         command_count,
     };
 
-    String command_string = string_from_cstring(argv[1]);
+    String command_string = arguments.data[1];
 
     Command command = 0;
     if (string_equal(command_string, string("com"))) {
-        if (argc != 4) {
+        if (arguments.count != 4) {
             log_error("usage: bici com <file.asm> <file.rom>");
             return 1;
         }
         command = command_compile;
     } else if (string_equal(command_string, string("run"))) {
-        if (argc != 3) {
+        if (arguments.count != 3) {
             log_error("usage: bici run <file.rom>");
             return 1;
         }
         command = command_run;
     } else if (string_equal(command_string, string("script"))) {
-        if (argc != 3) {
+        if (arguments.count != 3) {
             log_error("usage: bici script <file.asm>");
             return 1;
         }
@@ -686,9 +690,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    Arena arena = arena_init(8 * 1024 * 1024);
-
-    char *input_filepath = argv[2];
+    char *input_filepath = cstring_from_string(&arena, arguments.data[2]);
     usize max_filesize = 0x10000;
     String input_bytes = file_read_bytes_relative_path(&arena, input_filepath, max_filesize);
 
@@ -1233,8 +1235,8 @@ int main(int argc, char **argv) {
         }
 
         if (command == command_compile) {
-            assert(argc == 4);
-            char *output_path = argv[3];
+            assert(arguments.count == 4);
+            char *output_path = cstring_from_string(&arena, arguments.data[3]);
             file_write_bytes_to_relative_path(output_path, bit_cast(String) rom);
         }
     }

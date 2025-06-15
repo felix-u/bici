@@ -133,6 +133,25 @@ typedef        size_t usize;
 typedef     uintptr_t upointer;
 typedef      intptr_t ipointer;
 
+#if BUILD_DEBUG
+    #pragma section(".raddbg", read, write)
+    #define raddbg_exe_data __declspec(allocate(".raddbg"))
+    raddbg_exe_data unsigned char raddbg_is_attached_byte_marker[1];
+    #define raddbg_glue_(a, b) a##b
+    #define raddbg_glue(a, b) raddbg_glue_(a, b)
+    #define raddbg_gen_data_id() raddbg_glue(raddbg_data__, __COUNTER__)
+
+    #define raddbg_type_view(type, ...) raddbg_exe_data char raddbg_gen_data_id()[] = ("type_view: {type: ```" #type "```, expr: ```" #__VA_ARGS__ "```}");
+    #define raddbg_entry_point(...) raddbg_exe_data char raddbg_gen_data_id()[] = ("entry_point: \"" #__VA_ARGS__ "\"");
+#else
+    #define raddbg_type_view(...)
+    #define raddbg_entry_point(...)
+#endif
+
+// TODO(felix): I should be able to do raddbg_type_view(Slice_?, $.slice()), but for some reason it doesn't work, so instead I define the type views per structdef, enumdef, etc.
+// raddbg_type_view(Slice_?, $.slice())
+// raddbg_type_view(Array_?, $.slice())
+
 #define Slice(type) struct { type *data; usize count; }
 typedef Slice(u8) Slice_u8;
 typedef Slice(void) Slice_void;
@@ -150,27 +169,32 @@ typedef Array(u8) Array_u8;
 
 #define discard(expression) (void)(expression)
 
-// TODO(felix): raddebugger view definitions
-
 #define enumdef(Name, type)\
     typedef type Name;\
     typedef Slice(Name) Slice_##Name;\
     typedef Array(Name) Array_##Name;\
+    raddbg_type_view(Slice_##Name, $.slice())\
+    raddbg_type_view(Array_##Name, $.slice())\
     enum
 
 #define structdef(Name) \
     typedef struct Name Name; \
     typedef Slice(Name) Slice_##Name; \
     typedef Array(Name) Array_##Name; \
+    raddbg_type_view(Slice_##Name, $.slice())\
+    raddbg_type_view(Array_##Name, $.slice())\
     struct Name
 
 #define uniondef(Name) \
     typedef union Name Name; \
     typedef Slice(Name) Slice_##Name; \
     typedef Array(Name) Array_##Name; \
+    raddbg_type_view(Slice_##Name, $.slice())\
+    raddbg_type_view(Array_##Name, $.slice())\
     union Name
 
 
+raddbg_type_view(String, view:text($.data, size=count))
 structdef(String) { u8 *data; usize count; };
 #define stringc(s)  { .data = (u8 *)s, .count = sizeof(s) - 1 }
 #define string(s) (String)stringc(s)

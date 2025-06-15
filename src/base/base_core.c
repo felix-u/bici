@@ -87,7 +87,9 @@ extern void *memset(void *destination_, int byte_, usize byte_count) {
     return destination;
 }
 
+raddbg_entry_point(program)
 static u8 program(void);
+
 #if OS_WINDOWS
     void entrypoint(void) {
         u8 exit_code = program();

@@ -152,20 +152,26 @@ static void log_internal_with_location(char *file, usize line, char *func, char 
 
 static void os_write(String string) {
     // TODO(felix): stderr support
+    // NOTE(felix): can't use assert in this function because panic() will call os_write, so we'll end up with a recursively failing assert and stack overflow. Instead, use `if (!condition) { breakpoint; abort(); }`
     #if OS_WINDOWS
+        if (string.count > UINT32_MAX) { breakpoint; abort(); }
+
         HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        assert(console_handle != INVALID_HANDLE_VALUE);
+        if (console_handle == INVALID_HANDLE_VALUE) { breakpoint; abort(); }
+
         u32 num_chars_written = 0;
-        assert(string.count <= UINT32_MAX);
         bool ok = WriteConsole(console_handle, string.data, (u32)string.count, (LPDWORD)&num_chars_written, 0);
-        assert(ok);
-        assert(num_chars_written == string.count);
+        if (!ok) { breakpoint; abort(); }
+        if (num_chars_written != string.count) { breakpoint; abort(); }
+
     #elif OS_LINUX || OS_MACOS || OS_EMSCRIPTEN
         int stdout_handle = 1;
         isize bytes_written = write(stdout_handle, string.data, string.count);
         discard(bytes_written);
+
     #else
         #error "unimplemented"
+
     #endif
 }
 

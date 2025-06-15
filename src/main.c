@@ -649,6 +649,13 @@ static u8 parse_error(Assembler_Context *context, File_Id file_id, u32 token_sta
 
 #define usage "usage: bici <com|run|script> <file...>"
 
+enumdef(Command, u8) {
+    command_compile, command_run, command_script,
+    command_count,
+};
+
+structdef(File_Cursor) { Token_Id token_id; u32 asm_cursor; };
+
 static u8 program(void) {
     Arena arena = arena_init(8 * 1024 * 1024);
 
@@ -658,11 +665,6 @@ static u8 program(void) {
         log_error("%", fmt(cstring, usage));
         return 1;
     }
-
-    enumdef(Command, u8) {
-        command_compile, command_run, command_script,
-        command_count,
-    };
 
     String command_string = arguments.data[1];
 
@@ -712,7 +714,6 @@ static u8 program(void) {
         Input_File main_file = { .bytes = input_bytes, .name = string_from_cstring(input_filepath), .tokens = { .arena = &arena } };
         array_push(&context.files, &main_file);
 
-        structdef(File_Cursor) { Token_Id token_id; u32 asm_cursor; };
         Array_File_Cursor file_stack = { .arena = &arena };
         File_Cursor main_file_cursor = {0};
         array_push(&file_stack, &main_file_cursor);

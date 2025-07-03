@@ -1,7 +1,8 @@
-// raddbg 0.9.19 project file
+// raddbg 0.9.20 project file
 
-recent_file: path: "src/main.c"
+recent_file: path: "src/main.odin"
 recent_file: path: "src/base/base_io.c"
+recent_file: path: "src/main.c"
 recent_file: path: "src/base/base_strings.c"
 recent_file: path: "src/base/base_core.c"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"

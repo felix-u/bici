@@ -160,7 +160,7 @@ static void os_write(String string) {
         if (console_handle == INVALID_HANDLE_VALUE) { breakpoint; abort(); }
 
         u32 num_chars_written = 0;
-        bool ok = WriteConsole(console_handle, string.data, (u32)string.count, (LPDWORD)&num_chars_written, 0);
+        BOOL ok = WriteFile(console_handle, string.data, (u32)string.count, (LPDWORD)&num_chars_written, 0);
         if (!ok) { breakpoint; abort(); }
         if (num_chars_written != string.count) { breakpoint; abort(); }
 

@@ -1,18 +1,21 @@
 package main
 
 import "base:intrinsics"
-import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:slice"
 import "core:unicode"
 import "core:strconv"
 import "core:mem"
+import "core:log"
+import "core:fmt"
 
 main :: proc() {
+    context.logger = log.create_console_logger(opt = { .Level, .Short_File_Path, .Line, .Procedure })
+
     usage := "bici <compile|run|script> <file...>"
     if len(os.args) < 3 {
-        fmt.println("usage:", usage);
+        log.error("usage:", usage);
         os.exit(1)
     }
 
@@ -30,18 +33,17 @@ main :: proc() {
         usage = "script <file.asm>"
         command = .script
     } else {
-        fmt.printfln("error: no such command '%v'\n%v", command_string, usage)
+        log.errorf("no such command '%v'\n%v", command_string, usage)
         os.exit(1)
     }
     if len(os.args) != required_argument_count {
-        fmt.println("usage:", usage)
+        log.error("usage:", usage)
         os.exit(1)
     }
 
     input_filepath := os.args[2]
     input_bytes, _ := os.read_entire_file(input_filepath)
 
-    // TODO(felix): fixed buffer allocator?
     rom := slice.into_dynamic((&[0x10000]u8{})[:])
 
     should_compile := command == .compile || command == .script
@@ -72,14 +74,13 @@ main :: proc() {
         Input_File :: struct { name: string, bytes: []u8, tokens: [dynamic]Token }
         File_Id :: distinct u8
 
-        Label :: struct { token_id: Token_Id, address: Address, children: [dynamic]Label }
-        Label_Id :: distinct u32
+        Label :: struct { token_id: Token_Id, address: Address, children: map[string]Label }
         Label_Reference :: struct {
             token_id: Token_Id,
             destination: union { Address, Token_Id },
             width: u8,
             is_patch: bool,
-            parent_id: Label_Id,
+            parent: string,
         }
 
         Scoped_Reference :: struct { address: Address, token_id: Token_Id, is_relative: bool }
@@ -88,12 +89,15 @@ main :: proc() {
 
         Assembler_Context :: struct {
             files: [dynamic]Input_File,
-            global_labels: [dynamic]Label,
-            label_references: [dynamic]Label_Reference,
+            file_id: File_Id,
+            current_global_label: string,
+            global_labels: map[string]Label,
+            label_references: [dynamic]Label_Reference, // TODO(felix): map
             scoped_references: [dynamic]Scoped_Reference,
             insertion_mode: Insertion_Mode,
         }
         using assembler_context : Assembler_Context
+        context.user_ptr = &assembler_context
 
         append_elem(&files, (Input_File){ bytes = input_bytes, name = input_filepath })
 
@@ -101,22 +105,44 @@ main :: proc() {
         file_cursor_stack : [dynamic]File_Cursor
         append_elem(&file_cursor_stack, (File_Cursor){})
 
-        parse_error :: proc(assembler_context: ^Assembler_Context, file_id: File_Id, token_start_index: $T1, token_length: $T2) -> ! {
+        parse_error :: proc(start: $T, #any_int length: int = 1, override_file_id: File_Id = 0, exit := true) where T == Token || intrinsics.type_is_numeric(T) {
+            assembler_context : ^Assembler_Context = auto_cast context.user_ptr
+            file_id := assembler_context.file_id
+            if override_file_id != 0 do file_id = override_file_id
+
+            when T == Token {
+                start_index := start.start_index
+                length := start.length
+            } else {
+                start_index := start
+            }
+
             using file := assembler_context.files[file_id]
-            end := token_start_index + auto_cast token_length
-            lexeme := cast(string) bytes[token_start_index:end]
-            fmt.printfln("note: '%v' in file '%v'[%v..%v]", lexeme, name, token_start_index, end)
-            os.exit(1)
+            end := start_index + auto_cast length
+            lexeme := cast(string) bytes[start_index:end]
+
+            row := 1
+            column := 1
+            for c in bytes[:start_index] {
+                column += 1
+                if c == '\n' {
+                    row += 1
+                    column = 1
+                }
+            }
+
+            log.infof("'%v' in %v:%v:%v", lexeme, name, row, column)
+            if exit do os.exit(1)
         }
 
-        token_get_file :: proc(assembler_context: ^Assembler_Context, id: Token_Id) -> ^Input_File {
+        token_get_file :: proc(id: Token_Id) -> ^Input_File {
+            assembler_context := cast(^Assembler_Context) context.user_ptr
             return &assembler_context.files[id.file_id]
         }
 
-        token_get :: proc(assembler_context: ^Assembler_Context, id: Token_Id) -> ^Token {
-            file := token_get_file(assembler_context, id)^
-            // TODO(felix): why is this here? try removing
-            if id.index < 0 || id.index >= auto_cast len(file.tokens) {
+        token_get :: proc(id: Token_Id) -> ^Token {
+            file := token_get_file(id)^
+            if id.index >= auto_cast len(file.tokens) {
                 @static nil_token : Token
                 return &nil_token
             }
@@ -124,15 +150,15 @@ main :: proc() {
             return token
         }
 
-        token_lexeme :: proc(assembler_context: ^Assembler_Context, id: Token_Id) -> string {
-            token := token_get(assembler_context, id)^
-            file := token_get_file(assembler_context, id)
+        token_lexeme :: proc(id: Token_Id) -> string {
+            token := token_get(id)^
+            file := token_get_file(id)
             return auto_cast file.bytes[token.start_index:token.start_index + auto_cast token.length]
         }
 
         switch_file: for len(file_cursor_stack) > 0 {
             file_cursor := pop(&file_cursor_stack)
-            file_id := file_cursor.token_id.file_id
+            file_id = file_cursor.token_id.file_id
             file := &files[file_id]
             bytes := file.bytes
 
@@ -167,16 +193,17 @@ main :: proc() {
                     kind = .number
 
                     if cursor + 1 == len(bytes) || bytes[cursor + 1] != 'x' && bytes[cursor + 1] != 'b' {
-                        fmt.println("error: expected 'x' or 'b' after '0' to begin binary or hexadecimal literal")
-                        parse_error(&assembler_context, file_id, cursor + 1, 1)
+                        log.error("expected 'x' or 'b' after '0' to begin binary or hexadecimal literal")
+                        parse_error(cursor + 1)
                     }
                     base_character := bytes[cursor + 1]
+                    base = 2 if base_character == 'b' else 16
                     cursor += 2
                     start_index = cursor
 
                     if cursor == len(bytes) {
-                        fmt.printfln("error: expected digits following '0%c'", base_character)
-                        parse_error(&assembler_context, file_id, cursor - 2, 2)
+                        log.errorf("expected digits following '0%c'", base_character)
+                        parse_error(cursor - 2, 2)
                     }
 
                     for ; cursor < len(bytes); cursor += 1 {
@@ -184,16 +211,15 @@ main :: proc() {
                         if base_character == 'x' && is_hexadecimal(c) do continue
                         if base_character == 'b' && (c == '0' || c == '1') do continue
                         if unicode.is_white_space(cast(rune) c) do break
-                        fmt.println("error: expected digit of base", base_character)
-                        parse_error(&assembler_context, file_id, cursor, 1)
+                        log.error("expected digit of base", base)
+                        parse_error(cursor)
                     }
 
-                    base = 2 if base_character == 'b' else 16
                     number_string := bytes[start_index:cursor]
                     value_unbounded, _ := strconv.parse_uint(auto_cast number_string, auto_cast base)
                     if value_unbounded > 0x10000 {
-                        fmt.printfln("error: 0d%v is too large to fit in 16 bits", value_unbounded)
-                        parse_error(&assembler_context, file_id, start_index, auto_cast (cursor - start_index))
+                        log.errorf("0d%v is too large to fit in 16 bits", value_unbounded)
+                        parse_error(start_index, auto_cast (cursor - start_index))
                     }
                     value = auto_cast value_unbounded
                 case ';':
@@ -212,14 +238,14 @@ main :: proc() {
                         c := bytes[cursor]
                         if c == '"' do break
                         if c == '\n' {
-                            fmt.println("error: expected '\"' to close string before newline")
-                            parse_error(&assembler_context, file_id, start_index, auto_cast (cursor - start_index))
+                            log.error("expected '\"' to close string before newline")
+                            parse_error(start_index, auto_cast (cursor - start_index))
                         }
                     }
 
                     if cursor == len(bytes) {
-                        fmt.println("error: expected '\"' to close string before end of file")
-                        parse_error(&assembler_context, file_id, start_index, auto_cast (cursor - start_index))
+                        log.error("expected '\"' to close string before end of file")
+                        parse_error(start_index, auto_cast (cursor - start_index))
                     }
 
                     assert(bytes[cursor] == '"')
@@ -233,19 +259,19 @@ main :: proc() {
                         c := bytes[cursor]
                         if unicode.is_white_space(cast(rune) c) do break
                         if c != '2' && c != 'k' && c != 'r' {
-                            fmt.println("error: only characters '2', 'k', and 'r' are valid op modes")
-                            parse_error(&assembler_context, file_id, cursor, 1)
+                            log.error("only characters '2', 'k', and 'r' are valid op modes")
+                            parse_error(cursor)
                         }
                     }
 
                     length := cursor - start_index
                     if length == 0 || length > 3 {
-                        fmt.println("error: a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has", length)
-                        parse_error(&assembler_context, file_id, start_index, auto_cast length)
+                        log.error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has", length)
+                        parse_error(start_index, auto_cast length)
                     }
                 case:
-                    fmt.printfln("error: invalid syntax '%c'", bytes[cursor])
-                    parse_error(&assembler_context, file_id, cursor, 1)
+                    log.errorf("invalid syntax '%c'", bytes[cursor])
+                    parse_error(cursor)
                 }
 
                 length := cursor - start_index
@@ -262,17 +288,15 @@ main :: proc() {
             }
 
             parsing_relative_label := false
-            _ = parsing_relative_label // TODO(felix)
             for file_token_id := file_cursor.token_id; file_token_id.index < auto_cast len(file.tokens); file_token_id.index += 1 {
-                token := token_get(&assembler_context, file_token_id)^
-                token_string := token_lexeme(&assembler_context, file_token_id)
-                _ = token_string // TODO(felix)
+                token := token_get(file_token_id)^
+                token_string := token_lexeme(file_token_id)
 
                 if insertion_mode.is_active do #partial switch token.kind {
                 case .symbol, .right_square_bracket, .dollar, .slash, .number, .string: {}
                 case:
-                    fmt.println("error: insertion mode only supports addresses (e.g. labels) and numeric literals")
-                    parse_error(&assembler_context, file_id, token.start_index, token.length)
+                    log.error("insertion mode only supports addresses (e.g. labels) and numeric literals")
+                    parse_error(token)
                 }
 
                 token_id_shift :: proc(token_id: Token_Id, #any_int shift: int) -> Token_Id {
@@ -282,10 +306,8 @@ main :: proc() {
                 }
 
                 next_id := token_id_shift(file_token_id, 1)
-                next := token_get(&assembler_context, next_id)^
-                _ = next // TODO(felix)
-                next_string := token_lexeme(&assembler_context, next_id)
-                _ = next_string // TODO(felix)
+                next := token_get(next_id)^
+                next_string := token_lexeme(next_id)
 
                 #partial switch token.kind {
                 case .left_curly_bracket:
@@ -293,22 +315,22 @@ main :: proc() {
                     non_zero_resize(&rom, len(rom) + 2)
                 case .right_curly_bracket:
                     if len(scoped_references) == 0 {
-                        fmt.println("error: '}' has no matching '{'")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("'}' has no matching '{'")
+                        parse_error(token)
                     }
 
                     reference := pop(&scoped_references)
                     if reference.is_relative {
-                        fmt.println("error: expected to resolve absolute reference (from '{') but found unresolved relative reference")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("expected to resolve absolute reference (from '{') but found unresolved relative reference")
+                        parse_error(token)
                     }
 
                     as_u16_bytes : []u8 = mem.any_to_bytes(intrinsics.byte_swap(reference.address));
                     append(&rom, ..as_u16_bytes)
                 case .left_square_bracket:
                     if insertion_mode.is_active {
-                        fmt.println("error: cannot enter insertion mode while already in insertion mode")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("cannot enter insertion mode while already in insertion mode")
+                        parse_error(token)
                     }
                     insertion_mode.is_active = true
 
@@ -321,21 +343,21 @@ main :: proc() {
                     }
                 case .right_square_bracket:
                     if !insertion_mode.is_active {
-                        fmt.println("']' has no matching '['")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("']' has no matching '['")
+                        parse_error(token)
                     }
 
                     if insertion_mode.has_relative_reference {
                         reference := pop(&scoped_references)
                         if !reference.is_relative {
-                            fmt.println("error: expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?")
-                            parse_error(&assembler_context, file_id, token.start_index, token.length)
+                            log.error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?")
+                            parse_error(token)
                         }
 
                         relative_difference := len(rom) - auto_cast reference.address - 1
                         if relative_difference > 255 {
-                            fmt.printfln("error: relative difference from '[$' is %v bytes, but the maximum is 255", relative_difference)
-                            parse_error(&assembler_context, file_id, token.start_index, token.length)
+                            log.errorf("relative difference from '[$' is %v bytes, but the maximum is 255", relative_difference)
+                            parse_error(token)
                         }
 
                         rom[reference.address] = cast(u8) relative_difference
@@ -344,51 +366,58 @@ main :: proc() {
                     insertion_mode = {}
                 case .slash:
                     if next.kind != .symbol {
-                        fmt.println("error: expected relative label following '/'")
-                        parse_error(&assembler_context, file_id, next.start_index, next.length)
+                        log.error("expected relative label following '/'")
+                        parse_error(next)
                     }
                     parsing_relative_label = true
                 case .symbol:
                     if parsing_relative_label && next.kind != .colon {
-                        fmt.println("error: expected ':' ending relative label definition")
-                        parse_error(&assembler_context, file_id, next.start_index, next.length)
+                        log.error("expected ':' ending relative label definition")
+                        parse_error(next)
                     }
 
                     is_label := next.kind == .colon
                     if is_label {
-                        for label in global_labels {
-                            label_string := token_lexeme(&assembler_context, label.token_id)
-                            if strings.compare(label_string, token_string) == 0 {
-                                fmt.eprintfln("error: redefinition of label '%v'", token_string)
-                                parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        if token_string in global_labels {
+                            when ODIN_DEBUG {
+                                for label_string in global_labels {
+                                    _ = label_string
+                                    label := global_labels[label_string]
+                                    _ = label
+                                }
                             }
+                            log.errorf("redefinition of label '%v'", token_string)
+                            parse_error(token, exit = false)
+                            original_definition := global_labels[token_string]
+                            log.info("previous definition is here:")
+                            parse_error(token_get(original_definition.token_id)^)
                         }
 
                         new_label := Label{ token_id = file_token_id, address = auto_cast len(rom) }
-                        labels : ^[dynamic]Label
                         if parsing_relative_label {
-                            parent := slice.last_ptr(global_labels[:])
-                            parent_labels := &parent.children
-                            labels = parent_labels
-
-                            for label in parent_labels {
-                                label_string := token_lexeme(&assembler_context, label.token_id)
-                                if strings.compare(label_string, token_string) == 0 {
-                                    fmt.eprintfln("error: redefinition of label '%v'", token_string)
-                                    parse_error(&assembler_context, file_id, token.start_index, token.length)
-                                }
+                            parent_labels := &global_labels
+                            if len(current_global_label) != 0 {
+                                label := &global_labels[current_global_label]
+                                parent_labels = &label.children
                             }
 
-                            parsing_relative_label = false
-                        } else do labels = &global_labels
+                            if token_string in parent_labels {
+                                log.errorf("redefinition of label '%v'", token_string)
+                                parse_error(token)
+                            }
 
-                        append(labels, new_label)
+                            parent_labels[token_string] = new_label
+
+                            parsing_relative_label = false
+                        } else {
+                            current_global_label = token_string
+                            global_labels[token_string] = new_label
+                        }
 
                         file_token_id = token_id_shift(file_token_id, 1)
                         break
                     }
 
-                    // TODO(felix): map
                     instruction : Vm_Instruction
                     is_opcode := false
                     for opcode in Vm_Opcode {
@@ -415,13 +444,12 @@ main :: proc() {
                         append(&rom, byte_from_instruction(instruction))
 
                         if instruction_takes_immediate[instruction.opcode] {
-                            next = token_get(&assembler_context, token_id_shift(file_token_id, 1))^
-                            // TODO(felix): consider removing #partial from this and other switches
+                            next = token_get(token_id_shift(file_token_id, 1))^
                             #partial switch next.kind {
                             case .symbol, .number, .left_curly_bracket: {}
                             case:
-                                fmt.printfln("instruction '%v' takes an immediate, but no label or numeric literal is given", vm_opcode_name(auto_cast instruction.opcode));
-                                parse_error(&assembler_context, file_id, next.start_index, next.length)
+                                log.errorf("instruction '%v' takes an immediate, but no label or numeric literal is given", vm_opcode_name(auto_cast instruction.opcode));
+                                parse_error(next)
                             }
 
                             if next.kind == .left_curly_bracket do continue
@@ -434,20 +462,20 @@ main :: proc() {
                                     token_id = token_id_shift(file_token_id, 1),
                                     destination = cast(Address) len(rom),
                                     width = width,
-                                    parent_id = auto_cast len(global_labels),
+                                    parent = current_global_label,
                                 }
                                 append(&label_references, reference)
 
                                 non_zero_resize(&rom, len(rom) + auto_cast reference.width)
                             } else {
                                 assert(next.kind == .number)
-                                next_string = token_lexeme(&assembler_context, token_id_shift(file_token_id, 1))
+                                next_string = token_lexeme(token_id_shift(file_token_id, 1))
                                 value := next.value
 
                                 if width == 1 {
                                     if value > 255 {
-                                        fmt.printfln("error: attempt to supply 16-bit value to instruction taking 8-bit immediate (%v is greater than 255); did you mean to use mode '.2'?", value)
-                                        parse_error(&assembler_context, file_id, next.start_index, next.length)
+                                        log.errorf("attempt to supply 16-bit value to instruction taking 8-bit immediate (%v is greater than 255); did you mean to use mode '.2'?", value)
+                                        parse_error(next)
                                     }
                                     append(&rom, cast(u8) value)
                                 } else {
@@ -464,8 +492,8 @@ main :: proc() {
 
                     if strings.compare(token_string, "org") == 0 || strings.compare(token_string, "rorg") == 0 {
                         if next.kind != .number {
-                            fmt.printfln("error: expected numeric literal (byte offset) after directive '%v'", token_string)
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.errorf("expected numeric literal (byte offset) after directive '%v'", token_string)
+                            parse_error(next)
                         }
 
                         value := next.value
@@ -473,8 +501,8 @@ main :: proc() {
                         if is_relative do value += auto_cast len(rom)
 
                         if auto_cast value < len(rom) {
-                            fmt.printfln("error: new offset %v is less than current offset %v", value, len(rom))
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.errorf("new offset %v is less than current offset %v", value, len(rom))
+                            parse_error(next)
                         }
 
                         non_zero_resize(&rom, value)
@@ -483,28 +511,28 @@ main :: proc() {
                         break
                     } else if strings.compare(token_string, "patch") == 0 {
                         if next.kind != .symbol {
-                            fmt.println("error: expected label to indicate destination offset as first argument to directive 'patch'")
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.error("expected label to indicate destination offset as first argument to directive 'patch'")
+                            parse_error(next)
                         }
 
                         file_token_id = token_id_shift(file_token_id, 1)
                         reference := Label_Reference{
                             is_patch = true,
                             destination = file_token_id,
-                            parent_id = auto_cast len(global_labels) - 1
+                            parent = current_global_label,
                         }
 
-                        next = token_get(&assembler_context, token_id_shift(file_token_id, 1))^
+                        next = token_get(token_id_shift(file_token_id, 1))^
                         if next.kind != .comma {
-                            fmt.println("expected ',' between first and second arguments to directive 'patch'")
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.error("expected ',' between first and second arguments to directive 'patch'")
+                            parse_error(next)
                         }
 
                         file_token_id = token_id_shift(file_token_id, 1)
-                        next = token_get(&assembler_context, token_id_shift(file_token_id, 1))^
+                        next = token_get(token_id_shift(file_token_id, 1))^
                         if next.kind != .symbol && next.kind != .number {
-                            fmt.println("expected label or numeric literal to indicate address as second argument to directive 'patch'")
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.error("expected label or numeric literal to indicate address as second argument to directive 'patch'")
+                            parse_error(next)
                         }
 
                         file_token_id = token_id_shift(file_token_id, 1)
@@ -512,19 +540,19 @@ main :: proc() {
                         append(&label_references, reference)
                     } else if strings.compare(token_string, "include") == 0 {
                         if next.kind != .string {
-                            fmt.println("error: expected string following directive 'include'")
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.error("expected string following directive 'include'")
+                            parse_error(next)
                         }
 
                         include_filepath := next_string
                         if strings.compare(include_filepath, file.name) == 0 {
-                            fmt.printfln("error: cyclic inclusion of file '%v'", file.name)
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.errorf("cyclic inclusion of file '%v'", file.name)
+                            parse_error(next)
                         }
                         include_bytes, ok := os.read_entire_file(include_filepath)
                         if !ok {
-                            fmt.printfln("error: unable to read file '%v'", include_filepath)
-                            parse_error(&assembler_context, file_id, next.start_index, next.length)
+                            log.errorf("unable to read file '%v'", include_filepath)
+                            parse_error(next)
                         }
 
                         new_file := Input_File{ bytes = include_bytes, name = include_filepath }
@@ -538,13 +566,18 @@ main :: proc() {
                         continue switch_file
                     }
 
-                    reference := Label_Reference{ token_id = file_token_id, destination = cast(Address) len(rom), width = 2, parent_id = auto_cast len(global_labels) - 1 }
+                    reference := Label_Reference{
+                        token_id = file_token_id,
+                        destination = cast(Address) len(rom),
+                        width = 2,
+                        parent = current_global_label,
+                    }
                     append(&label_references, reference)
                     non_zero_resize(&rom, len(rom) + auto_cast reference.width)
                 case .number:
                     if !insertion_mode.is_active {
-                        fmt.println("error: standalone number literals are also supported in insertion mode (e.g. in [ ... ])")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("standalone number literals are only supported in insertion mode (e.g. in [ ... ])")
+                        parse_error(token)
                     }
 
                     value := token.value
@@ -566,37 +599,36 @@ main :: proc() {
                     panic("unreachable")
                 case .string:
                     if !insertion_mode.is_active {
-                        fmt.eprintln("error: strings can only be used in insertion mode (e.g. inside [ ... ])")
-                        parse_error(&assembler_context, file_id, token.start_index, token.length)
+                        log.error("strings can only be used in insertion mode (e.g. inside [ ... ])")
+                        parse_error(token)
                     }
 
                     append(&rom, token_string)
                 case:
-                    fmt.println("error: invalid syntax")
-                    parse_error(&assembler_context, file_id, token.start_index, token.length)
+                    log.error("invalid syntax")
+                    parse_error(token)
                 }
             }
 
             if len(scoped_references) != 0 {
                 reference := scoped_references[0]
-                token := token_get(&assembler_context, reference.token_id)
-                fmt.eprintln("anonymous reference ('{') without matching '}'")
-                parse_error(&assembler_context, file_id, token.start_index, token.length)
+                token := token_get(reference.token_id)
+                log.error("anonymous reference ('{') without matching '}'")
+                parse_error(token^, override_file_id = reference.token_id.file_id)
             }
         }
 
         for reference in label_references {
             source_label, destination_label : ^Label
             to_match := [?]^^Label{ &source_label, &destination_label }
-            // TODO(felix): probably union type assertion is wrong
             match_count := 2 if reference.is_patch else 1
             match_against := [2]Token_Id{ reference.token_id, {} }
             if match_count == 2 do match_against[1] = reference.destination.(Token_Id)
 
             for match, i in to_match[:match_count] {
                 token_id := match_against[i]
-                token := token_get(&assembler_context, token_id)
-                reference_string := token_lexeme(&assembler_context, token_id)
+                token := token_get(token_id)
+                reference_string := token_lexeme(token_id)
 
                 if token.kind == .number {
                     @static dummy : Label
@@ -607,26 +639,29 @@ main :: proc() {
                 assert(token.kind == .symbol)
 
                 resolving: {
-                    parent := global_labels[reference.parent_id]
-                    for _, index in parent.children {
-                        label := &parent.children[index]
-                        label_string := token_lexeme(&assembler_context, label.token_id)
-                        if strings.compare(reference_string, label_string) != 0 do continue
-                        match^ = label
+                    parent := global_labels[reference.parent]
+
+                    if reference_string in parent.children {
+                        match^ = &parent.children[reference_string]
                         break resolving
                     }
 
-                    for _, index in global_labels {
-                        label := &global_labels[index]
-                        label_string := token_lexeme(&assembler_context, label.token_id)
-                        if strings.compare(reference_string, label_string) != 0 do continue
-                        match^ = label
+                    if reference_string in global_labels {
+                        match^ = &global_labels[reference_string]
                         break resolving
                     }
                 }
                 if match^ == nil {
-                    fmt.eprintfln("error: no such label '%v'", reference_string)
-                    parse_error(&assembler_context, token_id.file_id, token.start_index, token.length)
+                    when ODIN_DEBUG {
+                        parent := global_labels[reference.parent]
+                        for label_string in parent.children {
+                            _ = label_string
+                            label := parent.children[label_string]
+                            _ = label
+                        }
+                    }
+                    log.errorf("no such label '%v'", reference_string)
+                    parse_error(token^, override_file_id = token_id.file_id)
                 }
             }
 
@@ -645,7 +680,6 @@ main :: proc() {
 
         if command == .compile {
             output_path := os.args[3]
-            non_zero_resize(&rom, 0x10000)
             ok := os.write_entire_file(output_path, rom[:], truncate = false)
             assert(ok)
         }
@@ -653,9 +687,47 @@ main :: proc() {
 
     should_run := command == .script || command == .run
     if should_run {
+        vm : Vm
+        copy(vm.memory[:], rom[:])
+
+        print_memory := true
+        if print_memory {
+            fmt.println("MEMORY ===")
+            for token_id in 0x100..<clamp(len(rom), 0, 0x200) {
+                byte := vm.memory[token_id]
+
+                mode_string := ""
+                if !vm_opcode_is_special(auto_cast byte) do switch (byte & 0xe0) >> 5 {
+                case 0x1: mode_string = "2"
+                case 0x2: mode_string = "r"
+                case 0x3: mode_string = "r2"
+                case 0x4: mode_string = "k"
+                case 0x5: mode_string = "k2"
+                case 0x6: mode_string = "kr"
+                case 0x7: mode_string = "kr2"
+                }
+
+                fmt.printfln("[%03x]\t'%c'\t#%02x\t%v;%v", token_id, byte, byte, vm_opcode_name(byte), mode_string)
+            }
+            fmt.println("\nRUN ===")
+        }
+
         unimplemented()
     }
 }
+
+Vm :: struct {
+    memory: [0x10000]u8,
+    stacks: [Vm_Stack_Id]Vm_Stack,
+    active_stack: Vm_Stack_Id,
+    program_counter: u16,
+    current_mode: Vm_Instruction_Mode,
+    // TODO(felix): render context
+
+    file_bytes: ^u8,
+}
+
+Vm_Stack :: struct { memory: [0x100]u8, data: u8 }
 
 Vm_Opcode :: enum u8 {
     break_                      = 0x00, /* NO MODE */

@@ -1,6 +1,9 @@
 // raddbg 0.9.20 project file
 
 recent_file: path: "src/main.odin"
+recent_file: path: "../../../../../appfolders/odin/base/runtime/entry_windows.odin"
+recent_file: path: "../../../../../appfolders/odin/base/runtime/core.odin"
+recent_file: path: "../../../../../appfolders/odin/base/runtime/core_builtin.odin"
 recent_file: path: "src/base/base_io.c"
 recent_file: path: "src/main.c"
 recent_file: path: "src/base/base_strings.c"
@@ -20,12 +23,27 @@ recent_file: path: "bici.rdi/src/main.c"
 target:
 {
   executable: "build/bici.exe"
-  working_directory: ""
+  working_directory: "../bici"
   enabled: 1
-  arguments: "script os.asm"
+  arguments: "compile os.asm os.rom"
 }
 type_view:
 {
   type: Slice_String
   expr: "$.slice()"
+}
+breakpoint:
+{
+  source_location: "src/main.odin:662:1"
+  hit_count: 0
+}
+breakpoint:
+{
+  source_location: "src/main.odin:659:1"
+  hit_count: 0
+}
+breakpoint:
+{
+  source_location: "src/main.odin:655:1"
+  hit_count: 0
 }

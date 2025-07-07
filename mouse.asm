@@ -221,5 +221,4 @@ update:
         0b00000000
     ]
 
-EOF:
-org 0xffff
+include "footer.asm"

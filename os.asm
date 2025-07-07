@@ -211,5 +211,4 @@ get_new_program_memory_location: ; (_ -> u16)
 program_1:
     program_1_memory:
 
-EOF:
-org 0xffff
+include "footer.asm"

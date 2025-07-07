@@ -55,5 +55,4 @@ smiley: [
     0x8084 0x8185 0x8285 0x8384
 ]
 
-EOF:
-org 0xffff
+include "footer.asm"

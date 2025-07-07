@@ -419,14 +419,9 @@ main :: proc() {
                     }
 
                     instruction : Vm_Instruction
-                    is_opcode := false
-                    for opcode in Vm_Opcode {
-                        if strings.compare(token_string, vm_opcode_name_table[opcode]) == 0 {
-                            instruction.opcode = opcode
-                            is_opcode = true
-                            break
-                        }
-                    }
+
+                    index, is_opcode := slice.linear_search(slice.enumerated_array(&vm_opcode_name_table), token_string)
+                    if is_opcode do instruction.opcode = auto_cast index
 
                     if is_opcode {
                         explicit_mode := next.kind == .opmode
@@ -446,10 +441,10 @@ main :: proc() {
                         if instruction_takes_immediate[instruction.opcode] {
                             next = token_get(token_id_shift(file_token_id, 1))^
                             #partial switch next.kind {
-                            case .symbol, .number, .left_curly_bracket: {}
-                            case:
-                                log.errorf("instruction '%v' takes an immediate, but no label or numeric literal is given", vm_opcode_name(auto_cast instruction.opcode));
-                                parse_error(next)
+                                case .symbol, .number, .left_curly_bracket: {}
+                                case:
+                                    log.errorf("instruction '%v' takes an immediate, but no label or numeric literal is given", vm_opcode_name(auto_cast instruction.opcode));
+                                    parse_error(next)
                             }
 
                             if next.kind == .left_curly_bracket do continue

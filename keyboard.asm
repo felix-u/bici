@@ -169,5 +169,4 @@ sprite: [
     0b00111100
 ]
 
-EOF:
-org 0xffff
+include "footer.asm"

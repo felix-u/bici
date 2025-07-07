@@ -1,13 +1,15 @@
 // raddbg 0.9.20 project file
 
+recent_file: path: "src/main.c"
+recent_file: path: "src/base/base_arena.c"
+recent_file: path: "src/base/base_io.c"
+recent_file: path: "src/base/base_core.c"
 recent_file: path: "src/main.odin"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/entry_windows.odin"
+recent_file: path: "../../../../../src/llvm_package_18.1.8/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/core.odin"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/core_builtin.odin"
-recent_file: path: "src/base/base_io.c"
-recent_file: path: "src/main.c"
 recent_file: path: "src/base/base_strings.c"
-recent_file: path: "src/base/base_core.c"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"
 recent_file: path: "../../../appfolders/raddbg/minkernel/crts/ucrt/inc/corecrt_internal"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/eh/frame.cpp"
@@ -25,7 +27,7 @@ target:
   executable: "build/bici.exe"
   working_directory: "../bici"
   enabled: 1
-  arguments: "compile os.asm os.rom"
+  arguments: "script os.asm"
 }
 type_view:
 {

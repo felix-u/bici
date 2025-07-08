@@ -67,6 +67,7 @@ uniondef(M4) {
     #define abs_i64(x) _abs64(x)
     #define abs_f64(x) fabs(x)
     // NOTE(felix): because I got `warning C4163: 'fabsf': not available as an intrinsic function`
+    // NOTE(felix): corecrt_math.h defines fabsf as an inline function casting fabs to f32. Might be good to benchmark that approach versus what I'm doing here
     static force_inline f32 abs_f32(f32 x) { return x < 0 ? -x : x; }
 #elif COMPILER_CLANG || COMPILER_GCC
     #define abs_i32(x) __builtin_abs(x)

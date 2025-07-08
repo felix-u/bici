@@ -36,8 +36,8 @@
 #elif OS_WINDOWS
     #define WIN32_LEAN_AND_MEAN
     #define VC_EXTRALEAN
-    #define abort() ExitProcess(1) // TODO(felix): remove this
-    #define exit(code) ExitProcess(code)
+    #define os_abort() ExitProcess(1)
+    #define os_exit(code) ExitProcess(code)
     #if !BASE_GRAPHICS
         #define NOGDI
         #define NOUSER
@@ -224,7 +224,7 @@ define_container_types(String_Builder);
 
 #define panic(...) {\
     log_internal_with_location(__FILE__, __LINE__, (char *)__func__, "panic: " __VA_ARGS__);\
-    breakpoint; abort();\
+    breakpoint; os_abort();\
 }
 
 #define statement_macro(...) do { __VA_ARGS__ } while (0)

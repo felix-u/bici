@@ -185,15 +185,15 @@ static void os_write(String string) {
         #if WINDOWS_SUBSYSTEM_WINDOWS
             discard(string);
         #else
-            if (string.count > UINT32_MAX) { breakpoint; abort(); }
+            if (string.count > UINT32_MAX) { breakpoint; os_abort(); }
 
             HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-            if (console_handle == INVALID_HANDLE_VALUE) { breakpoint; abort(); }
+            if (console_handle == INVALID_HANDLE_VALUE) { breakpoint; os_abort(); }
 
             u32 num_chars_written = 0;
             BOOL ok = WriteFile(console_handle, string.data, (u32)string.count, (LPDWORD)&num_chars_written, 0);
-            if (!ok) { breakpoint; abort(); }
-            if (num_chars_written != string.count) { breakpoint; abort(); }
+            if (!ok) { breakpoint; os_abort(); }
+            if (num_chars_written != string.count) { breakpoint; os_abort(); }
         #endif
 
     #elif OS_LINUX || OS_MACOS || OS_EMSCRIPTEN

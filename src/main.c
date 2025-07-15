@@ -3,43 +3,43 @@
 #define vm_screen_initial_width 640
 #define vm_screen_initial_height 360
 
-#define vm_for_opcode(action)\
+#define VM_OPCODE_TABLE \
     /*     name,   byte, is_immediate */\
-    action(break,  0x00, 0)/* NO MODE */\
-    action(push,   0x01, 1)/* NO k MODE */\
-    action(drop,   0x02, 0)\
-    action(nip,    0x03, 0)\
-    action(swap,   0x04, 0)\
-    action(rot,    0x05, 0)\
-    action(dup,    0x06, 0)\
-    action(over,   0x07, 0)\
-    action(eq,     0x08, 0)\
-    action(neq,    0x09, 0)\
-    action(gt,     0x0a, 0)\
-    action(lt,     0x0b, 0)\
-    action(add,    0x0c, 0)\
-    action(sub,    0x0d, 0)\
-    action(mul,    0x0e, 0)\
-    action(div,    0x0f, 0)\
-    action(inc,    0x10, 0)\
-    action(not,    0x11, 0)\
-    action(and,    0x12, 0)\
-    action(or,     0x13, 0)\
-    action(xor,    0x14, 0)\
-    action(shift,  0x15, 0)\
-    action(jmp,    0x16, 0)\
-    action(jme,    0x17, 0)\
-    action(jst,    0x18, 0)\
-    action(jne,    0x19, 0)\
-    action(jni,    0x1a, 1)\
-    action(stash,  0x1b, 0)\
-    action(load,   0x1c, 0)\
-    action(store,  0x1d, 0)\
-    action(read,   0x1e, 0)\
-    action(write,  0x1f, 0)\
-    action(jmi,    0x80, 1)/* NO MODE (== push;k)  */\
-    action(jei,    0xa0, 1)/* NO MODE (== push;k2) */\
-    action(jsi,    0xc0, 1)/* NO MODE (== push;kr) */\
+    X(break,  0x00, 0)/* NO MODE */\
+    X(push,   0x01, 1)/* NO k MODE */\
+    X(drop,   0x02, 0)\
+    X(nip,    0x03, 0)\
+    X(swap,   0x04, 0)\
+    X(rot,    0x05, 0)\
+    X(dup,    0x06, 0)\
+    X(over,   0x07, 0)\
+    X(eq,     0x08, 0)\
+    X(neq,    0x09, 0)\
+    X(gt,     0x0a, 0)\
+    X(lt,     0x0b, 0)\
+    X(add,    0x0c, 0)\
+    X(sub,    0x0d, 0)\
+    X(mul,    0x0e, 0)\
+    X(div,    0x0f, 0)\
+    X(inc,    0x10, 0)\
+    X(not,    0x11, 0)\
+    X(and,    0x12, 0)\
+    X(or,     0x13, 0)\
+    X(xor,    0x14, 0)\
+    X(shift,  0x15, 0)\
+    X(jmp,    0x16, 0)\
+    X(jme,    0x17, 0)\
+    X(jst,    0x18, 0)\
+    X(jne,    0x19, 0)\
+    X(jni,    0x1a, 1)\
+    X(stash,  0x1b, 0)\
+    X(load,   0x1c, 0)\
+    X(store,  0x1d, 0)\
+    X(read,   0x1e, 0)\
+    X(write,  0x1f, 0)\
+    X(jmi,    0x80, 1)/* NO MODE (== push;k)  */\
+    X(jei,    0xa0, 1)/* NO MODE (== push;k2) */\
+    X(jsi,    0xc0, 1)/* NO MODE (== push;kr) */\
     /* UNUSED      0xe0, 0)   NO MODE (== push;kr2)*/\
 
 enumdef(Vm_Device, u8) {
@@ -99,14 +99,10 @@ enumdef(Vm_File_Action, u8) {
 };
 
 enumdef(Vm_Opcode, u8) {
-    #define vm_opcode_def_enum(name, val, ...) vm_opcode_##name = val,
-    vm_for_opcode(vm_opcode_def_enum)
+    #define X(name, val, ...) vm_opcode_##name = val,
+    VM_OPCODE_TABLE
+    #undef X
     vm_opcode_max_value_plus_one
-};
-
-const char *vm_opcode_name_table[vm_opcode_max_value_plus_one] = {
-    #define vm_opcode_set_name(name, val, ...) [val] = #name,
-    vm_for_opcode(vm_opcode_set_name)
 };
 
 static bool vm_opcode_is_special(u8 instruction) {
@@ -117,27 +113,34 @@ static bool vm_opcode_is_special(u8 instruction) {
 }
 
 static const char *vm_opcode_name(u8 instruction) {
+    static const char *vm_opcode_name_table[vm_opcode_max_value_plus_one] = {
+        #define X(name, val, ...) [val] = #name,
+        VM_OPCODE_TABLE
+        #undef X
+    };
     return vm_opcode_name_table[vm_opcode_is_special(instruction) ? instruction : (instruction & 0x1f)];
 }
 
-structdef(Vm_Stack) { u8 memory[0x100], data; };
-// TODO(felix): set stack_return to 0x40 and avoid shifting later
-enumdef(Vm_Stack_Id, u8) { stack_param = 0, stack_return = 1 };
-// TODO(felix): replace with numeric byte width 1, 2
-enumdef(Vm_Opcode_Size, u8)  { vm_opcode_size_byte = 0, vm_opcode_size_short = 1 };
-// TODO(felix): set keep to 0x20 and avoid shifting later
-structdef(Vm_Instruction_Mode) { u8 keep; Vm_Stack_Id stack; Vm_Opcode_Size size; };
+enumdef(Vm_Mode, u8) {
+    VM_MODE_SHORT = 1 << 5,
+    VM_MODE_RETURN_STACK = 1 << 6,
+    VM_MODE_KEEP = 1 << 7,
+    VM_MODE_MASK = VM_MODE_SHORT | VM_MODE_RETURN_STACK | VM_MODE_KEEP,
+};
+#define VM_OPCODE_MASK (~(VM_MODE_MASK))
 
-structdef(Vm_Instruction) { Vm_Opcode opcode; Vm_Instruction_Mode mode; };
+structdef(Vm_Stack) { u8 memory[0x100], data; };
+
+structdef(Vm_Instruction) { u8 mode; u8 opcode; };
 
 structdef(Vm) {
     Arena *arena;
 
     u8 memory[0x10000];
     Vm_Stack stacks[2];
-    Vm_Stack_Id active_stack;
+    u8 active_stack;
     u16 program_counter;
-    Vm_Instruction_Mode current_mode;
+    u8 current_mode;
     Gfx_Render_Context gfx;
 
     u8 *file_bytes;
@@ -163,13 +166,13 @@ static force_inline void set16(u8 *address, u16 value) {
 
 static u8   vm_get8(Vm *vm, u8 i_back) { return *(vm_stack + (u8)(vm_sp - i_back)); }
 static void vm_push8(Vm *vm, u8 byte) { vm_s(vm_sp) = byte; vm_sp += 1; }
-static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!vm->current_mode.keep) vm_sp -= 1; return val; }
+static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!(vm->current_mode & VM_MODE_KEEP)) vm_sp -= 1; return val; }
 static u8   vm_load8(Vm *vm, u16 addr) { return vm_mem(addr); }
 static void vm_store8(Vm *vm, u16 addr, u8 val) { vm_mem(addr) = val; }
 
 static u16  vm_get16(Vm *vm, u8 i_back) { return (u16)vm_s(vm_sp - 2 * i_back + 1) | (u16)(vm_s(vm_sp - 2 * i_back) << 8); }
 static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm, (u8)byte2); }
-static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!vm->current_mode.keep) vm_sp -= 2; return val; }
+static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!(vm->current_mode & VM_MODE_KEEP)) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
 
@@ -191,15 +194,11 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
         add = 1;
         u8 byte = vm_mem(vm->program_counter);
 
-        Vm_Instruction instruction = { .opcode = byte & 0x1f, .mode = {
-            .keep =  (byte & 0x80) >> 7,
-            .stack = (byte & 0x40) >> 6,
-            .size =  (byte & 0x20) >> 5,
-        } };
+        Vm_Instruction instruction = { .opcode = byte & 0x1f, .mode = byte & VM_MODE_MASK };
 
         vm->current_mode = instruction.mode;
 
-        vm->active_stack = instruction.mode.stack;
+        vm->active_stack = instruction.mode & VM_MODE_RETURN_STACK;
 
         switch (byte) {
             case vm_opcode_break: return;
@@ -207,9 +206,9 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
             case vm_opcode_jei: if ( vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jni: if (!vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jsi: {
-                vm->active_stack = stack_return;
+                vm->active_stack = VM_MODE_RETURN_STACK;
                 vm_push16(vm, vm->program_counter + 3);
-                vm->active_stack = stack_param;
+                vm->active_stack = 0;
                 vm->program_counter = vm_load16(vm, vm->program_counter + 1);
                 add = 0;
                 continue;
@@ -217,10 +216,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
             default: break;
         }
 
-        switch (instruction.mode.size) {
-            case vm_opcode_size_byte:
-                switch (instruction.opcode) {
-                /* TODO(felix): for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */
+        switch (instruction.mode & VM_MODE_SHORT) {
+            case 0: switch (instruction.opcode) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
                 case vm_opcode_push:   vm_push8(vm, vm_load8(vm, vm->program_counter + 1)); add = 1 + 1; break;
@@ -228,8 +225,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 case vm_opcode_nip:    { u8 c = vm_pop8(vm); vm_pop8(vm); u8 a = vm_pop8(vm); vm_push8(vm, a); vm_push8(vm, c); } break;
                 case vm_opcode_swap:   { u8 c = vm_pop8(vm), b = vm_pop8(vm); vm_push8(vm, c); vm_push8(vm, b); } break;
                 case vm_opcode_rot:    { u8 c = vm_pop8(vm), b = vm_pop8(vm), a = vm_pop8(vm); vm_push8(vm, b); vm_push8(vm, c); vm_push8(vm, a); } break;
-                case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push8(vm, vm_get8(vm, 1)); break;
-                case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push8(vm, vm_get8(vm, 2)); break;
+                case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push8(vm, vm_get8(vm, 1)); break;
+                case vm_opcode_over:   assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push8(vm, vm_get8(vm, 2)); break;
                 case vm_opcode_eq:     vm_push8(vm, vm_pop8(vm) == vm_pop8(vm)); break;
                 case vm_opcode_neq:    vm_push8(vm, vm_pop8(vm) != vm_pop8(vm)); break;
                 case vm_opcode_gt:     { u8 right = vm_pop8(vm), left = vm_pop8(vm); vm_push8(vm, left > right); } break;
@@ -247,17 +244,17 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;
                 case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop8(vm)) { vm->program_counter = addr; add = 0; } } break;
                 case vm_opcode_jst:    {
-                    vm->active_stack = stack_return;
+                    vm->active_stack = VM_MODE_RETURN_STACK;
                     vm_push16(vm, vm->program_counter + 1);
-                    vm->active_stack = stack_param;
+                    vm->active_stack = 0;
                     vm->program_counter = vm_pop16(vm);
                     add = 0;
                 } break;
                 case vm_opcode_stash:  { // TODO(felix): fix
                     u8 val = vm_pop8(vm);
-                    vm->active_stack = vm->active_stack == stack_param ? stack_return : stack_param;
+                    vm->active_stack = vm->active_stack == 0 ? VM_MODE_RETURN_STACK : 0;
                     vm_push8(vm, val);
-                    vm->active_stack = vm->active_stack == stack_param ? stack_return : stack_param;
+                    vm->active_stack = vm->active_stack == 0 ? VM_MODE_RETURN_STACK : 0;
                 } break;
                 case vm_opcode_load:   { u16 addr = vm_pop16(vm); u8 val = vm_load8(vm, addr); vm_push8(vm, val); } break;
                 case vm_opcode_store:  { u16 addr = vm_pop16(vm); u8 val = vm_pop8(vm); vm_store8(vm, addr, val); } break;
@@ -378,8 +375,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 } break;
                 default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(byte)), fmt(u64, byte, .base = 16));
             } break;
-            case vm_opcode_size_short: switch (instruction.opcode) {
-                /* TODO(felix): for most, if not all, ops, use get##bi rather than pop##bi to work with mode.keep */
+            case VM_MODE_SHORT: switch (instruction.opcode) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
                 case vm_opcode_push:   vm_push16(vm, vm_load16(vm, vm->program_counter + 1)); add = 2 + 1; break;
@@ -387,8 +383,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 case vm_opcode_nip:    { u16 c = vm_pop16(vm); vm_pop16(vm); u16 a = vm_pop16(vm); vm_push16(vm, a); vm_push16(vm, c); } break;
                 case vm_opcode_swap:   { u16 c = vm_pop16(vm), b = vm_pop16(vm); vm_push16(vm, c); vm_push16(vm, b); } break;
                 case vm_opcode_rot:    { u16 c = vm_pop16(vm), b = vm_pop16(vm), a = vm_pop16(vm); vm_push16(vm, b); vm_push16(vm, c); vm_push16(vm, a); } break;
-                case vm_opcode_dup:    assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 1)); break;
-                case vm_opcode_over:   assert(!vm->current_mode.keep); vm_push16(vm, vm_get16(vm, 2)); break;
+                case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push16(vm, vm_get16(vm, 1)); break;
+                case vm_opcode_over:   assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push16(vm, vm_get16(vm, 2)); break;
                 case vm_opcode_eq:     vm_push8(vm, vm_pop16(vm) == vm_pop16(vm)); break;
                 case vm_opcode_neq:    vm_push8(vm, vm_pop16(vm) != vm_pop16(vm)); break;
                 case vm_opcode_gt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left > right); } break;
@@ -406,13 +402,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;
                 case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop16(vm)) { vm->program_counter = addr; add = 0; } } break;
                 case vm_opcode_jst:    {
-                    vm->active_stack = stack_return;
+                    vm->active_stack = VM_MODE_RETURN_STACK;
                     vm_push16(vm, vm->program_counter + 1);
-                    vm->active_stack = stack_param;
+                    vm->active_stack = 0;
                     vm->program_counter = vm_pop16(vm);
                     add = 0;
                 } break;
-                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = stack_return; vm_push16(vm, val); vm->active_stack = stack_param; } break;
+                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = VM_MODE_RETURN_STACK; vm_push16(vm, val); vm->active_stack = 0; } break;
                 case vm_opcode_load:   { u16 addr = vm_pop16(vm); u16 val = vm_load16(vm, addr); vm_push16(vm, val); } break;
                 case vm_opcode_store:  { u16 addr = vm_pop16(vm); u16 val = vm_pop16(vm); vm_store16(vm, addr, val); } break;
                 case vm_opcode_read:   {
@@ -520,19 +516,18 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 }
 
 static bool instruction_takes_immediate(Vm_Instruction instruction) {
-    #define for_opcode_return_is_immediate(name, value, is_immediate) case vm_opcode_##name: return is_immediate;
     switch (instruction.opcode) {
-        vm_for_opcode(for_opcode_return_is_immediate)
+        #define X(name, value, is_immediate) case vm_opcode_##name: return is_immediate;
+        VM_OPCODE_TABLE
+        #undef X
+
         default: unreachable;
     }
 }
 
 static u8 byte_from_instruction(Vm_Instruction instruction) {
     if (vm_opcode_is_special(instruction.opcode)) return instruction.opcode;
-    u8 byte = (u8)(instruction.opcode
-        | (instruction.mode.keep << 7)
-        | (instruction.mode.stack << 6)
-        | (instruction.mode.size << 5));
+    u8 byte = (u8)(instruction.opcode | instruction.mode);
     return byte;
 }
 
@@ -732,14 +727,20 @@ static void program(void) {
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = (Array_u8)array_from_slice(input_bytes);
     else {
+        // TODO(felix): fix
+        // Map_u8 opcode_from_name_map = {0};
+        // map_make(&arena, &opcode_from_name_map, 256);
+        // u8 i;
+        // #define X(name, byte, ...) i = byte; map_put(&opcode_from_name_map, string(#name), &i);
+        // VM_OPCODE_TABLE
+        // #undef X
+
         Assembler_Context assembler = {
             .label_references.arena = &arena,
             .scoped_references.arena = &arena,
         };
-        map_make(&assembler.files, &arena, max_file_id);
-        map_make(&assembler.labels, &arena, 1024);
-
-        // push(&assembler.labels, (Label){0}); // TODO(felix): remove
+        map_make(&arena, &assembler.files, max_file_id);
+        map_make(&arena, &assembler.labels, 1024);
 
         Input_File main_file = { .bytes = input_bytes, .name = input_filepath, .tokens.arena = &arena };
         File_Id main_file_id = (File_Id)map_put(&assembler.files, input_filepath, &main_file).index;
@@ -979,7 +980,7 @@ static void program(void) {
                             }
 
                             Label new_label = { .token_id = file_token_id, .address = (u16)rom.count };
-                            map_make(&new_label.children, &arena, 256);
+                            map_make(&arena, &new_label.children, 256);
 
                             Map_Label *labels = 0;
                             if (parsing_relative_label) {
@@ -1003,19 +1004,24 @@ static void program(void) {
                             break;
                         }
 
+                        // TODO(felix): fix
+                        // Vm_Instruction instruction = * map_get(&opcode_from_name_map, token_string).pointer;
+
                         Vm_Instruction instruction = {0};
                         bool is_opcode = false;
-                        #define for_opcode_test_string(name, byte, ...) else if (string_equal(token_string, string(#name))) { instruction.opcode = byte; is_opcode = true; }
                         if (false) {}
-                        vm_for_opcode(for_opcode_test_string)
+                        #define X(name, byte, ...) else if (string_equal(token_string, string(#name))) { instruction.opcode = byte; is_opcode = true; }
+                        VM_OPCODE_TABLE
+                        #undef X
+
                         if (is_opcode) {
                             bool explicit_mode = next.kind == token_kind_opmode;
                             if (explicit_mode) {
                                 for_slice (u8 *, c, next_string) {
                                     switch (*c) {
-                                        case '2': instruction.mode.size = vm_opcode_size_short; break;
-                                        case 'k': instruction.mode.keep = 0x80; break;
-                                        case 'r': instruction.mode.stack = stack_return; break;
+                                        case '2': instruction.mode |= VM_MODE_SHORT; break;
+                                        case 'k': instruction.mode |= VM_MODE_KEEP; break;
+                                        case 'r': instruction.mode |= VM_MODE_RETURN_STACK; break;
                                         default: unreachable;
                                     }
                                 }
@@ -1039,7 +1045,7 @@ static void program(void) {
                                 if (next.kind == '{') continue;
 
                                 u8 width = 1;
-                                if (instruction.mode.size == vm_opcode_size_short || vm_opcode_is_special(instruction.opcode)) width = 2;
+                                if ((instruction.mode & VM_MODE_SHORT) || vm_opcode_is_special(instruction.opcode)) width = 2;
 
                                 if (next.kind == token_kind_symbol) {
                                     Label_Reference reference = {
@@ -1316,9 +1322,9 @@ static void program(void) {
         vm_run_to_break(&vm, vm_on_system_quit_pc);
 
         print("working stack (bottom->top): { ");
-        for (u8 token_id = 0; token_id < vm.stacks[stack_param].data; token_id += 1) print("% ", fmt(u64, vm.stacks[stack_param].memory[token_id], .base = 16));
+        for (u8 token_id = 0; token_id < vm.stacks[0].data; token_id += 1) print("% ", fmt(u64, vm.stacks[0].memory[token_id], .base = 16));
         print("}\nreturn  stack (bottom->top): { ");
-        for (u8 token_id = 0; token_id < vm.stacks[stack_return].data; token_id += 1) print("% ", fmt(u64, vm.stacks[stack_return].memory[token_id], .base = 16));
+        for (u8 token_id = 0; token_id < vm.stacks[VM_MODE_RETURN_STACK].data; token_id += 1) print("% ", fmt(u64, vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
         print("}\n");
     }
 

@@ -2,18 +2,25 @@
 
 structdef(Map_Result) { u64 index; void *pointer; };
 
+structdef(Map_Get_Arguments) {
+    u64 _item_size;
+    Map_void *map;
+    Slice_u8 key;
+    void *put;
+};
+
 
 #else // IMPLEMENTATION
 
 
 #define map_max_load_factor 70
 
-#define map_make(map, arena, capacity) do { \
+#define map_make(arena, map, capacity) do { \
     static_assert(sizeof(*(map)) == sizeof(Map_void), "Parameter must be a Map"); \
-    map_make_explicit_item_size((Map_void *)(map), (arena), (capacity), sizeof(*(map)->values.data)); \
+    map_make_explicit_item_size((arena), (Map_void *)(map), (capacity), sizeof(*(map)->values.data)); \
 } while (0);
 
-static void map_make_explicit_item_size(Map_void *map, Arena *arena, u64 capacity, u64 item_size) {
+static void map_make_explicit_item_size(Arena *arena, Map_void *map, u64 capacity, u64 item_size) {
     capacity *= 100;
     capacity /= map_max_load_factor;
 
@@ -29,13 +36,6 @@ static void map_make_explicit_item_size(Map_void *map, Arena *arena, u64 capacit
     reserve(&indices, capacity);
     map->value_index_from_key_hash = (Slice_u64){ .data = indices.data, .count = indices.capacity };
 }
-
-structdef(Map_Get_Arguments) {
-    u64 _item_size;
-    Map_void *map;
-    Slice_u8 key;
-    void *put;
-};
 
 #define map_get(map, key, ...) map_get_argument_struct((Map_Get_Arguments){ \
     ._item_size = sizeof *(map)->values.data, \

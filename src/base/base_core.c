@@ -4,6 +4,10 @@
 #include <stdint.h> // TODO(felix): look into removing
 #include <stddef.h> // TODO(felix): look into removing
 
+#if !defined(LINK_CRT)
+    #define LINK_CRT 0
+#endif
+
 #if OS_EMSCRIPTEN
     // TODO(felix): idk
     #include<stdlib.h>
@@ -79,7 +83,7 @@
     #define force_inline inline __forceinline
 
 #elif COMPILER_STANDARD
-    // NOTE(felix): probably broken in many ways. Getting this working with a non-major compiler is not a priority
+    // NOTE(felix): I don't even know why I have this. Getting my base layer working with a non-major compiler is not a priority
     #include <assert.h>
     #define builtin_assume(expr) assert(expr)
     #define breakpoint builtin_assume(false)
@@ -103,7 +107,7 @@
 // TODO(felix): no dependency on C stdlib!
     #include <math.h> // TODO(felix): look into
 
-#define bool _Bool
+typedef _Bool bool;
 #define true 1
 #define false 0
 #define __bool_true_false_are_defined 1
@@ -119,19 +123,6 @@ typedef  int64_t i64;
 typedef    float f32;
 typedef   double f64;
 
-typedef unsigned char uchar;
-typedef        size_t usize;
-#if OS_WINDOWS
-    typedef SSIZE_T isize; // TODO(felix): is this from windows.h? should I use ptrdiff_t or intptr_t instead?
-#elif OS_LINUX
-    typedef ssize_t isize;
-#elif OS_MACOS
-    typedef i64 isize;
-#elif OS_EMSCRIPTEN
-    typedef i64 isize;
-#else
-    #error "haven't figured out an isize typedef for this OS yet"
-#endif
 typedef     uintptr_t upointer;
 typedef      intptr_t ipointer;
 
@@ -153,44 +144,46 @@ typedef      intptr_t ipointer;
 raddbg_type_view(Slice_?, $.slice())
 raddbg_type_view(Array_?, $.slice())
 
-#define Slice(type) struct { type *data; usize count; }
+#define Slice(type) struct { type *data; u64 count; }
 
 struct Arena;
 #define Array(type) struct { \
     union { \
         Slice_##type slice; \
-        struct { type *data; usize count; }; \
+        struct { type *data; u64 count; }; \
     }; \
-    usize capacity; \
+    u64 capacity; \
     struct Arena *arena; \
 }
 
-typedef Slice(u8) Slice_u8;
-typedef Slice_u8 String;
+raddbg_type_view(String, view:text($.data, size=count))
+typedef Slice(u8) String;
 typedef Slice(String) Slice_String;
 typedef Array(String) Array_String;
-
-struct Arena;
-#define Map(type) struct { \
-    struct Arena *arena; \
-    Array_String keys; \
-    Array_##type values; \
-}
 
 #define for_slice(ptr_type, name, slice)\
     for (ptr_type name = (slice).data; (name == 0 ? false : name < (slice).data + (slice).count); name += 1)
 
-#define array_count(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define array_count(arr) (sizeof(arr) / sizeof(*(arr)))
 #define array_size(arr) ((arr).capacity * sizeof(*((arr).data)))
 
 #define discard(expression) (void)(expression)
+
+typedef Slice(u8) Slice_u8;
+typedef Array(u8) Array_u8;
+typedef Slice(Slice_u8) Slice_Slice_u8;
+typedef Array(Slice_u8) Array_Slice_u8;
+typedef Slice(u64) Slice_u64;
+#define Map(type) struct { \
+    Array_Slice_u8 keys; \
+    Array_##type values; \
+    Slice_u64 value_index_from_key_hash; \
+}
 
 #define define_container_types(type) \
     typedef Slice(type) Slice_##type; \
     typedef Array(type) Array_##type; \
     typedef Map(type) Map_##type;
-
-define_container_types(void);
 
 #define enumdef(Name, type)\
     typedef type Name;\
@@ -207,18 +200,28 @@ define_container_types(void);
     define_container_types(Name);\
     union Name
 
+define_container_types(void);
+define_container_types(bool);
+typedef Map(u8) Map_u8;
+define_container_types(u16);
+define_container_types(u32);
+typedef Array(u64) Array_u64;
+typedef Map(u64) Map_u64;
+define_container_types(i8);
+define_container_types(i16);
+define_container_types(i32);
+define_container_types(i64);
+define_container_types(f32);
+define_container_types(f64);
+define_container_types(upointer);
+define_container_types(ipointer);
+
 #define stringc(s)  { .data = (u8 *)s, .count = sizeof(s) - 1 }
 #define string(s) (String)stringc(s)
-raddbg_type_view(String, view:text($.data, size=count))
 
-structdef(String16) { u16 *data; usize count; };
+structdef(String16) { u16 *data; u64 count; };
 #define string16c(s) { .data = (u16 *)s, .count = sizeof(s) / sizeof(u16) - 1 }
 #define string16(s) (String16)string16c(s)
-
-typedef Array(u8) Array_u8;
-typedef Array_u8 String_Builder;
-define_container_types(String_Builder);
-
 
 #define log_error(...) log_internal("error: " __VA_ARGS__)
 
@@ -229,28 +232,28 @@ define_container_types(String_Builder);
 
 #define statement_macro(...) do { __VA_ARGS__ } while (0)
 
-// TODO(felix): a number of these would benefit from assert-as-expression using comma operator
 #define slice_from_c_array(c_array) { .data = c_array, .count = array_count(c_array) }
 #define slice_of(type, ...) slice_from_c_array(((type[]){ __VA_ARGS__ }))
 #define slice_get_last(s) (assert_expression((s).count > 0) ? &(s).data[(s).count - 1] : 0)
 #define pop(s) (*(assert_expression((s).count > 0) ? &(s).data[--(s).count] : 0))
-#define slice_range(slice, beg, end) { .data = (slice).data + (beg), .count = (end) - (beg) }
-#define slice_swap_remove(slice_pointer, idx) (slice_pointer)->data[idx] = (slice_pointer)->data[--(slice_pointer)->count]
-#define slice_as_bytes(slice) (String){ .data = (u8 *)(slice).data, .count = sizeof(*((slice).data)) * (slice).count }
+#define slice_range(s, begin, end) { .data = assert_expression((i64)(end) - (i64)(begin) >= 0 && (end) <= (s).count) ? (s).data + (begin) : 0, .count = (end) - (begin) }
+#define slice_swap_remove(s, i) (s)->data[i] = (s)->data[--(s)->count]
+#define slice_as_bytes(s) (Slice_u8){ .data = (u8 *)(s).data, .count = sizeof(*((s).data)) * (s).count }
+#define slice_size(s) ((s).count * (sizeof *(s).data))
 
 #define array_from_c_array_c(type, capacity_) { .data = (type[capacity_]){0}, .capacity = capacity_ }
 #define array_from_c_array(type, capacity_) ((Array_##type)array_from_c_array_c(type, capacity_))
 
-#define array_ensure_capacity_non_zero(array_pointer, item_count) \
-    array_ensure_capacity_explicit_item_size((Array_void *)(array_pointer), item_count, sizeof(*((array_pointer)->data)), true)
-#define array_ensure_capacity(array_pointer, item_count) \
-    array_ensure_capacity_explicit_item_size((Array_void *)(array_pointer), item_count, sizeof(*((array_pointer)->data)), false)
-static void array_ensure_capacity_explicit_item_size(Array_void *array, usize item_count, usize item_size, bool non_zero);
+#define reserve_non_zero(array_pointer, item_count) \
+    reserve_explicit_item_size((Array_void *)(array_pointer), item_count, sizeof(*((array_pointer)->data)), true)
+#define reserve(array_pointer, item_count) \
+    reserve_explicit_item_size((Array_void *)(array_pointer), item_count, sizeof(*((array_pointer)->data)), false)
+static void reserve_explicit_item_size(Array_void *array, u64 item_count, u64 item_size, bool non_zero);
 
 #define array_from_slice(s) { .data = (s).data, .count = (s).count, .capacity = (s).count }
 
 #define push(array_pointer, item) statement_macro( \
-    array_ensure_capacity_explicit_item_size((Array_void *)array_pointer, (array_pointer)->count + 1, sizeof(*((array_pointer)->data)), false); \
+    reserve_explicit_item_size((Array_void *)array_pointer, (array_pointer)->count + 1, sizeof(*((array_pointer)->data)), false); \
     push_assume_capacity(array_pointer, item); \
 )
 
@@ -260,13 +263,13 @@ static void array_ensure_capacity_explicit_item_size(Array_void *array, usize it
 )
 
 #define push_slice(array_pointer, slice) statement_macro( \
-    array_ensure_capacity_explicit_item_size((Array_void *)array_pointer, (array_pointer)->count + (slice).count, sizeof(*((array_pointer)->data)), false); \
+    reserve_explicit_item_size((Array_void *)array_pointer, (array_pointer)->count + (slice).count, sizeof(*((array_pointer)->data)), false); \
     push_slice_assume_capacity(array_pointer, slice); \
 )
 
 #define push_slice_assume_capacity(array_pointer, slice) statement_macro( \
     assert((array_pointer)->count + (slice).count <= (array_pointer)->capacity); \
-    for (usize __psac_i = 0; __psac_i < (slice).count; __psac_i += 1) { \
+    for (u64 __psac_i = 0; __psac_i < (slice).count; __psac_i += 1) { \
         (array_pointer)->data[(array_pointer)->count + __psac_i] = (slice).data[__psac_i]; \
     } \
     (array_pointer)->count += (slice).count; \
@@ -288,15 +291,15 @@ static void array_ensure_capacity_explicit_item_size(Array_void *array, usize it
 )
 
 // TODO(felix): rename/replace
-static inline int memcmp_(void *a_, void *b_, usize byte_count);
+static inline int memcmp_(void *a_, void *b_, u64 byte_count);
 #if OS_WINDOWS
     #pragma function(memcpy)
 #endif
-void *memcpy(void *destination_, const void *source_, usize byte_count);
+void *memcpy(void *destination_, const void *source_, u64 byte_count);
 #if OS_WINDOWS
     #pragma function(memset)
 #endif
-extern void *memset(void *destination_, int byte_, usize byte_count);
+extern void *memset(void *destination_, int byte_, u64 byte_count);
 
 struct Arena;
 static Slice_String os_get_arguments(struct Arena *arena);
@@ -318,19 +321,19 @@ static force_inline bool assert_expression(bool value) {
 
 // TODO(felix): add slice_equal/slice_compare
 
-static void array_ensure_capacity_explicit_item_size(Array_void *array, usize item_count, usize item_size, bool non_zero) {
+static void reserve_explicit_item_size(Array_void *array, u64 item_count, u64 item_size, bool non_zero) {
     if (array->capacity >= item_count) return;
 
     // TODO(felix): should this be a power of 2?
-    usize new_capacity = clamp_low(1, array->capacity * 2);
+    u64 new_capacity = clamp_low(1, array->capacity * 2);
     while (new_capacity < item_count) new_capacity *= 2;
 
     u8 *new_memory = arena_make(array->arena, new_capacity, item_size);
     if (array->count > 0) memcpy(new_memory, array->data, array->count * item_size);
 
     if (!non_zero) {
-        usize old_capacity = array->capacity;
-        usize growth_byte_count = item_size * (new_capacity - old_capacity);
+        u64 old_capacity = array->capacity;
+        u64 growth_byte_count = item_size * (new_capacity - old_capacity);
         u8 *beginning_of_new_memory = new_memory + (item_size * old_capacity);
         memset(beginning_of_new_memory, 0, growth_byte_count);
     }
@@ -340,45 +343,48 @@ static void array_ensure_capacity_explicit_item_size(Array_void *array, usize it
 }
 
 // TODO(felix): rename/replace (see base_core.h)
-static inline int memcmp_(void *a_, void *b_, usize byte_count) {
+static inline int memcmp_(void *a_, void *b_, u64 byte_count) {
     u8 *a = a_, *b = b_;
     assert(a != 0);
     assert(b != 0);
-    for (usize i = 0; i < byte_count; i += 1) {
+    for (u64 i = 0; i < byte_count; i += 1) {
         if (a[i] != b[i]) return a[i] - b[i];
     }
     return 0;
 }
 
-void *memcpy(void *destination_, const void *source_, usize byte_count) {
+#if !LINK_CRT
+void *memcpy(void *destination_, const void *source_, u64 byte_count) {
     u8 *destination = destination_;
     const u8 *source = source_;
     if (byte_count != 0) {
         assert(destination != 0);
         assert(source != 0);
     }
-    for (usize i = 0; i < byte_count; i += 1) destination[i] = source[i];
+    for (u64 i = 0; i < byte_count; i += 1) destination[i] = source[i];
     return destination;
 }
+#endif
 
-extern void *memset(void *destination_, int byte_, usize byte_count) {
+extern void *memset(void *destination_, int byte_, u64 byte_count) {
     assert(byte_ < 256);
     u8 byte = (u8)byte_;
     u8 *destination = destination_;
     assert(destination != 0);
-    for (usize i = 0; i < byte_count; i += 1) destination[i] = byte;
+    for (u64 i = 0; i < byte_count; i += 1) destination[i] = byte;
     return destination;
 }
 
-raddbg_entry_point(program)
-static u8 program(void);
+static bool mem_equals(Slice_u8 a, Slice_u8 b) {
+    if (a.count != b.count) return false;
+    for (u64 i = 0; i < a.count; i += 1) if (a.data[i] != b.data[i]) return false;
+    return true;
+}
 
-#if OS_WINDOWS
-    void entrypoint(void) {
-        u8 exit_code = program();
-        ExitProcess(exit_code);
-    }
-#elif OS_LINUX || OS_MACOS
+raddbg_entry_point(program)
+static void program(void);
+
+#if LINK_CRT || OS_LINUX || OS_MACOS
     // TODO(felix): replace with something that feels less hacky
 
     static int argument_count_;
@@ -387,8 +393,13 @@ static u8 program(void);
     int main(int argument_count, char **arguments) {
         argument_count_ = argument_count;
         arguments_ = arguments;
-        u8 exit_code = entrypoint();
-        return exit_code;
+        program();
+        os_exit(0);
+    }
+#elif OS_WINDOWS
+    void entrypoint(void) {
+        program();
+        os_exit(0);
     }
 #endif
 
@@ -403,27 +414,27 @@ static Slice_String os_get_arguments(Arena *arena) {
             return (Slice_String){0};
         }
 
-        array_ensure_capacity(&arguments, (usize)argument_count);
+        reserve(&arguments, (u64)argument_count);
 
-        for (usize i = 0; i < (usize)argument_count; i += 1) {
+        for (u64 i = 0; i < (u64)argument_count; i += 1) {
             u16 *argument_utf16 = arguments_utf16[i];
 
-            usize length = 0;
+            u64 length = 0;
             while (argument_utf16[length] != 0) length += 1;
 
             // TODO(felix): convert to UTF-8, not ascii
             Array_u8 argument = { .arena = arena };
-            array_ensure_capacity(&argument, length);
-            for (usize j = 0; j < length; j += 1) {
+            reserve(&argument, length);
+            for (u64 j = 0; j < length; j += 1) {
                 u16 wide_character = argument_utf16[j];
                 assert(wide_character < 128);
                 push_assume_capacity(&argument, (u8)wide_character);
             }
-            push_assume_capacity(&arguments, argument.slice);
+            push_assume_capacity(&arguments, bit_cast(String) argument.slice);
         }
     #elif OS_LINUX || OS_MACOS
-        array_ensure_capacity(&arguments, argument_count__);
-        for (usize i = 0; i < (usize)argument_count__; i += 1) {
+        reserve(&arguments, argument_count__);
+        for (u64 i = 0; i < (u64)argument_count__; i += 1) {
             String argument = string_from_cstring(arguments__[i]);
             array_push_assume_capacity(&arguments, &argument);
         }

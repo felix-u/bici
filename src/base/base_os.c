@@ -1,13 +1,13 @@
 #if defined(BASE_NO_IMPLEMENTATION) || defined(BASE_NO_IMPLEMENTATION_IO)
 
-structdef(Os_Read_Entire_File_Arguments) { Arena *arena; String path; usize max_bytes; };
+structdef(Os_Read_Entire_File_Arguments) { Arena *arena; String path; u64 max_bytes; };
 #define os_read_entire_file(...) os_read_entire_file_argument_struct((Os_Read_Entire_File_Arguments){ __VA_ARGS__ })
-static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments);
-static bool file_write_bytes_to_relative_path(char *path, String bytes);
+static Slice_u8 os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments);
+static bool os_write_entire_file(Arena scratch, String path, Slice_u8 bytes);
 
 #define log_info(...) log_internal("info: " __VA_ARGS__)
 #define log_internal(...) log_internal_with_location(__FILE__, __LINE__, (char *)__func__, __VA_ARGS__)
-static void log_internal_with_location(char *file, usize line, char *func, char *format, ...);
+static void log_internal_with_location(char *file, u64 line, char *func, char *format, ...);
 
 static void os_write(String bytes);
 static void print(char *format, ...);
@@ -17,12 +17,12 @@ static void print_var_args(char *format, va_list args);
 #else // IMPLEMENTATION
 
 
-static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments arguments) {
+static Slice_u8 os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments arguments) {
     String path = arguments.path;
-    usize max_bytes = arguments.max_bytes;
+    u64 max_bytes = arguments.max_bytes;
     if (max_bytes == 0) max_bytes = UINT32_MAX;
 
-    if (path.count == 0) return (String){0};
+    if (path.count == 0) return (Slice_u8){0};
 
     char *path_cstring = cstring_from_string(arguments.arena, path);
     Array_u8 bytes = { .arena = arguments.arena };
@@ -39,7 +39,7 @@ static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments 
         if (!file_ok) log_error("unable to open file '%'", fmt(String, path));
 
         bool file_size_ok = false;
-        usize file_size = 0;
+        u64 file_size = 0;
         if (file_ok) {
             BOOL ok = GetFileSizeEx(file, (PLARGE_INTEGER)&file_size);
             file_size_ok = ok != false;
@@ -53,7 +53,7 @@ static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments 
 
         bool read_ok = false;
         if (file_size_ok) {
-            array_ensure_capacity(&bytes, file_size);
+            reserve(&bytes, file_size);
 
             u32 num_bytes_read = 0;
             BOOL ok = ReadFile(file, bytes.data, (u32)file_size, (LPDWORD)&num_bytes_read, 0);
@@ -97,9 +97,9 @@ static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments 
         if (file_size_ok) {
             rewind(file_handle);
 
-            array_ensure_capacity(&bytes, file_size);
+            reserve(&bytes, file_size);
 
-            usize num_bytes_read = fread(bytes.data, 1, file_size, file_handle);
+            u64 num_bytes_read = fread(bytes.data, 1, file_size, file_handle);
             bytes.count = num_bytes_read;
             read_ok = num_bytes_read == file_size;
             if (!read_ok) log_error("unable to read entire file '%'; could only read %/% bytes", fmt(String, path), fmt(u64, num_bytes_read), fmt(u64, file_size));
@@ -113,22 +113,25 @@ static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments 
     return bytes.slice;
 }
 
-static bool file_write_bytes_to_relative_path(char *path, String bytes) {
+static bool os_write_entire_file(Arena scratch, String path, Slice_u8 bytes) {
     #if OS_WINDOWS
-        usize dword_max = UINT32_MAX;
+        u64 dword_max = UINT32_MAX;
         assert(bytes.count <= dword_max);
 
         // NOTE(felix): not sure about this. See https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
         DWORD share_mode = 0;
-        HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, share_mode, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+        Scratch scratch_ = scratch_begin(&scratch);
+        char *path_as_cstring = cstring_from_string(scratch_.arena, path);
+        HANDLE file_handle = CreateFileA(path_as_cstring, GENERIC_WRITE, share_mode, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+        scratch_end(scratch_);
         if (file_handle == INVALID_HANDLE_VALUE) {
-            log_error("unable to open file '%'", fmt(cstring, path));
+            log_error("unable to open file '%'", fmt(String, path));
             return false;
         }
 
         bool ok = WriteFile(file_handle, bytes.data, (DWORD)bytes.count, 0, 0);
         if (!ok) {
-            log_error("error writing to file '%'", fmt(cstring, path));
+            log_error("error writing to file '%'", fmt(String, path));
         }
 
         CloseHandle(file_handle);
@@ -145,13 +148,13 @@ static bool file_write_bytes_to_relative_path(char *path, String bytes) {
         }
 
         bool ok = false;
-        for (usize written_bytes = 0; written_bytes < bytes.count;) {
-            isize wrote_this_time = write(file_handle, bytes.data + written_bytes, bytes.count - written_bytes);
+        for (u64 written_bytes = 0; written_bytes < bytes.count;) {
+            i64 wrote_this_time = write(file_handle, bytes.data + written_bytes, bytes.count - written_bytes);
             if (wrote_this_time == -1) {
                 log_error("error writing to file '%'", fmt(cstring, path));
                 goto end;
             }
-            written_bytes += (usize)wrote_this_time;
+            written_bytes += (u64)wrote_this_time;
         }
         ok = true;
 
@@ -163,7 +166,7 @@ static bool file_write_bytes_to_relative_path(char *path, String bytes) {
     #endif
 }
 
-static void log_internal_with_location(char *file, usize line, char *func, char *format, ...) {
+static void log_internal_with_location(char *file, u64 line, char *func, char *format, ...) {
     va_list args;
     va_start(args, format);
     print_var_args(format, args);
@@ -198,7 +201,7 @@ static void os_write(String string) {
 
     #elif OS_LINUX || OS_MACOS || OS_EMSCRIPTEN
         int stdout_handle = 1;
-        isize bytes_written = write(stdout_handle, string.data, string.count);
+        i64 bytes_written = write(stdout_handle, string.data, string.count);
         discard(bytes_written);
 
     #else
@@ -225,13 +228,12 @@ static void print_var_args(char *format, va_list args) {
     string_builder_print_var_args(&output, format, args);
 
     string_builder_null_terminate(&output);
-    String string = output.slice;
 
     #if OS_WINDOWS && BUILD_DEBUG
-        OutputDebugStringA((char *)string.data);
+        OutputDebugStringA((char *)output.data);
     #endif
 
-    os_write(string);
+    os_write(output.string);
 
     scratch_end(temp);
 }

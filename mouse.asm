@@ -80,7 +80,8 @@ update:
         push.2 sin_wave_frame_counter load
         inc
         ; reset if above max - basically modulo
-        dup push 0x18 gt jni {
+        ; TODO(felix): delta time
+        dup push 0x2 gt jni {
             push 0x0
             nip
         }

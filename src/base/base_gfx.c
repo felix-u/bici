@@ -3,7 +3,9 @@
 #if OS_WINDOWS
     #pragma comment(lib, "user32.lib")
     #pragma comment(lib, "gdi32.lib")
+    #pragma comment(lib, "dwmapi.lib")
     #include <windowsx.h>
+    #include <dwmapi.h>
 #else
     #error "OS not yet supported"
 #endif
@@ -107,7 +109,6 @@ static               bool gfx_window_should_close(Gfx_Render_Context *gfx);
 #else // IMPLEMENTATION
 
 
-// TODO(felix): is vsync enabled by default? if not, let's enable it
 // TODO(felix): get delta time
 
 static Gfx_Font gfx_font_default_3x5 = {
@@ -909,7 +910,7 @@ static void gfx_draw_text(Gfx_Render_Context *gfx, Gfx_Font font, String string,
     i32 step = font.width + tracking;
 
     assert(string.count > 0);
-    for (usize i = 0; i < string.count; i += 1, left += step) {
+    for (u64 i = 0; i < string.count; i += 1, left += step) {
         u8 character = string.data[i];
         assert(character < 128);
 
@@ -1049,8 +1050,6 @@ static bool gfx_window_should_close(Gfx_Render_Context *gfx) {
         DispatchMessageA(&message);
     }
 
-    // TODO(felix): vsync? or more likely, """vsync"""
-
     HDC window_device_context = GetDC(gfx->window_handle);
     {
         i32 virtual_width = (i32)gfx->frame_info.virtual_window_size.x;
@@ -1065,6 +1064,7 @@ static bool gfx_window_should_close(Gfx_Render_Context *gfx) {
             0, 0, virtual_width, virtual_height,
             SRCCOPY
         );
+        DwmFlush();
     }
     ReleaseDC(gfx->window_handle, window_device_context);
 

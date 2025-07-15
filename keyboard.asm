@@ -60,7 +60,7 @@ update:
     push 0x57 ; 'W'
     jsi key_down jni {
         push.2 target_sprite_y load.2
-        push.2 0x1 sub.2
+        push.2 0x10 sub.2
         dup.2
         push.2 real_sprite_y store.2
         push.2 target_sprite_y store.2
@@ -69,7 +69,7 @@ update:
     push 0x41 ; 'A'
     jsi key_down jni {
         push.2 target_sprite_x load.2
-        push.2 0x1 sub.2
+        push.2 0x10 sub.2
         dup.2
         push.2 real_sprite_x store.2
         push.2 target_sprite_x store.2
@@ -78,7 +78,7 @@ update:
     push 0x53 ; 'S'
     jsi key_down jni {
         push.2 target_sprite_y load.2
-        inc.2
+        push.2 0x10 add.2
         dup.2
         push.2 real_sprite_y store.2
         push.2 target_sprite_y store.2
@@ -87,7 +87,7 @@ update:
     push 0x44 ; 'D'
     jsi key_down jni {
         push.2 target_sprite_x load.2
-        inc.2
+        push.2 0x10 add.2
         dup.2
         push.2 real_sprite_x store.2
         push.2 target_sprite_x store.2
@@ -141,7 +141,7 @@ interpolate: ; (a, b: u16 -> u16)
     dup.2 push.2 initial_a store.2
 
     sub.2
-    push.2 0x20 div.2
+    push.2 0x08 div.2
 
     push.2 initial_a load.2
     add.2

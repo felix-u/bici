@@ -486,7 +486,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u8 string_length = vm_load8(vm, string_address);
                                 String file_name = { .data = &vm->memory[string_address + 1], .count = string_length };
 
-                                String bytes = os_read_entire_file(vm->arena, file_name, 0xffff);
+                                Slice_u8 bytes = os_read_entire_file(vm->arena, file_name, 0xffff);
 
                                 vm->file_bytes = bytes.data;
 
@@ -536,7 +536,7 @@ static u8 byte_from_instruction(Vm_Instruction instruction) {
     return byte;
 }
 
-static void write_u16_swap_bytes(Array_u8 rom, usize index, u16 value) {
+static void write_u16_swap_bytes(Array_u8 rom, u64 index, u16 value) {
     assert(index + 1 < rom.capacity);
     u8 byte2 = (u8)(value);
     u8 byte1 = (u8)(value >> 8);
@@ -575,7 +575,7 @@ structdef(Token_Id) { File_Id file_id; i32 index; };
 structdef(Label) {
     Token_Id token_id;
     u16 address;
-    Array_Label children;
+    Map_Label children;
 };
 
 typedef u32 Label_Id;
@@ -596,12 +596,12 @@ structdef(Scoped_Reference) {
 
 structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
 
-structdef(Input_File) { String name, bytes; Array_Token tokens; };
+structdef(Input_File) { String name; Slice_u8 bytes; Array_Token tokens; };
 
 structdef(Assembler_Context) {
-    Array_Input_File files;
+    Map_Input_File files;
     File_Id file_id;
-    Array_Label labels;
+    Map_Label labels;
     Array_Label_Reference label_references;
     Array_Scoped_Reference scoped_references;
     Insertion_Mode insertion_mode;
@@ -615,14 +615,14 @@ static Token_Id token_id_shift(Token_Id token_id, i32 shift) {
 
 static Input_File *token_get_file(Assembler_Context *assembler, Token_Id token_id) {
     File_Id file_id = token_id.file_id;
-    Input_File *file = &assembler->files.data[file_id];
+    Input_File *file = &assembler->files.values.data[file_id];
     return file;
 }
 
 static Token *token_get(Assembler_Context *assembler, Token_Id token_id) {
     Input_File file = *token_get_file(assembler, token_id);
     i32 index = token_id.index;
-    if (index < 0 || (usize)index >= file.tokens.count) {
+    if (index < 0 || (u64)index >= file.tokens.count) {
         static Token nil_token = {0};
         return &nil_token;
     }
@@ -633,7 +633,7 @@ static Token *token_get(Assembler_Context *assembler, Token_Id token_id) {
 static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
     Token token = *token_get(assembler, token_id);
     Input_File *file = token_get_file(assembler, token_id);
-    String asm = file->bytes;
+    String asm = string_from_bytes(file->bytes);
     String token_string = string_range(asm, token.start_index, token.start_index + token.length);
     return token_string;
 }
@@ -646,7 +646,7 @@ structdef(Parse_Error_Arguments) {
     File_Id file_id;
 };
 #define parse_error(...) parse_error_argument_struct((Parse_Error_Arguments){ __VA_ARGS__ })
-static u8 parse_error_argument_struct(Parse_Error_Arguments arguments) {
+static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
     Assembler_Context *assembler = arguments.assembler;
 
     File_Id file_id = assembler->file_id;
@@ -661,12 +661,12 @@ static u8 parse_error_argument_struct(Parse_Error_Arguments arguments) {
         length = arguments.token.length;
     } else if (length == 0) length = 1;
 
-    String text = assembler->files.data[file_id].bytes;
-    String file_name = assembler->files.data[file_id].name;
+    String text = string_from_bytes(assembler->files.values.data[file_id].bytes);
+    String file_name = assembler->files.values.data[file_id].name;
     String lexeme = string_range(text, start_index, start_index + length);
 
-    usize row = 1, column = 1;
-    for (usize i = 0; i < start_index; i += 1) {
+    u64 row = 1, column = 1;
+    for (u64 i = 0; i < start_index; i += 1) {
         u8 c = text.data[i];
         column += 1;
         if (c == '\n') {
@@ -675,84 +675,83 @@ static u8 parse_error_argument_struct(Parse_Error_Arguments arguments) {
         }
     }
 
-    print("note: '%' in %:%:%\n", fmt(String, lexeme), fmt(String, file_name), fmt(usize, row), fmt(usize, column));
+    print("note: '%' in %:%:%\n", fmt(String, lexeme), fmt(String, file_name), fmt(u64, row), fmt(u64, column));
 
-    return 1;
+    os_exit(1);
 }
 
-#define usage "usage: bici <com|run|script> <file...>"
-
-enumdef(Command, u8) {
-    command_compile, command_run, command_script,
-    command_count,
-};
+#define usage "usage: bici <compile|run|script> <file...>"
 
 structdef(File_Cursor) { Token_Id token_id; u32 cursor; };
 
-static u8 program(void) {
+static void program(void) {
     Arena arena = arena_init(64 * 1024 * 1024);
     Slice_String arguments = os_get_arguments(&arena);
 
     if (arguments.count < 3) {
         log_error("%", fmt(cstring, usage));
-        return 1;
+        os_exit(1);
     }
 
+    enumdef(Command, u8) {
+        command_compile, command_run, command_script,
+        command_count,
+    };
     String command_string = arguments.data[1];
 
     Command command = 0;
     if (string_equal(command_string, string("compile"))) {
         if (arguments.count != 4) {
-            log_error("usage: bici com <file.asm> <file.rom>");
-            return 1;
+            log_error("usage: bici compile <file.asm> <file.rom>");
+            os_exit(1);
         }
         command = command_compile;
     } else if (string_equal(command_string, string("run"))) {
         if (arguments.count != 3) {
             log_error("usage: bici run <file.rom>");
-            return 1;
+            os_exit(1);
         }
         command = command_run;
     } else if (string_equal(command_string, string("script"))) {
         if (arguments.count != 3) {
             log_error("usage: bici script <file.asm>");
-            return 1;
+            os_exit(1);
         }
         command = command_script;
     } else {
         log_error("no such command '%'\n%", fmt(String, command_string), fmt(cstring, usage));
-        return 1;
+        os_exit(1);
     }
 
     String input_filepath = arguments.data[2];
-    usize max_filesize = 0x10000;
-    String input_bytes = os_read_entire_file(&arena, input_filepath, max_filesize);
+    u64 max_filesize = 0x10000;
+    Slice_u8 input_bytes = os_read_entire_file(&arena, input_filepath, max_filesize);
 
-    Array_u8 rom = { .data = (u8[0x10000]){0}, .capacity = 0x10000 };
+    Array_u8 rom = array_from_c_array(u8, 0x10000);
 
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = (Array_u8)array_from_slice(input_bytes);
     else {
         Assembler_Context assembler = {
-            .files.arena = &arena,
-            .labels.arena = &arena,
             .label_references.arena = &arena,
             .scoped_references.arena = &arena,
         };
+        map_make(&assembler.files, &arena, max_file_id);
+        map_make(&assembler.labels, &arena, 1024);
 
-        push(&assembler.labels, (Label){0});
+        // push(&assembler.labels, (Label){0}); // TODO(felix): remove
 
         Input_File main_file = { .bytes = input_bytes, .name = input_filepath, .tokens.arena = &arena };
-        push(&assembler.files, main_file);
+        File_Id main_file_id = (File_Id)map_put(&assembler.files, input_filepath, &main_file).index;
 
         Array_File_Cursor file_stack = { .arena = &arena };
-        push(&file_stack, (File_Cursor){0});
+        push(&file_stack, (File_Cursor){ .token_id.file_id = main_file_id });
 
         while (file_stack.count > 0) {
             File_Cursor file_cursor = pop(file_stack);
             assembler.file_id = file_cursor.token_id.file_id;
-            Input_File *file = &assembler.files.data[assembler.file_id];
-            String asm = file->bytes;
+            Input_File *file = &assembler.files.values.data[assembler.file_id];
+            String asm = string_from_bytes(file->bytes);
 
             for (u32 cursor = file_cursor.cursor; cursor < asm.count;) {
                 while (cursor < asm.count && ascii_is_whitespace(asm.data[cursor])) cursor += 1;
@@ -777,7 +776,7 @@ static u8 program(void) {
 
                         if (cursor + 1 == asm.count || (asm.data[cursor + 1] != 'x' && asm.data[cursor + 1] != 'b')) {
                             log_error("expected 'x' or 'b' after '0' to begin binary or hexadecimal literal");
-                            return parse_error(.start_index = cursor + 1, 1);
+                            parse_error(.start_index = cursor + 1, 1);
                         }
                         u8 base_char = asm.data[cursor + 1];
                         cursor += 2;
@@ -785,7 +784,7 @@ static u8 program(void) {
 
                         if (cursor == asm.count) {
                             log_error("expected digits following '0%'", fmt(char, base_char));
-                            return parse_error(.start_index = cursor - 2, 2);
+                            parse_error(.start_index = cursor - 2, 2);
                         }
 
                         for (; cursor < asm.count; cursor += 1) {
@@ -794,15 +793,15 @@ static u8 program(void) {
                             if (base_char == 'b' && (c == '0' || c == '1')) continue;
                             if (ascii_is_whitespace(c)) break;
                             log_error("expected base_char % digit", fmt(char, base_char));
-                            return parse_error(.start_index = cursor);
+                            parse_error(.start_index = cursor);
                         }
 
                         base = base_char == 'b' ? 2 : 16;
                         String number_string = string_range(asm, start_index, cursor);
-                        usize value_unbounded = int_from_string_base(number_string, base);
+                        u64 value_unbounded = int_from_string_base(number_string, base);
                         if (value_unbounded >= 0x10000) {
-                            log_error("0d% is too large to fit in 16 bits", fmt(usize, value_unbounded));
-                            return parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                            log_error("0d% is too large to fit in 16 bits", fmt(u64, value_unbounded));
+                            parse_error(.start_index = start_index, (u8)(cursor - start_index));
                         }
                         value = (u16)value_unbounded;
                     } break;
@@ -825,13 +824,13 @@ static u8 program(void) {
                             if (c == '"') break;
                             if (c == '\n') {
                                 log_error("expected '\"' to close string before newline");
-                                return parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                                parse_error(.start_index = start_index, (u8)(cursor - start_index));
                             }
                         }
 
                         if (cursor == asm.count) {
                             log_error("expected '\"' to close string before end of file");
-                            return parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                            parse_error(.start_index = start_index, (u8)(cursor - start_index));
                         }
 
                         assert(asm.data[cursor] == '"');
@@ -847,23 +846,23 @@ static u8 program(void) {
                             if (ascii_is_whitespace(c)) break;
                             if (c != '2' && c != 'k' && c != 'r') {
                                 log_error("only characters '2', 'k', and 'r' are valid op modes");
-                                return parse_error(.start_index = cursor);
+                                parse_error(.start_index = cursor);
                             }
                         }
 
-                        usize length = cursor - start_index;
+                        u64 length = cursor - start_index;
                         if (length == 0 || length > 3) {
-                            log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %", fmt(usize, length));
-                            return parse_error(.start_index = start_index, (u8)length);
+                            log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %", fmt(u64, length));
+                            parse_error(.start_index = start_index, (u8)length);
                         }
                     } break;
                     default: {
                         log_error("invalid syntax '%'", fmt(char, asm.data[cursor]));
-                        return parse_error(.start_index = cursor);
+                        parse_error(.start_index = cursor);
                     }
                 }
 
-                usize length = cursor - start_index;
+                u64 length = cursor - start_index;
                 if (kind == token_kind_string) length -= 1;
                 assert(length <= 255);
 
@@ -878,7 +877,7 @@ static u8 program(void) {
             }
 
             bool parsing_relative_label = false;
-            for (Token_Id file_token_id = file_cursor.token_id; (usize)file_token_id.index < file->tokens.count; file_token_id.index += 1) {
+            for (Token_Id file_token_id = file_cursor.token_id; (u64)file_token_id.index < file->tokens.count; file_token_id.index += 1) {
                 Token token = *token_get(&assembler, file_token_id);
                 String token_string = token_lexeme(&assembler, file_token_id);
 
@@ -887,7 +886,7 @@ static u8 program(void) {
                         case token_kind_symbol: case ']': case '$': case '/': case token_kind_number: case token_kind_string: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
                     };
                 }
@@ -905,13 +904,13 @@ static u8 program(void) {
                     case '}': {
                         if (assembler.scoped_references.count == 0) {
                             log_error("'}' has no matching '{'");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
 
                         Scoped_Reference reference = pop(assembler.scoped_references);
                         if (reference.is_relative) {
                             log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
 
                         write_u16_swap_bytes(rom, reference.address, (u16)rom.count);
@@ -919,7 +918,7 @@ static u8 program(void) {
                     case '[': {
                         if (assembler.insertion_mode.is_active) {
                             log_error("cannot enter insertion mode while already in insertion mode");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
                         assembler.insertion_mode.is_active = true;
 
@@ -935,20 +934,20 @@ static u8 program(void) {
                     case ']': {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("']' has no matching '['");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
 
                         if (assembler.insertion_mode.has_relative_reference) {
                             Scoped_Reference reference = pop(assembler.scoped_references);
                             if (!reference.is_relative) {
                                 log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
-                                return parse_error(&assembler, token);
+                                parse_error(&assembler, token);
                             }
 
-                            usize relative_difference = rom.count - reference.address - 1;
+                            u64 relative_difference = rom.count - reference.address - 1;
                             if (relative_difference > 255) {
-                                log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(usize, relative_difference));
-                                return parse_error(&assembler, token);
+                                log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(u64, relative_difference));
+                                parse_error(&assembler, token);
                             }
 
                             u8 *location_to_patch = &rom.data[reference.address];
@@ -960,7 +959,7 @@ static u8 program(void) {
                     case '/': {
                         if (next.kind != token_kind_symbol) {
                             log_error("expected relative label following '/'");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
                         parsing_relative_label = true;
                     } break;
@@ -968,34 +967,29 @@ static u8 program(void) {
                         if (parsing_relative_label) {
                             if (next.kind != ':') {
                                 log_error("expected ':' ending relative label definition");
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
                         }
 
                         bool is_label = next.kind == ':';
                         if (is_label) {
-                            for_slice (Label *, label, assembler.labels) {
-                                String label_string = token_lexeme(&assembler, label->token_id);
-                                if (string_equal(label_string, token_string)) {
-                                    log_error("redefinition of label '%'", fmt(String, token_string));
-                                    return parse_error(&assembler, token);
-                                }
+                            if (map_get(&assembler.labels, token_string).pointer != 0) {
+                                log_error("redefinition of label '%'", fmt(String, token_string));
+                                parse_error(&assembler, token);
                             }
 
-                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count, .children.arena = &arena };
+                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count };
+                            map_make(&new_label.children, &arena, 256);
 
-                            Array_Label *labels = 0;
+                            Map_Label *labels = 0;
                             if (parsing_relative_label) {
-                                Label *parent = slice_get_last(assembler.labels);
-                                Array_Label *parent_labels = &parent->children;
+                                Label *parent = slice_get_last(assembler.labels.values);
+                                Map_Label *parent_labels = &parent->children;
                                 labels = parent_labels;
 
-                                for_slice (Label *, label, *parent_labels) {
-                                    String label_string = token_lexeme(&assembler, label->token_id);
-                                    if (string_equal(label_string, token_string)) {
-                                        log_error("redefinition of label '%'", fmt(String, token_string));
-                                        return parse_error(&assembler, token);
-                                    }
+                                if (map_get(parent_labels, token_string).index != 0) {
+                                    log_error("redefinition of label '%'", fmt(String, token_string));
+                                    parse_error(&assembler, token);
                                 }
 
                                 parsing_relative_label = false;
@@ -1003,7 +997,7 @@ static u8 program(void) {
                                 labels = &assembler.labels;
                             }
 
-                            push(labels, new_label);
+                            map_put(labels, token_string, &new_label);
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
@@ -1038,7 +1032,7 @@ static u8 program(void) {
                                     case token_kind_symbol: case token_kind_number: case '{': break;
                                     default: {
                                         log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction.opcode)));
-                                        return parse_error(&assembler, next);
+                                        parse_error(&assembler, next);
                                     }
                                 }
 
@@ -1052,7 +1046,7 @@ static u8 program(void) {
                                         .token_id = token_id_shift(file_token_id, 1),
                                         .destination_address = (u16)rom.count,
                                         .width = width,
-                                        .parent_id = (Label_Id)(assembler.labels.count - 1),
+                                        .parent_id = (Label_Id)(assembler.labels.values.count - 1),
                                     };
                                     push(&assembler.label_references, reference);
                                     rom.count += reference.width;
@@ -1064,7 +1058,7 @@ static u8 program(void) {
                                     if (width == 1) {
                                         if (value > 255) {
                                             log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (% is greater than 255); did you mean to use mode '.2'?", fmt(u16, value));
-                                            return parse_error(&assembler, next);
+                                            parse_error(&assembler, next);
                                         }
                                         rom.data[rom.count] = (u8)value;
                                         rom.count += 1;
@@ -1083,7 +1077,7 @@ static u8 program(void) {
                         if (string_equal(token_string, string("org")) || string_equal(token_string, string("rorg")) || string_equal(token_string, string("aorg"))) {
                             if (next.kind != token_kind_number) {
                                 log_error("expected numeric literal (byte offset) after directive '%'", fmt(String, token_string));
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
 
                             u16 value = next.value;
@@ -1091,8 +1085,8 @@ static u8 program(void) {
                             if (is_relative) value += (u16)rom.count;
 
                             if (value < rom.count) {
-                                log_error("offset % is less than current offset %", fmt(usize, value), fmt(usize, rom.count));
-                                return parse_error(&assembler, next);
+                                log_error("offset % is less than current offset %", fmt(u64, value), fmt(u64, rom.count));
+                                parse_error(&assembler, next);
                             }
 
                             bool assert_only = token_string.data[0] == 'a';
@@ -1103,23 +1097,23 @@ static u8 program(void) {
                         } else if (string_equal(token_string, string("patch"))) {
                             if (next.kind != token_kind_symbol) {
                                 log_error("expected label to indicate destination offset as first argument to directive 'patch'");
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
-                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id, .parent_id = (Label_Id)(assembler.labels.count - 1) };
+                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id, .parent_id = (Label_Id)(assembler.labels.values.count - 1) };
 
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
                                 log_error("expected ',' after between first and second arguments to directive 'patch'");
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                             if (next.kind != token_kind_symbol && next.kind != token_kind_number) {
                                 log_error("expected label or numeric literal to indicate address as second argument to directive 'patch'");
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -1128,20 +1122,19 @@ static u8 program(void) {
                         } else if (string_equal(token_string, string("include"))) {
                             if (next.kind != token_kind_string) {
                                 log_error("expected string following directive 'include'");
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
 
                             String include_filepath = next_string;
                             if (string_equal(include_filepath, file->name)) {
                                 log_error("cyclic inclusion of file '%'", fmt(String, file->name));
-                                return parse_error(&assembler, next);
+                                parse_error(&assembler, next);
                             }
-                            String include_bytes = os_read_entire_file(&arena, include_filepath, 0xffff);
-                            if (include_bytes.count == 0) return 1;
+                            Slice_u8 include_bytes = os_read_entire_file(&arena, include_filepath, 0xffff);
+                            if (include_bytes.count == 0) os_exit(1);
 
                             Input_File new_file = { .bytes = include_bytes, .name = include_filepath, .tokens.arena = &arena };
-                            File_Id new_file_id = (File_Id)assembler.files.count;
-                            push(&assembler.files, new_file);
+                            File_Id new_file_id = (File_Id)map_put(&assembler.files, include_filepath, &new_file).index;
 
                             File_Cursor current = { .cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
                             push(&file_stack, current);
@@ -1151,14 +1144,14 @@ static u8 program(void) {
                             goto switch_file;
                         }
 
-                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2, .parent_id = (Label_Id)(assembler.labels.count - 1) };
+                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2, .parent_id = (Label_Id)(assembler.labels.values.count - 1) };
                         push(&assembler.label_references, reference);
                         rom.count += reference.width;
                     } break;
                     case token_kind_number: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("standalone number literals are only supported in insertion mode (e.g. in [ ... ])");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
 
                         u16 value = token.value;
@@ -1183,7 +1176,7 @@ static u8 program(void) {
                     case token_kind_string: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
-                            return parse_error(&assembler, token);
+                            parse_error(&assembler, token);
                         }
 
                         assert(rom.count + token_string.count <= 0x10000);
@@ -1192,7 +1185,7 @@ static u8 program(void) {
                     } break;
                     default: {
                         log_error("invalid syntax");
-                        return parse_error(&assembler, token);
+                        parse_error(&assembler, token);
                     }
                 }
             }
@@ -1201,7 +1194,7 @@ static u8 program(void) {
                 Scoped_Reference reference = assembler.scoped_references.data[0];
                 Token token = *token_get(&assembler, reference.token_id);
                 log_error("anonymous reference ('{') without matching '}'");
-                return parse_error(&assembler, token);
+                parse_error(&assembler, token);
             }
 
             switch_file:;
@@ -1211,9 +1204,9 @@ static u8 program(void) {
             Label *source_label = 0, *destination_label = 0;
             Label **to_match[] = { &source_label, &destination_label };
             Token_Id match_against[] = { reference->token_id, reference->destination_label_token_id };
-            usize match_count = reference->is_patch ? 2 : 1;
+            u64 match_count = reference->is_patch ? 2 : 1;
 
-            for (usize i = 0; i < match_count; i += 1) {
+            for (u64 i = 0; i < match_count; i += 1) {
                 Label **match = to_match[i];
 
                 Token_Id token_id = match_against[i];
@@ -1229,25 +1222,18 @@ static u8 program(void) {
                 }
                 assert(token.kind == token_kind_symbol);
 
-                Label parent = assembler.labels.data[reference->parent_id];
-                for_slice (Label *, label, parent.children) {
-                    String label_string = token_lexeme(&assembler, label->token_id);
-                    if (!string_equal(reference_string, label_string)) continue;
-                    *match = label;
-                    goto done;
-                }
-
-                for_slice (Label *, label, assembler.labels) {
-                    String label_string = token_lexeme(&assembler, label->token_id);
-                    if (!string_equal(reference_string, label_string)) continue;
-                    *match = label;
+                Label parent = assembler.labels.values.data[reference->parent_id];
+                Label *find = map_get(&parent.children, reference_string).pointer;
+                if (find == 0) find = map_get(&assembler.labels, reference_string).pointer;
+                if (find != 0) {
+                    *match = find;
                     goto done;
                 }
 
                 done:
                 if (*match == 0) {
                     log_error("no such label '%'", fmt(String, reference_string));
-                    return parse_error(&assembler, token, .file_id = token_id.file_id);
+                    parse_error(&assembler, token, .file_id = token_id.file_id);
                 }
             }
 
@@ -1268,14 +1254,14 @@ static u8 program(void) {
 
         if (command == command_compile) {
             assert(arguments.count == 4);
-            char *output_path = cstring_from_string(&arena, arguments.data[3]);
-            file_write_bytes_to_relative_path(output_path, rom.slice);
+            String output_path = arguments.data[3];
+            os_write_entire_file(arena, output_path, rom.slice);
         }
     }
 
     bool should_run = command == command_script || command == command_run;
     if (should_run) {
-        if (rom.count == 0) return 1;
+        if (rom.count == 0) os_exit(1);
 
         Vm vm = { .arena = &arena };
         memcpy(vm.memory, rom.data, rom.count);
@@ -1306,7 +1292,7 @@ static u8 program(void) {
                 }
                 string_builder_print(&builder, "\nRUN ===\n");
             }
-            os_write(builder.slice);
+            os_write(builder.string);
             scratch_end(scratch);
         }
 
@@ -1337,5 +1323,4 @@ static u8 program(void) {
     }
 
     arena_deinit(&arena);
-    return 0;
 }

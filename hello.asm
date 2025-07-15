@@ -57,4 +57,4 @@ punctuation: [$ "!" 0x22 "#$%&'()*+,-./:;<=>?@[\]^_`{|}~" ]
 
 numbers: [$ "0123456789" ]
 
-#include "footer.asm"
+include "footer.asm"

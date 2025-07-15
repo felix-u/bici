@@ -44,7 +44,7 @@ load_coordinates_at_address:
     load
     jsi cast_16_from_8
     swap.2
-    inc.2
+    push.2 0x1 add.2
     load
     jsi cast_16_from_8
     jmp.r

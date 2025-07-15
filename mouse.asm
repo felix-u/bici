@@ -20,7 +20,7 @@ update:
         push.2 last_mouse_colour
         lt.2 jni else
             ; add 1 and store new mouse colour
-            inc.2
+            push.2 0x1 add.2
             push.2 current_mouse_colour
             store.2
             jmi end_set_mouse_colour
@@ -44,7 +44,7 @@ update:
         push.2 last_background_colour
         lt.2 jni else2
             ; add 1 and store new background colour
-            inc.2
+            push.2 0x1 add.2
             push.2 current_background_colour
             store.2
             jmi end_set_background_colour
@@ -78,12 +78,12 @@ update:
     push 0b00001111 and
     jni end_draw_sin_wave
         push.2 sin_wave_frame_counter load
-        inc
+        push 0x1 add
         ; reset if above max - basically modulo
         ; TODO(felix): delta time
         dup push 0x2 gt jni {
             push 0x0
-            nip
+            swap drop
         }
         dup push.2 sin_wave_frame_counter store
 

@@ -20,15 +20,15 @@ update:
 
     ; draw titlebar background
     push.2 0x0
-    /loop: dup.2 push.2 0xc lt.2 jni {
+    /loop: dup.2 push.2 0xc lt.2 jni.2 {
         dup.2
         push screen_y write.2
 
         push 0b10000000
         push screen_pixel write
 
-        inc.2
-        jmi loop
+        push.2 0x1 add.2
+        jmi.2 loop
     } drop.2
     push.2 0xc push screen_y write.2
     push 0b10000011 push screen_pixel write
@@ -44,7 +44,7 @@ update:
     push.2 0x14
     push.2 0x2
     push 0b00001100
-    jsi draw_text
+    jsi.2 draw_text
 
     ; END DRAW TITLEBAR =======================================================
 
@@ -52,62 +52,62 @@ update:
 
     ; for 0..default_program_count
     push 0x0
-    /loop10: dup push.2 default_program_count load lt jni {
+    /loop10: dup push.2 default_program_count load lt jni.2 {
         dup
 
         ; save index
         dup push.2 current_program_label_index store
 
         ; draw floppy
-        jsi current_program_label_x_coordinate push.2 0xc sub.2 push screen_x write.2
-        jsi current_program_label_y_coordinate inc.2 push screen_y write.2
+        jsi.2 current_program_label_x_coordinate push.2 0xc sub.2 push screen_x write.2
+        jsi.2 current_program_label_y_coordinate push.2 0x1 add.2 push screen_y write.2
         push.2 floppy_icon_sprite push screen_data write.2
         push 0b01001101 push screen_sprite write
 
         ; save program name address address = default_programs + current index
         push 0x2 mul ; sizeof(address) = 2
-        jsi cast_u16_from_u8
+        jsi.2 cast_u16_from_u8
         push.2 default_programs
         add.2 ; &default_programs[index]
         load.2 push.2 current_program_name store.2
 
         ; draw file name
         push.2 current_program_name load.2
-        jsi current_program_label_x_coordinate
-        jsi current_program_label_y_coordinate
+        jsi.2 current_program_label_x_coordinate
+        jsi.2 current_program_label_y_coordinate
         push 0b00001100
-        jsi draw_text
+        jsi.2 draw_text
 
         ; BEGIN CLICK CHECK ===================================================
 
-        jsi current_program_label_x_coordinate
-        jsi current_program_label_y_coordinate
+        jsi.2 current_program_label_x_coordinate
+        jsi.2 current_program_label_y_coordinate
         push.2 current_program_name load.2
-        jsi mouse_in_text
+        jsi.2 mouse_in_text
         push 0x16 mul ; (<< 4 = 0b00010000 so that anding with the mouse click value works)
 
         push mouse_left_button read
         push 0b11110000 and
 
-        and jni {
+        and jni.2 {
             ; set up current file for querying
             push.2 current_program_name load.2
             push file_name write.2
 
             ; error if file_length == 0
             push file_length read.2
-            push.2 0x0 eq.2 jni {
+            push.2 0x0 eq.2 jni.2 {
                 ; TODO(felix): nicer solution here
                 push.2 error_file_not_found push console_print write.2
-                jmi end_click_check
+                jmi.2 end_click_check
             }
 
             ; error if file_length < 256
             push file_length read.2
-            push.2 0x100 lt.2 jni {
+            push.2 0x100 lt.2 jni.2 {
                 ; TODO(felix): nicer solution here
                 push.2 error_file_invalid push console_print write.2
-                jmi end_click_check
+                jmi.2 end_click_check
             }
 
             ; TODO(felix): check if ROM fits
@@ -118,11 +118,11 @@ update:
             push file_read read.2
 
             ; error if system_end < 256
-            dup.2 push.2 0x100 lt.2 jni {
+            dup.2 push.2 0x100 lt.2 jni.2 {
                 ; TODO(felix): nicer solution here
                 drop.2
                 push.2 error_length_invalid push console_print write.2
-                jmi end_click_check
+                jmi.2 end_click_check
             }
 
             ; when we copy the file into memory, we only copy as much as we need to
@@ -130,23 +130,23 @@ update:
 
             ; copy
             push.2 0x0 ; TODO(felix): we in fact need to do something else than overwriting the current ROM
-            ; jsi get_new_program_memory_location
+            ; jsi.2 get_new_program_memory_location
             push file_copy write.2
 
-            jsi save_current_program_routine_addresses
+            jsi.2 save_current_program_routine_addresses
         }
 
         /end_click_check:
         ; END CLICK CHECK =====================================================
 
-        inc
-        jmi loop10
+        push 0x1 add
+        jmi.2 loop10
     } drop
 
     ; END DRAW FILE TEXT ======================================================
 
     push 0b00001100
-    jsi draw_default_mouse_cursor_at_mouse
+    jsi.2 draw_default_mouse_cursor_at_mouse
 
     break
 
@@ -157,7 +157,7 @@ update:
         jmp.r
     /current_program_label_y_coordinate: ; (_ -> u16)
         push.2 current_program_label_index load
-        jsi cast_u16_from_u8
+        jsi.2 cast_u16_from_u8
         push.2 0x10 mul.2
         push.2 0x20 add.2
         jmp.r

@@ -12,9 +12,9 @@ enumdef(Vm_Mode, u8) {
 #define VM_OPCODE_MASK (~(VM_MODE_MASK))
 
 #define VM_OPCODE_TABLE \
-    /*     name,   byte, is_immediate */\
+    /* name,  byte, is_immediate */\
     X(break,  0x00, 0)/* NO MODE */\
-    X(push,   0x01, 1)/* NO k MODE */\
+    X(push,   0x01, 1)/* NO .k MODE */\
     X(drop,   0x02, 0)\
     X(swap,   0x03, 0)\
     X(rot,    0x04, 0)\
@@ -102,21 +102,18 @@ enumdef(Vm_File_Action, u8) {
     vm_file_copy    = 0x8,
 };
 
-enumdef(Vm_Opcode, u8) {
+enum {
     #define X(name, val, ...) vm_opcode_##name = val,
     VM_OPCODE_TABLE
     #undef X
     vm_opcode_max_value_plus_one
 };
 
-static const char *vm_opcode_name(u8 instruction) {
-    static const char *vm_opcode_name_table[vm_opcode_max_value_plus_one] = {
-        #define X(name, val, ...) [val] = #name,
-        VM_OPCODE_TABLE
-        #undef X
-    };
-    return vm_opcode_name_table[instruction];
-}
+static String vm_opcode_name[vm_opcode_max_value_plus_one] = {
+    #define X(name, val, ...) [val] = stringc(#name),
+    VM_OPCODE_TABLE
+    #undef X
+};
 
 structdef(Vm_Stack) { u8 memory[0x100], data; };
 
@@ -161,7 +158,7 @@ static u16  vm_get16(Vm *vm, u8 i_back) { return (u16)vm_s(vm_sp - 2 * i_back + 
 static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm, (u8)byte2); }
 static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!(vm->current_mode & VM_MODE_KEEP)) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
-static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO: ensure correct
+static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO(felix): ensure correct
 
 static inline u32 rgb_from_colour(Vm *vm, u8 colour_index) {
     assert(colour_index < 4);
@@ -183,9 +180,6 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
         vm->current_mode = instruction & VM_MODE_MASK;
         vm->active_stack = instruction & VM_MODE_RETURN_STACK;
-
-        u8 instruction_width = ((instruction & VM_MODE_SHORT) >> 5) + 1; // 1 or 2
-        discard(instruction_width); // TODO(felix);
 
         switch (instruction & VM_OPCODE_MASK) {
             case vm_opcode_break: return;
@@ -358,7 +352,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     }
                     vm->memory[vm_device_and_action] = argument;
                 } break;
-                default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(instruction)), fmt(u64, instruction, .base = 16));
+                default: panic("unreachable %{#%}", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]), fmt(u64, instruction, .base = 16));
             } break;
             case VM_MODE_SHORT: switch (instruction & VM_OPCODE_MASK) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
@@ -491,7 +485,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     }
                     set16(&vm->memory[vm_device_and_action], argument);
                 } break;
-                default: panic("unreachable %{#%}", fmt(cstring, (char *)vm_opcode_name(instruction)), fmt(u8, instruction, .base = 16));
+                default: panic("unreachable %{#%}", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]), fmt(u8, instruction, .base = 16));
             } break;
             default: unreachable;
         }
@@ -703,13 +697,12 @@ static void program(void) {
     bool should_compile = command == command_compile || command == command_script;
     if (!should_compile) rom = (Array_u8)array_from_slice(input_bytes);
     else {
-        // TODO(felix): fix
-        // Map_u8 opcode_from_name_map = {0};
-        // map_make(&arena, &opcode_from_name_map, 256);
-        // u8 i;
-        // #define X(name, byte, ...) i = byte; map_put(&opcode_from_name_map, string(#name), &i);
-        // VM_OPCODE_TABLE
-        // #undef X
+        Map_u8 opcode_from_name_map = {0};
+        map_make(&arena, &opcode_from_name_map, 0x1f);
+        for (u8 opcode = 0; opcode <= 0x1f; opcode += 1) {
+            String name = vm_opcode_name[opcode];
+            map_put(&opcode_from_name_map, name, &opcode);
+        }
 
         Assembler_Context assembler = {
             .label_references.arena = &arena,
@@ -980,17 +973,11 @@ static void program(void) {
                             break;
                         }
 
-                        // TODO(felix): fix
-                        // u8 instruction = *map_get(&opcode_from_name_map, token_string).pointer;
+                        u8 *instruction_match = map_get(&opcode_from_name_map, token_string).pointer;
 
-                        u8 instruction = {0};
-                        bool is_opcode = false;
-                        if (false) {}
-                        #define X(name, byte, ...) else if (string_equal(token_string, string(#name))) { instruction = byte; is_opcode = true; }
-                        VM_OPCODE_TABLE
-                        #undef X
+                        if (instruction_match != NULL) {
+                            u8 instruction = *instruction_match;
 
-                        if (is_opcode) {
                             bool explicit_mode = next.kind == token_kind_opmode;
                             if (explicit_mode) {
                                 for_slice (u8 *, c, next_string) {
@@ -1013,7 +1000,7 @@ static void program(void) {
                                 switch (next.kind) {
                                     case token_kind_symbol: case token_kind_number: case '{': break;
                                     default: {
-                                        log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(cstring, (char *)vm_opcode_name(instruction)));
+                                        log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]));
                                         parse_error(&assembler, next);
                                     }
                                 }
@@ -1268,7 +1255,7 @@ static void program(void) {
                     }
 
                     string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
-                        fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(cstring, (char *)vm_opcode_name(byte)), fmt(String, mode_string)
+                        fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(String, vm_opcode_name[byte & VM_OPCODE_MASK]), fmt(String, mode_string)
                     );
                 }
                 string_builder_print(&builder, "\nRUN ===\n");

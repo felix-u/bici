@@ -261,7 +261,7 @@ static UI_Box *ui_box_argument_struct(UI_Box_Arguments arguments) {
         // TODO(felix): there are fields we need to initialise here that are currently only initialised when allocating a new widget
         // TODO(felix): also, I think, fields that need to be zeroed
         // TODO(felix): need to do some cleanup here to unify control flow
-        match->build.display_string = arena_push(ui->frame_arena, display_string);
+        match->build.display_string = string_from_bytes(arena_push(ui->frame_arena, slice_as_bytes(display_string)));
         if (display_string.count != 0) {
             match->computed_size_px[ui_axis_x] = display_string_size.x + match->style.pad.x * 2.f;
             match->computed_size_px[ui_axis_y] = display_string_size.y + match->style.pad.y * 2.f;
@@ -286,8 +286,8 @@ static UI_Box *ui_box_argument_struct(UI_Box_Arguments arguments) {
         .target_style = target_style,
         .computed_size_px = { display_string_size.x + target_style.pad.x * 2.f, display_string_size.y + target_style.pad.y * 2.f },
     };
-    new->build.hash_string = arena_push(ui->persistent_arena, hash_string);
-    new->build.display_string = arena_push(ui->frame_arena, display_string);
+    new->build.hash_string = string_from_bytes(arena_push(ui->persistent_arena, slice_as_bytes(hash_string)));
+    new->build.display_string = string_from_bytes(arena_push(ui->frame_arena, slice_as_bytes(display_string)));
     return new;
 }
 

@@ -241,6 +241,8 @@ structdef(String16) { u16 *data; u64 count; };
 #define slice_as_bytes(s) (Slice_u8){ .data = (u8 *)(s).data, .count = sizeof(*((s).data)) * (s).count }
 #define slice_size(s) ((s).count * (sizeof *(s).data))
 
+#define as_bytes(value) ((Slice_u8){ .data = (u8 *)value, .count = sizeof(*(value)) })
+
 #define array_from_c_array_c(type, capacity_) { .data = (type[capacity_]){0}, .capacity = capacity_ }
 #define array_from_c_array(type, capacity_) ((Array_##type)array_from_c_array_c(type, capacity_))
 

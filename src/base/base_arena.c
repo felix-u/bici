@@ -19,7 +19,7 @@ static void  arena_deinit(Arena *arena);
 // TODO(felix): remove this function. A zeroed reserve+commit arena will be valid and will grow on demand
 static Arena arena_init(u64 initial_size_bytes);
 
-static String arena_push(Arena *arena, String bytes);
+static Slice_u8 arena_push(Arena *arena, Slice_u8 bytes);
 
 static Scratch scratch_begin(Arena *arena);
 static void    scratch_end(Scratch scratch);
@@ -90,10 +90,10 @@ static void arena_deinit(Arena *arena) {
     arena->capacity = 0;
 }
 
-static String arena_push(Arena *arena, String bytes) {
+static Slice_u8 arena_push(Arena *arena, Slice_u8 bytes) {
     u8 *bytes_on_arena = arena_make(arena, bytes.count, sizeof(*bytes.data));
     memcpy(bytes_on_arena, bytes.data, bytes.count);
-    String result = { .data = bytes_on_arena, .count = bytes.count };
+    Slice_u8 result = { .data = bytes_on_arena, .count = bytes.count };
     return result;
 }
 

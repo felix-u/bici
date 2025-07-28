@@ -142,8 +142,8 @@ static force_inline void set16(u8 *address, u16 value) {
     *(address + 1) = (u8)value;
 }
 
-#define vm_stack vm->stacks[vm->active_stack].memory
-#define vm_sp vm->stacks[vm->active_stack].data
+#define vm_stack vm->stacks[vm->active_stack >> 6].memory
+#define vm_sp vm->stacks[vm->active_stack >> 6].data
 
 #define vm_s(data) vm_stack[(u8)(data)]
 #define vm_mem(data) vm->memory[(u16)(data)]
@@ -459,7 +459,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u8 string_length = vm_load8(vm, string_address);
                                 String file_name = { .data = &vm->memory[string_address + 1], .count = string_length };
 
-                                Slice_u8 bytes = os_read_entire_file(vm->arena, file_name, 0xffff);
+                                String bytes = os_read_entire_file(vm->arena, file_name, 0xffff);
 
                                 vm->file_bytes = bytes.data;
 
@@ -561,7 +561,7 @@ structdef(Scoped_Reference) {
 
 structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
 
-structdef(Input_File) { String name; Slice_u8 bytes; Array_Token tokens; };
+structdef(Input_File) { String name; String bytes; Array_Token tokens; };
 
 structdef(Assembler_Context) {
     Map_Input_File files;
@@ -598,7 +598,7 @@ static Token *token_get(Assembler_Context *assembler, Token_Id token_id) {
 static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
     Token token = *token_get(assembler, token_id);
     Input_File *file = token_get_file(assembler, token_id);
-    String asm = string_from_bytes(file->bytes);
+    String asm = file->bytes;
     String token_string = string_range(asm, token.start_index, token.start_index + token.length);
     return token_string;
 }
@@ -626,7 +626,7 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
         length = arguments.token.length;
     } else if (length == 0) length = 1;
 
-    String text = string_from_bytes(assembler->files.values.data[file_id].bytes);
+    String text = assembler->files.values.data[file_id].bytes;
     String file_name = assembler->files.values.data[file_id].name;
     String lexeme = string_range(text, start_index, start_index + length);
 
@@ -665,19 +665,19 @@ static void program(void) {
     String command_string = arguments.data[1];
 
     Command command = 0;
-    if (string_equal(command_string, string("compile"))) {
+    if (string_equals(command_string, string("compile"))) {
         if (arguments.count != 4) {
             log_error("usage: bici compile <file.asm> <file.rom>");
             os_exit(1);
         }
         command = command_compile;
-    } else if (string_equal(command_string, string("run"))) {
+    } else if (string_equals(command_string, string("run"))) {
         if (arguments.count != 3) {
             log_error("usage: bici run <file.rom>");
             os_exit(1);
         }
         command = command_run;
-    } else if (string_equal(command_string, string("script"))) {
+    } else if (string_equals(command_string, string("script"))) {
         if (arguments.count != 3) {
             log_error("usage: bici script <file.asm>");
             os_exit(1);
@@ -690,7 +690,7 @@ static void program(void) {
 
     String input_filepath = arguments.data[2];
     u64 max_filesize = 0x10000;
-    Slice_u8 input_bytes = os_read_entire_file(&arena, input_filepath, max_filesize);
+    String input_bytes = os_read_entire_file(&arena, input_filepath, max_filesize);
 
     Array_u8 rom = array_from_c_array(u8, 0x10000);
 
@@ -721,7 +721,7 @@ static void program(void) {
             File_Cursor file_cursor = pop(file_stack);
             assembler.file_id = file_cursor.token_id.file_id;
             Input_File *file = &assembler.files.values.data[assembler.file_id];
-            String asm = string_from_bytes(file->bytes);
+            String asm = file->bytes;
 
             for (u32 cursor = file_cursor.cursor; cursor < asm.count;) {
                 while (cursor < asm.count && ascii_is_whitespace(asm.data[cursor])) cursor += 1;
@@ -1042,7 +1042,7 @@ static void program(void) {
                             break;
                         }
 
-                        if (string_equal(token_string, string("org")) || string_equal(token_string, string("rorg")) || string_equal(token_string, string("aorg"))) {
+                        if (string_equals(token_string, string("org")) || string_equals(token_string, string("rorg")) || string_equals(token_string, string("aorg"))) {
                             if (next.kind != token_kind_number) {
                                 log_error("expected numeric literal (byte offset) after directive '%'", fmt(String, token_string));
                                 parse_error(&assembler, next);
@@ -1062,7 +1062,7 @@ static void program(void) {
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
-                        } else if (string_equal(token_string, string("patch"))) {
+                        } else if (string_equals(token_string, string("patch"))) {
                             if (next.kind != token_kind_symbol) {
                                 log_error("expected label to indicate destination offset as first argument to directive 'patch'");
                                 parse_error(&assembler, next);
@@ -1087,18 +1087,18 @@ static void program(void) {
                             file_token_id = token_id_shift(file_token_id, 1);
                             reference.token_id = file_token_id;
                             push(&assembler.label_references, reference);
-                        } else if (string_equal(token_string, string("include"))) {
+                        } else if (string_equals(token_string, string("include"))) {
                             if (next.kind != token_kind_string) {
                                 log_error("expected string following directive 'include'");
                                 parse_error(&assembler, next);
                             }
 
                             String include_filepath = next_string;
-                            if (string_equal(include_filepath, file->name)) {
+                            if (string_equals(include_filepath, file->name)) {
                                 log_error("cyclic inclusion of file '%'", fmt(String, file->name));
                                 parse_error(&assembler, next);
                             }
-                            Slice_u8 include_bytes = os_read_entire_file(&arena, include_filepath, 0xffff);
+                            String include_bytes = os_read_entire_file(&arena, include_filepath, 0xffff);
                             if (include_bytes.count == 0) os_exit(1);
 
                             Input_File new_file = { .bytes = include_bytes, .name = include_filepath, .tokens.arena = &arena };
@@ -1223,7 +1223,7 @@ static void program(void) {
         if (command == command_compile) {
             assert(arguments.count == 4);
             String output_path = arguments.data[3];
-            os_write_entire_file(arena, output_path, rom.slice);
+            os_write_entire_file(arena, output_path, bit_cast(String) rom);
         }
     }
 
@@ -1286,7 +1286,7 @@ static void program(void) {
         print("working stack (bottom->top): { ");
         for (u8 token_id = 0; token_id < vm.stacks[0].data; token_id += 1) print("% ", fmt(u64, vm.stacks[0].memory[token_id], .base = 16));
         print("}\nreturn  stack (bottom->top): { ");
-        for (u8 token_id = 0; token_id < vm.stacks[VM_MODE_RETURN_STACK].data; token_id += 1) print("% ", fmt(u64, vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
+        for (u8 token_id = 0; token_id < vm.stacks[1].data; token_id += 1) print("% ", fmt(u64, vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
         print("}\n");
     }
 

@@ -169,13 +169,9 @@ typedef Array(String) Array_String;
 
 #define discard(expression) (void)(expression)
 
-typedef Slice(u8) Slice_u8;
-typedef Array(u8) Array_u8;
-typedef Slice(Slice_u8) Slice_Slice_u8;
-typedef Array(Slice_u8) Array_Slice_u8;
 typedef Slice(u64) Slice_u64;
 #define Map(type) struct { \
-    Array_Slice_u8 keys; \
+    Array_String keys; \
     Array_##type values; \
     Slice_u64 value_index_from_key_hash; \
 }
@@ -187,34 +183,34 @@ typedef Slice(u64) Slice_u64;
 
 #define enumdef(Name, type)\
     typedef type Name;\
-    define_container_types(Name);\
+    define_container_types(Name)\
     enum
 
 #define structdef(Name) \
     typedef struct Name Name; \
-    define_container_types(Name);\
+    define_container_types(Name)\
     struct Name
 
 #define uniondef(Name) \
     typedef union Name Name; \
-    define_container_types(Name);\
+    define_container_types(Name)\
     union Name
 
-define_container_types(void);
-define_container_types(bool);
-typedef Map(u8) Map_u8;
-define_container_types(u16);
-define_container_types(u32);
+define_container_types(void)
+define_container_types(bool)
+define_container_types(u8)
+define_container_types(u16)
+define_container_types(u32)
 typedef Array(u64) Array_u64;
 typedef Map(u64) Map_u64;
-define_container_types(i8);
-define_container_types(i16);
-define_container_types(i32);
-define_container_types(i64);
-define_container_types(f32);
-define_container_types(f64);
-define_container_types(upointer);
-define_container_types(ipointer);
+define_container_types(i8)
+define_container_types(i16)
+define_container_types(i32)
+define_container_types(i64)
+define_container_types(f32)
+define_container_types(f64)
+define_container_types(upointer)
+define_container_types(ipointer)
 
 #define stringc(s)  { .data = (u8 *)s, .count = sizeof(s) - 1 }
 #define string(s) (String)stringc(s)
@@ -238,10 +234,10 @@ structdef(String16) { u16 *data; u64 count; };
 #define pop(s) (*(assert_expression((s).count > 0) ? &(s).data[--(s).count] : 0))
 #define slice_range(s, begin, end) { .data = assert_expression((i64)(end) - (i64)(begin) >= 0 && (end) <= (s).count) ? (s).data + (begin) : 0, .count = (end) - (begin) }
 #define slice_swap_remove(s, i) (s)->data[i] = (s)->data[--(s)->count]
-#define slice_as_bytes(s) (Slice_u8){ .data = (u8 *)(s).data, .count = sizeof(*((s).data)) * (s).count }
+#define slice_as_bytes(s) (String){ .data = (u8 *)((s).data), .count = sizeof(*((s).data)) * (s).count }
 #define slice_size(s) ((s).count * (sizeof *(s).data))
 
-#define as_bytes(value) ((Slice_u8){ .data = (u8 *)value, .count = sizeof(*(value)) })
+#define as_bytes(value) ((String){ .data = (u8 *)value, .count = sizeof(*(value)) })
 
 #define array_from_c_array_c(type, capacity_) { .data = (type[capacity_]){0}, .capacity = capacity_ }
 #define array_from_c_array(type, capacity_) ((Array_##type)array_from_c_array_c(type, capacity_))
@@ -375,12 +371,6 @@ extern void *memset(void *destination_, int byte_, u64 byte_count) {
     assert(destination != 0);
     for (u64 i = 0; i < byte_count; i += 1) destination[i] = byte;
     return destination;
-}
-
-static bool mem_equals(Slice_u8 a, Slice_u8 b) {
-    if (a.count != b.count) return false;
-    for (u64 i = 0; i < a.count; i += 1) if (a.data[i] != b.data[i]) return false;
-    return true;
 }
 
 raddbg_entry_point(program)

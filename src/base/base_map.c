@@ -5,7 +5,7 @@ structdef(Map_Result) { u64 index; void *pointer; };
 structdef(Map_Get_Arguments) {
     u64 _item_size;
     Map_void *map;
-    Slice_u8 key;
+    String key;
     void *put;
 };
 
@@ -50,7 +50,7 @@ static void map_make_explicit_item_size(Arena *arena, Map_void *map, u64 capacit
 
 static Map_Result map_get_argument_struct(Map_Get_Arguments arguments) {
     Map_void *map = arguments.map;
-    Slice_u8 key = arguments.key;
+    String key = arguments.key;
     void *put = arguments.put;
     u64 item_size = arguments._item_size;
 
@@ -72,8 +72,8 @@ static Map_Result map_get_argument_struct(Map_Get_Arguments arguments) {
         value_index = &map->value_index_from_key_hash.data[hash];
         if (*value_index == 0) break;
 
-        Slice_u8 key_at_index = map->keys.data[*value_index];
-        if (mem_equals(key, key_at_index)) break;
+        String key_at_index = map->keys.data[*value_index];
+        if (string_equals(key, key_at_index)) break;
 
         hash += probe_increment;
         probe_increment += 1;

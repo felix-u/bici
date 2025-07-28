@@ -2,8 +2,8 @@
 
 structdef(Os_Read_Entire_File_Arguments) { Arena *arena; String path; u64 max_bytes; };
 #define os_read_entire_file(...) os_read_entire_file_argument_struct((Os_Read_Entire_File_Arguments){ __VA_ARGS__ })
-static Slice_u8 os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments);
-static bool os_write_entire_file(Arena scratch, String path, Slice_u8 bytes);
+static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments);
+static bool os_write_entire_file(Arena scratch, String path, String bytes);
 
 #define log_info(...) log_internal("info: " __VA_ARGS__)
 #define log_internal(...) log_internal_with_location(__FILE__, __LINE__, (char *)__func__, __VA_ARGS__)
@@ -17,12 +17,12 @@ static void print_var_args(char *format, va_list args);
 #else // IMPLEMENTATION
 
 
-static Slice_u8 os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments arguments) {
+static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments arguments) {
     String path = arguments.path;
     u64 max_bytes = arguments.max_bytes;
     if (max_bytes == 0) max_bytes = UINT32_MAX;
 
-    if (path.count == 0) return (Slice_u8){0};
+    if (path.count == 0) return (String){0};
 
     char *path_cstring = cstring_from_string(arguments.arena, path);
     Array_u8 bytes = { .arena = arguments.arena };
@@ -110,10 +110,10 @@ static Slice_u8 os_read_entire_file_argument_struct(Os_Read_Entire_File_Argument
         #error "unsupported OS"
     #endif
 
-    return bytes.slice;
+    return bit_cast(String) bytes;
 }
 
-static bool os_write_entire_file(Arena scratch, String path, Slice_u8 bytes) {
+static bool os_write_entire_file(Arena scratch, String path, String bytes) {
     #if OS_WINDOWS
         u64 dword_max = UINT32_MAX;
         assert(bytes.count <= dword_max);

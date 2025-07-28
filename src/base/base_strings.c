@@ -6,8 +6,6 @@ uniondef(String_Builder) {
     struct { u8 *data; u64 count, _capacity; struct Arena *_arena; };
 };
 
-static force_inline String string_from_bytes(Slice_u8 bytes) { return bit_cast(String) bytes; }
-
 structdef(Format) {
     #if BUILD_DEBUG
         u32 magic_value_for_debug;
@@ -73,7 +71,7 @@ static u64 int_from_string_base(String s, u64 base);
 
 static char *cstring_from_string(Arena *arena, String string);
 
-static bool   string_equal(String s1, String s2);
+static bool   string_equals(String s1, String s2);
 static String string_from_cstring(char *s);
 static String string_from_int_base(Arena *arena, u64 _num, u8 base);
 static String string_print(Arena *arena, char *fmt, ...);
@@ -107,7 +105,7 @@ static u64 int_from_string_base(String s, u64 base) {
     return result;
 }
 
-static bool string_equal(String s1, String s2) {
+static bool string_equals(String s1, String s2) {
     if (s1.count != s2.count) return false;
     return memcmp_(s1.data, s2.data, s1.count) == 0;
 }

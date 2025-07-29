@@ -1,9 +1,8 @@
 #if defined(BASE_NO_IMPLEMENTATION) || defined(BASE_NO_IMPLEMENTATION_STRINGS)
 
 uniondef(String_Builder) {
-    Array_u8 bytes;
-    struct { String string; u64 capacity; struct Arena *arena; };
-    struct { u8 *data; u64 count, _capacity; struct Arena *_arena; };
+    using(Array_u8, bytes);
+    struct { String string; u64 _capacity; struct Arena *_arena; };
 };
 
 structdef(Format) {

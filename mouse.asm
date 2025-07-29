@@ -10,7 +10,7 @@ update:
     ; if left click
     push mouse_left_button read
     push 0b11110000 and
-    jni end_set_mouse_colour
+    jni.2 end_set_mouse_colour
         push.2 message_left_click
         push.2 message store.2
 
@@ -18,12 +18,12 @@ update:
         push.2 current_mouse_colour load.2
         dup.2
         push.2 last_mouse_colour
-        lt.2 jni else
+        lt.2 jni.2 else
             ; add 1 and store new mouse colour
             push.2 0x1 add.2
             push.2 current_mouse_colour
             store.2
-            jmi end_set_mouse_colour
+            jmi.2 end_set_mouse_colour
         /else: ; wrap around to first colour
             drop.2
             push.2 first_mouse_colour
@@ -34,7 +34,7 @@ update:
     ; if right click
     push mouse_right_button read
     push 0b11110000 and
-    jni end_set_background_colour
+    jni.2 end_set_background_colour
         push.2 message_right_click
         push.2 message store.2
 
@@ -42,12 +42,12 @@ update:
         push.2 current_background_colour load.2
         dup.2
         push.2 last_background_colour
-        lt.2 jni else2
+        lt.2 jni.2 else2
             ; add 1 and store new background colour
             push.2 0x1 add.2
             push.2 current_background_colour
             store.2
-            jmi end_set_background_colour
+            jmi.2 end_set_background_colour
         /else2: ; wrap around to first colour
             drop.2
             push.2 first_background_colour
@@ -65,40 +65,40 @@ update:
     push.2 message_header
     push.2 0x10 dup.2
     push.2 current_mouse_colour load.2 load
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 message load.2
     push.2 0x10
     push.2 0x20
     push.2 current_mouse_colour load.2 load
-    jsi draw_text
+    jsi.2 draw_text
 
     ; if left down
     push mouse_left_button read
     push 0b00001111 and
-    jni end_draw_sin_wave
+    jni.2 end_draw_sin_wave
         push.2 sin_wave_frame_counter load
         push 0x1 add
         ; reset if above max - basically modulo
         ; TODO(felix): delta time
-        dup push 0x2 gt jni {
+        dup push 0x2 gt jni.2 {
             push 0x0
             swap drop
         }
         dup push.2 sin_wave_frame_counter store
 
         ; if counter == 0
-        push 0x0 eq jni {
+        push 0x0 eq jni.2 {
             ; if current_sin_wave < last_sin_wave
             push.2 current_sin_wave load.2
             dup.2
             push.2 last_sin_wave
-            lt.2 jni else3
+            lt.2 jni.2 else3
                 ; add 1 and store new sin wave sprite
                 push.2 0x8 add.2
                 push.2 current_sin_wave
                 store.2
-                jmi draw
+                jmi.2 draw
             /else3: ; wrap around to first sin wave
                 drop.2
                 push.2 first_sin_wave
@@ -121,7 +121,7 @@ update:
     /end_draw_sin_wave:
 
     push.2 current_mouse_colour load.2 load
-    jsi draw_default_mouse_cursor_at_mouse
+    jsi.2 draw_default_mouse_cursor_at_mouse
 
     break
 

@@ -154,13 +154,13 @@ update:
     /current_program_label_index: rorg 0x1
     /current_program_label_x_coordinate: ; (_ -> u16)
         push.2 0x1c
-        jmp.r
+        jmp.2r
     /current_program_label_y_coordinate: ; (_ -> u16)
         push.2 current_program_label_index load
         jsi.2 cast_u16_from_u8
         push.2 0x10 mul.2
         push.2 0x20 add.2
-        jmp.r
+        jmp.2r
     /error_file_not_found: [$ "File not found" 0xa ]
     /error_file_invalid:   [$ "File invalid" 0xa ]
     /error_length_invalid: [$ "Rom does not store valid length" 0xa ]
@@ -200,13 +200,13 @@ save_current_program_routine_addresses: ; (_ -> _)
     ; TODO(felix): get actual current program
     push.2 program_1_memory push.2 program_memory store.2
 
-    jmp.r
+    jmp.2r
 
     /program_memory: rorg 0x2
 
 get_new_program_memory_location: ; (_ -> u16)
     push.2 program_1_memory
-    jmp.r
+    jmp.2r
 
 program_1:
     program_1_memory:

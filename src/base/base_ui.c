@@ -57,7 +57,8 @@ structdef(UI_Box) {
 
     UI_Interaction interaction;
 };
-typedef Array(UI_Box *) Array_UI_Box_Pointer;
+typedef UI_Box *UI_Box_Pointer;
+define_container_types(UI_Box_Pointer)
 
 // TODO(felix): actually use properly
 structdef(UI_Style_Stack) {

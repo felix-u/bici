@@ -47,13 +47,13 @@ patch system_end, EOF
 
 cast_u16_from_u8: ; (value: u8 -> u16)
     push 0x0 swap
-    jmp.r
+    jmp.2r
 
 string_width: ; (string_address: u16 -> u16)
     load
     jsi.2 cast_u16_from_u8
     push.2 0x8 mul.2
-    jmp.r
+    jmp.2r
 
 mouse_in_rectangle: ; (x, y, width, height: u16 -> u8)
     push.2 height store.2
@@ -64,29 +64,29 @@ mouse_in_rectangle: ; (x, y, width, height: u16 -> u8)
     ; if mouse_x < x
     push mouse_x read.2
     push.2 x load.2
-    lt.2 jni.2 { push 0x0 jmp.r }
+    lt.2 jni.2 { push 0x0 jmp.2r }
 
     ; if mouse_x > x + width
     push mouse_x read.2
     push.2 x load.2
     push.2 width load.2
     add.2
-    gt.2 jni.2 { push 0x0 jmp.r }
+    gt.2 jni.2 { push 0x0 jmp.2r }
 
     ; if mouse_y < y
     push mouse_y read.2
     push.2 y load.2
-    lt.2 jni.2 { push 0x0 jmp.r }
+    lt.2 jni.2 { push 0x0 jmp.2r }
 
     ; if mouse_y > y + height
     push mouse_y read.2
     push.2 y load.2
     push.2 height load.2
     add.2
-    gt.2 jni.2 { push 0x0 jmp.r }
+    gt.2 jni.2 { push 0x0 jmp.2r }
 
     push 0x1
-    jmp.r
+    jmp.2r
 
     /x: rorg 0x2
     /y: rorg 0x2
@@ -97,7 +97,7 @@ mouse_in_text: ; (top_left_x, top_left_y, string_address: u16 -> u8)
     jsi.2 string_width
     push.2 0x8
     jsi.2 mouse_in_rectangle
-    jmp.r
+    jmp.2r
 
 draw_text: ; (string_address, x, y: u16, text_colour: u8 -> _)
     push.2 text_colour store
@@ -162,7 +162,7 @@ draw_text: ; (string_address, x, y: u16, text_colour: u8 -> _)
         }
         drop.2
 
-    jmp.r
+    jmp.2r
 
     /text_colour: rorg 0x1
     /count: rorg 0x2
@@ -181,7 +181,7 @@ draw_default_mouse_cursor_at_mouse: ; (colour: u8 -> _)
 
     push screen_sprite write
 
-    jmp.r
+    jmp.2r
 
 mouse_cursor_sprite: [
     0b10000000

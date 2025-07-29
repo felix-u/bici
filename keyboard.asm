@@ -48,17 +48,17 @@ update:
     push.2 window_height load.2
     push.2 0x30 sub.2
     push 0b00001100
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 control_hint_bottom
     push.2 0x18
     push.2 window_height load.2
     push.2 0x28 sub.2
     push 0b00001100
-    jsi draw_text
+    jsi.2 draw_text
 
     push 0x57 ; 'W'
-    jsi key_down jni {
+    jsi.2 key_down jni.2 {
         push.2 target_sprite_y load.2
         push.2 0x10 sub.2
         dup.2
@@ -67,7 +67,7 @@ update:
     }
 
     push 0x41 ; 'A'
-    jsi key_down jni {
+    jsi.2 key_down jni.2 {
         push.2 target_sprite_x load.2
         push.2 0x10 sub.2
         dup.2
@@ -76,7 +76,7 @@ update:
     }
 
     push 0x53 ; 'S'
-    jsi key_down jni {
+    jsi.2 key_down jni.2 {
         push.2 target_sprite_y load.2
         push.2 0x10 add.2
         dup.2
@@ -85,7 +85,7 @@ update:
     }
 
     push 0x44 ; 'D'
-    jsi key_down jni {
+    jsi.2 key_down jni.2 {
         push.2 target_sprite_x load.2
         push.2 0x10 add.2
         dup.2
@@ -96,7 +96,7 @@ update:
     ; if left click
     push mouse_left_button read
     push 0b11110000 and
-    jni {
+    jni.2 {
         push mouse_x read.2
         push.2 0x8 mul.2
         push.2 target_sprite_x store.2
@@ -108,12 +108,12 @@ update:
 
     push.2 real_sprite_x load.2
     push.2 target_sprite_x load.2
-    jsi interpolate
+    jsi.2 interpolate
     push.2 real_sprite_x store.2
 
     push.2 real_sprite_y load.2
     push.2 target_sprite_y load.2
-    jsi interpolate
+    jsi.2 interpolate
     push.2 real_sprite_y store.2
 
     push.2 real_sprite_x load.2
@@ -130,7 +130,7 @@ update:
     push screen_sprite write
 
     push 0b00000000
-    jsi draw_default_mouse_cursor_at_mouse
+    jsi.2 draw_default_mouse_cursor_at_mouse
 
     break
 
@@ -146,14 +146,14 @@ interpolate: ; (a, b: u16 -> u16)
     push.2 initial_a load.2
     add.2
 
-    jmp.r
+    jmp.2r
     /initial_a: rorg 0x2
 
 key_down: ; (key: u8 -> u8)
     push keyboard_key_value write
     push keyboard_key_state read
     push 0b00001111 and
-    jmp.r
+    jmp.2r
 
 control_hint_top: [$ "W" ]
 control_hint_bottom: [$ "ASD" ]

@@ -17,62 +17,24 @@ structdef(Gfx_Font) {
     u8 glyphs[gfx_max_font_width * gfx_max_font_height][128]; // NOTE(felix): worth looking into whether we want to support > 128. IBM codepage 437 might be cool!
 };
 
-enumdef(Gfx_Key, u8) {
-    gfx_key_shift                = VK_SHIFT,
-    gfx_key_control              = VK_CONTROL,
-    gfx_key_space                = VK_SPACE,
-    gfx_key_left                 = VK_LEFT,
-    gfx_key_down                 = VK_DOWN,
-    gfx_key_up                   = VK_UP,
-    gfx_key_right                = VK_RIGHT,
-    gfx_key_a                    = 'A',
-    gfx_key_b                    = 'B',
-    gfx_key_c                    = 'C',
-    gfx_key_d                    = 'D',
-    gfx_key_s                    = 'S',
-    gfx_key_w                    = 'W',
-    gfx_key_f1                   = VK_F1,
-    gfx_key_f2                   = VK_F2,
-    gfx_key_f3                   = VK_F3,
-    gfx_key_f4                   = VK_F4,
-    gfx_key_f5                   = VK_F5,
-    gfx_key_f6                   = VK_F6,
-    gfx_key_f7                   = VK_F7,
-    gfx_key_f8                   = VK_F8,
-    gfx_key_f9                   = VK_F9,
-    gfx_key_f10                  = VK_F10,
-    gfx_key_comma                = VK_OEM_COMMA,
-    gfx_key_dot                  = VK_OEM_PERIOD,
-    gfx_key_left_square_bracket  = VK_OEM_4,
-    gfx_key_right_square_bracket = VK_OEM_6,
-    gfx_key_count,
-};
-
 structdef(Gfx_Frame_Info) {
-    V2 real_window_size;
-    V2 real_screen_size;
-    HMONITOR monitor_handle;
     V2 virtual_window_size;
-    f32 dpi_scale;
     V2 real_mouse_position;
-    bool mouse_left_down, mouse_right_down;
-    bool mouse_left_clicked, mouse_right_clicked;
-    Gfx_Key key_is_down[256];
-    Gfx_Key key_is_up[256];
-    Gfx_Key key_was_down_last_frame[256];
-    Gfx_Key key_was_up_last_frame[256];
+    bool mouse_down[SAPP_MAX_MOUSEBUTTONS];
+    bool mouse_up[SAPP_MAX_MOUSEBUTTONS];
+    bool mouse_down_previously[SAPP_MAX_MOUSEBUTTONS];
+    bool mouse_up_previously[SAPP_MAX_MOUSEBUTTONS];
+    bool key_down[SAPP_MAX_KEYCODES];
+    bool key_up[SAPP_MAX_KEYCODES];
+    bool key_down_previously[SAPP_MAX_KEYCODES];
+    bool key_up_previously[SAPP_MAX_KEYCODES];
     f32 seconds;
 };
 
 structdef(Gfx_Render_Context) {
-    HWND window_handle;
-    HDC memory_device_context;
-    HBITMAP bitmap;
     u32 *pixels;
-
     Gfx_Font font;
-
-    Gfx_Frame_Info frame_info;
+    using(Gfx_Frame_Info, frame_info);
 };
 
 uniondef(Gfx_Rectangle) {
@@ -85,14 +47,8 @@ structdef(Gfx_Texture_Vertex) { V2 position, texture_coordinate; };
 // TODO(felix): remove or do something with this
 structdef(Gfx_Vertex) { f32 x, y, r, g, b, a; };
 
-#define release(obj) vcall((IUnknown *)(obj), Release);
-#define ensure_released_and_null(obj) statement_macro( if (*(obj) != 0) { release(*(obj)); *(obj) = 0; } )
-#define vcall(struct_ptr, fn_name) (struct_ptr)->lpVtbl->fn_name(struct_ptr)
-#define vcalla(struct_ptr, fn_name, ...) (struct_ptr)->lpVtbl->fn_name((struct_ptr), __VA_ARGS__)
-
-#define gfx_key_is_down(gfx, key) (gfx)->frame_info.key_is_down[key]
-#define gfx_key_is_up(gfx, key) (gfx)->frame_info.key_is_up[key]
-#define gfx_key_is_pressed(gfx, key) (gfx_key_is_down(gfx, key) && !(gfx)->frame_info.key_was_down_last_frame[key])
+#define gfx_key_pressed(gfx, key) ((gfx).key_down[key] && !(gfx).key_down_previously[key])
+#define gfx_mouse_clicked(gfx, button) ((gfx).mouse_down[button] && !(gfx).mouse_down_previously[button])
 
 static                 V2 gfx_get_real_screen_size(Gfx_Render_Context *gfx);
 static inline         u32 gfx_rgba8_from_v4(V4 v);
@@ -101,10 +57,6 @@ static               void gfx_draw_line(Gfx_Render_Context *gfx, V2 start_positi
 static               void gfx_draw_rectangle(Gfx_Render_Context *gfx, i32 top, i32 left, i32 width, i32 height, u32 rgb);
 static               void gfx_draw_text(Gfx_Render_Context *gfx, Gfx_Font font, String string, i32 x, i32 y, u32 rgb);
 static inline        void gfx_set_pixel(Gfx_Render_Context *gfx, i32 x, i32 y, u32 rgb);
-static            LRESULT gfx_win32_window_procedure(HWND window, u32 message, WPARAM w, LPARAM l);
-static Gfx_Render_Context gfx_window_create(Arena *arena, char *window_name, u32 width, u32 height);
-static               bool gfx_window_should_close(Gfx_Render_Context *gfx);
-
 
 #else // IMPLEMENTATION
 
@@ -782,19 +734,6 @@ static Gfx_Font gfx_font_default_3x5 = {
     },
 };
 
-static V2 gfx_get_real_screen_size(Gfx_Render_Context *gfx) {
-    gfx->frame_info.monitor_handle = MonitorFromWindow(gfx->window_handle, MONITOR_DEFAULTTONEAREST);
-
-    MONITORINFO info = { .cbSize = sizeof(MONITORINFO) };
-    bool ok = GetMonitorInfoA(gfx->frame_info.monitor_handle, &info);
-    assert(ok);
-
-    V2 size;
-    size.x = (f32)(info.rcMonitor.right - info.rcMonitor.left);
-    size.y = (f32)(info.rcMonitor.bottom - info.rcMonitor.top);
-    return size;
-}
-
 static inline u32 gfx_rgba8_from_v4(V4 v) {
     u32 result =
         ((u32)(v.r * 255.f + 0.5f) << 24) |
@@ -928,147 +867,6 @@ static void gfx_draw_text(Gfx_Render_Context *gfx, Gfx_Font font, String string,
             }
         }
     }
-}
-
-static Gfx_Render_Context *gfx_win32_window_procedure_context__;
-static LRESULT gfx_win32_window_procedure(HWND window, u32 message, WPARAM w, LPARAM l) {
-    Gfx_Render_Context *gfx = gfx_win32_window_procedure_context__;
-    switch (message) {
-        case WM_CLOSE: DestroyWindow(window); break;
-        case WM_DESTROY: PostQuitMessage(0); break;
-        case WM_DISPLAYCHANGE: gfx->frame_info.real_screen_size = gfx_get_real_screen_size(gfx); break;
-        case WM_DPICHANGED: {
-            f32 dpi_1x = 96.f;
-            gfx->frame_info.dpi_scale = (f32)GetDpiForWindow(window) / dpi_1x;
-        } break;
-        case WM_GETMINMAXINFO: { // TODO(felix): not working. The goal is to not allow the window to become smaller than a certain size
-            MINMAXINFO *info = (MINMAXINFO *)l;
-            int min_width = 100, min_height = 100;
-            info->ptMinTrackSize.x = min_width;
-            info->ptMinTrackSize.y = min_height;
-        } break;
-        case WM_KEYDOWN: {
-            gfx->frame_info.key_is_up[w] = false;
-            gfx->frame_info.key_is_down[w] = true;
-        } break;
-        case WM_KEYUP: {
-            gfx->frame_info.key_is_down[w] = false;
-            gfx->frame_info.key_is_up[w] = true;
-        } break;
-        case WM_LBUTTONDOWN: gfx->frame_info.mouse_left_clicked = true; gfx->frame_info.mouse_left_down = true; break;
-        case WM_LBUTTONUP: gfx->frame_info.mouse_left_clicked = false; gfx->frame_info.mouse_left_down = false; break;
-        case WM_MOUSEMOVE: {
-            // NOTE(felix): we include windowsx.h just for these two lparam macros. Can we remove that and do something else?
-            gfx->frame_info.real_mouse_position.x = (f32)GET_X_LPARAM(l);
-            gfx->frame_info.real_mouse_position.y = (f32)GET_Y_LPARAM(l);
-        } break;
-        case WM_RBUTTONDOWN: gfx->frame_info.mouse_right_clicked = true; gfx->frame_info.mouse_right_down = true; break;
-        case WM_RBUTTONUP: gfx->frame_info.mouse_right_clicked = false; gfx->frame_info.mouse_right_down = false; break;
-        case WM_SIZE: {
-            gfx->frame_info.real_window_size.x = (f32)LOWORD(l);
-            gfx->frame_info.real_window_size.y = (f32)HIWORD(l);
-        } break;
-        case WM_SIZING: {
-            // TODO(felix): handle redrawing here so that we're not blocked while resizing
-            // NOTE(felix): apparently there might be some problems with this and the better way to do it is for the thread with window events to be different than the application thread that submits draw calls and updates the program
-        } break;
-    }
-    return DefWindowProcA(window, message, w, l);
-}
-
-static Gfx_Render_Context gfx_window_create(Arena *arena, char *window_name, u32 width, u32 height) {
-    Gfx_Render_Context gfx = {0};
-    gfx_win32_window_procedure_context__ = &gfx;
-
-    // window
-    {
-        WNDCLASSA window_class = {
-            .lpfnWndProc = gfx_win32_window_procedure,
-            .hCursor = LoadCursorA(0, IDC_ARROW),
-            .lpszClassName = window_name,
-        };
-        ATOM atom_result = RegisterClassA(&window_class);
-        ensure(atom_result != 0);
-
-        bool ok = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        ensure(ok);
-
-        DWORD extended_style = 0;
-        char *class_name = window_name;
-        int x = CW_USEDEFAULT, y = CW_USEDEFAULT, window_width = CW_USEDEFAULT, window_height = CW_USEDEFAULT;
-        gfx.window_handle = CreateWindowExA(extended_style, class_name, window_name, WS_OVERLAPPEDWINDOW, x, y, window_width, window_height, 0, 0, 0, 0);
-        ensure(gfx.window_handle != 0);
-    }
-
-    HRESULT hresult = ShowWindow(gfx.window_handle, SW_SHOWDEFAULT);
-    ensure(hresult == S_OK);
-
-    // TODO(felix): option to have resizable *virtual* window, not just resizable real window
-    gfx.frame_info.virtual_window_size = (V2){ .x = (f32)width, .y = (f32)height };
-    gfx.pixels = arena_make(arena, width * height, sizeof(u32));
-
-    HDC window_device_context = GetDC(gfx.window_handle);
-    {
-        i32 virtual_width = (i32)gfx.frame_info.virtual_window_size.x;
-        i32 virtual_height = (i32)gfx.frame_info.virtual_window_size.y;
-
-        BITMAPINFOHEADER bitmap_info_header = {
-            .biSize = sizeof(bitmap_info_header),
-            .biWidth = virtual_width,
-            .biHeight = -virtual_height,
-            .biPlanes = 1,
-            .biBitCount = sizeof(*(gfx.pixels)) * 8,
-        };
-
-        gfx.memory_device_context = CreateCompatibleDC(window_device_context);
-        ensure(gfx.memory_device_context != 0);
-
-        gfx.bitmap = CreateDIBSection(gfx.memory_device_context, (BITMAPINFO *)&bitmap_info_header, DIB_RGB_COLORS, (void **)&gfx.pixels, 0, 0);
-        ensure(gfx.bitmap != 0);
-
-        SelectObject(gfx.memory_device_context, gfx.bitmap);
-    }
-    ReleaseDC(gfx.window_handle, window_device_context);
-
-    return gfx;
-}
-
-static bool gfx_window_should_close(Gfx_Render_Context *gfx) {
-    memcpy(gfx->frame_info.key_was_down_last_frame, gfx->frame_info.key_is_down, sizeof(gfx->frame_info.key_is_down));
-    memcpy(gfx->frame_info.key_was_up_last_frame, gfx->frame_info.key_is_up, sizeof(gfx->frame_info.key_is_up));
-    gfx->frame_info.mouse_left_clicked = false;
-    gfx->frame_info.mouse_right_clicked = false;
-
-    gfx_win32_window_procedure_context__ = gfx;
-    for (MSG message = {0}; PeekMessageA(&message, 0, 0, 0, PM_REMOVE);) {
-        if (message.message == WM_QUIT) {
-            DeleteObject(gfx->bitmap);
-            DeleteDC(gfx->memory_device_context);
-            return true;
-        }
-        TranslateMessage(&message);
-        DispatchMessageA(&message);
-    }
-
-    HDC window_device_context = GetDC(gfx->window_handle);
-    {
-        i32 virtual_width = (i32)gfx->frame_info.virtual_window_size.x;
-        i32 virtual_height = (i32)gfx->frame_info.virtual_window_size.y;
-        i32 real_width = (i32)gfx->frame_info.real_window_size.x;
-        i32 real_height = (i32)gfx->frame_info.real_window_size.y;
-
-        StretchBlt(
-            window_device_context,
-            0, 0, real_width, real_height,
-            gfx->memory_device_context,
-            0, 0, virtual_width, virtual_height,
-            SRCCOPY
-        );
-        DwmFlush();
-    }
-    ReleaseDC(gfx->window_handle, window_device_context);
-
-    return false;
 }
 
 #endif // defined(BASE_NO_IMPLEMENTATION) || defined(BASE_NO_IMPLEMENTATION_GFX)

@@ -92,6 +92,9 @@
 
 #endif // COMPILER
 
+#if defined(unreachable)
+    #undef unreachable
+#endif
 
 #if BUILD_DEBUG
     #define assert(expr) { if(!(expr)) panic("failed assertion `"#expr"`"); }
@@ -107,17 +110,19 @@
 // TODO(felix): no dependency on C stdlib!
     #include <math.h> // TODO(felix): look into
 
-#if defined(bool)
-    #undef bool
+#if !defined(__bool_true_false_are_defined)
+    #if defined(bool)
+        #undef bool
+    #endif
+    typedef _Bool bool;
+    #if !defined(true)
+        #define true 1
+    #endif
+    #if !defined(false)
+        #define false 0
+    #endif
+    #define __bool_true_false_are_defined 1
 #endif
-typedef _Bool bool;
-#if !defined(true)
-    #define true 1
-#endif
-#if !defined(false)
-    #define false 0
-#endif
-#define __bool_true_false_are_defined 1
 
 typedef  uint8_t  u8;
 typedef uint16_t u16;
@@ -203,7 +208,9 @@ typedef Slice(u64) Slice_u64;
     union Name
 
 define_container_types(void)
-define_container_types(bool)
+typedef Slice(bool) Slice_bool;
+typedef Array(bool) Array_bool;
+typedef Map(bool) Map_bool;
 define_container_types(u8)
 define_container_types(u16)
 define_container_types(u32)

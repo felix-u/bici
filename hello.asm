@@ -16,34 +16,34 @@ update:
     push.2 0x10
     push.2 0x10
     push 0b00000100
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 hello
     push.2 0x10
     push.2 0x20
     push 0b00000100
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 punctuation
     push.2 0x10
     push.2 0x30
     push 0b00000100
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 numbers
     push.2 0x10
     push.2 0x40
     push 0b00000100
-    jsi draw_text
+    jsi.2 draw_text
 
     push.2 alphabet_lowercase
     push.2 0x10
     push.2 0x50
     push 0b00000100
-    jsi draw_text
+    jsi.2 draw_text
 
     push 0b00000100
-    jsi draw_default_mouse_cursor_at_mouse
+    jsi.2 draw_default_mouse_cursor_at_mouse
 
     break
 

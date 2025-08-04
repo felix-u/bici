@@ -3,12 +3,12 @@
 #define vm_screen_initial_width 640
 #define vm_screen_initial_height 360
 
-enumdef(Vm_Mode, u8) {
+typedef enum {
     VM_MODE_SHORT = 1 << 5,
     VM_MODE_RETURN_STACK = 1 << 6,
     VM_MODE_KEEP = 1 << 7,
     VM_MODE_MASK = VM_MODE_SHORT | VM_MODE_RETURN_STACK | VM_MODE_KEEP,
-};
+} Vm_Mode;
 #define VM_OPCODE_MASK (~(VM_MODE_MASK))
 
 #define VM_OPCODE_TABLE \

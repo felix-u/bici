@@ -1,5 +1,6 @@
 // raddbg 0.9.20 project file
 
+recent_file: path: "D:/interface/interface.rdi"
 recent_file: path: "src/main.c"
 recent_file: path: "src/base/base_strings.c"
 recent_file: path: "../../../../../temp/SDL3-3.2.16/src/dynapi/sdl_dynapi_procs.h"
@@ -7,7 +8,6 @@ recent_file: path: "src/main.odin"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/core.odin"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/core_builtin.odin"
 recent_file: path: "../../../../../appfolders/odin/base/runtime/entry_windows.odin"
-recent_file: path: "D:/interface/interface.rdi"
 recent_file: path: "src/base/base_arena.c"
 recent_file: path: "src/base/base_io.c"
 recent_file: path: "src/base/base_core.c"

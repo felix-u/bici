@@ -31,7 +31,7 @@ target:
   executable: "build/bici.exe"
   working_directory: "../bici"
   enabled: 1
-  arguments: "run os.rom"
+  arguments: "script keyboard.asm"
 }
 type_view:
 {

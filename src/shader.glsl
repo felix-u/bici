@@ -16,6 +16,7 @@ void main() {
         texture_coordinate = vec2(0.0, 2.0);
     }
 
+    position_ndc.y = -position_ndc.y;
     gl_Position = vec4(position_ndc, 0.0, 1.0);
     fragment_texture_coordinate = texture_coordinate;
 }

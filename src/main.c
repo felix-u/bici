@@ -323,7 +323,6 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
                                     u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
 
-                                    breakpoint;
                                     if (fill_x && fill_y) {
                                         gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
                                     } else if (fill_x) {
@@ -573,17 +572,8 @@ static void frame(void) {
     memcpy(g->mouse_down_previously, g->mouse_down, sizeof(g->mouse_down));
     memcpy(g->mouse_up_previously, g->mouse_up, sizeof(g->mouse_up));
 
-
     u16 vm_on_screen_update_pc = vm_load16(&g_vm, vm_device_screen | vm_screen_update);
     vm_run_to_break(&g_vm, vm_on_screen_update_pc);
-
-    // TODO(felix): remove
-    static u32 x = 0, y = 0;
-    g_vm.gfx.pixels[y * vm_screen_initial_width + x] = 0xff00ff;
-    x += 1;
-    y += 1;
-    x %= vm_screen_initial_width;
-    y %= vm_screen_initial_height;
 
     sg_image_data image_data = { .subimage[0][0] = { g->pixels, vm_screen_initial_width * vm_screen_initial_height * sizeof *g->pixels } };
     sg_update_image(state.image, &image_data);
@@ -1406,6 +1396,8 @@ static void program(void) {
             os_write(builder.string);
             scratch_end(scratch);
         }
+
+        g_vm = vm;
 
         sapp_run(&(sapp_desc){
             .init_cb = init,

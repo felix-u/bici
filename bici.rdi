@@ -31,7 +31,7 @@ target:
   executable: "build/bici.exe"
   working_directory: "../bici"
   enabled: 1
-  arguments: "script keyboard.asm"
+  arguments: "script os.asm"
 }
 type_view:
 {

@@ -154,7 +154,6 @@ structdef(Vm) {
 
     u8 *file_bytes;
 };
-static Vm g_vm;
 
 static force_inline u16 get16(u8 *address) {
     u16 result = 0;
@@ -523,13 +522,14 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
 
 static Arena arena;
 
-static void init(void) {
-    g_vm.gfx.pixels = arena_make(&arena, vm_screen_initial_width * vm_screen_initial_height, sizeof *g_vm.gfx.pixels);
+static void init(void *vm_) {
+    Vm *vm = vm_;
+    vm->gfx.pixels = arena_make(&arena, vm_screen_initial_width * vm_screen_initial_height, sizeof *vm->gfx.pixels);
 
     sapp_show_mouse(false);
 
-    g_vm.gfx.virtual_window_size = (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)vm_screen_initial_height };
-    gfx_clear(&g_vm.gfx, 0);
+    vm->gfx.virtual_window_size = (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)vm_screen_initial_height };
+    gfx_clear(&vm->gfx, 0);
 
     sg_setup(&(sg_desc){
         .environment = sglue_environment(),
@@ -561,19 +561,16 @@ static void init(void) {
         .samplers[0] = state.sampler,
     };
 
-    u16 vm_on_system_start_pc = vm_load16(&g_vm, vm_device_system | vm_system_start);
-    vm_run_to_break(&g_vm, vm_on_system_start_pc);
+    u16 vm_on_system_start_pc = vm_load16(vm, vm_device_system | vm_system_start);
+    vm_run_to_break(vm, vm_on_system_start_pc);
 }
 
-static void frame(void) {
-    Gfx_Render_Context *g = &g_vm.gfx;
-    memcpy(g->key_down_previously, g->key_down, sizeof(g->key_down));
-    memcpy(g->key_up_previously, g->key_up, sizeof(g->key_up));
-    memcpy(g->mouse_down_previously, g->mouse_down, sizeof(g->mouse_down));
-    memcpy(g->mouse_up_previously, g->mouse_up, sizeof(g->mouse_up));
+static void frame(void *vm_) {
+    Vm *vm = vm_;
+    Gfx_Render_Context *g = &vm->gfx;
 
-    u16 vm_on_screen_update_pc = vm_load16(&g_vm, vm_device_screen | vm_screen_update);
-    vm_run_to_break(&g_vm, vm_on_screen_update_pc);
+    u16 vm_on_screen_update_pc = vm_load16(vm, vm_device_screen | vm_screen_update);
+    vm_run_to_break(vm, vm_on_screen_update_pc);
 
     sg_image_data image_data = { .subimage[0][0] = { g->pixels, vm_screen_initial_width * vm_screen_initial_height * sizeof *g->pixels } };
     sg_update_image(state.image, &image_data);
@@ -586,35 +583,45 @@ static void frame(void) {
     sg_commit();
 }
 
-static void cleanup(void) {
-    u16 vm_on_system_quit_pc = vm_load16(&g_vm, vm_device_system | vm_system_quit);
-    vm_run_to_break(&g_vm, vm_on_system_quit_pc);
+static void cleanup(void *vm_) {
+    Vm *vm = vm_;
+    u16 vm_on_system_quit_pc = vm_load16(vm, vm_device_system | vm_system_quit);
+    vm_run_to_break(vm, vm_on_system_quit_pc);
 
     sg_shutdown();
 
     print("working stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < g_vm.stacks[0].data; token_id += 1) print("% ", fmt(u64, g_vm.stacks[0].memory[token_id], .base = 16));
+    for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("% ", fmt(u64, vm->stacks[0].memory[token_id], .base = 16));
     print("}\nreturn  stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < g_vm.stacks[1].data; token_id += 1) print("% ", fmt(u64, g_vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
+    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("% ", fmt(u64, vm->stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
     print("}\n");
 }
 
-static void event(const sapp_event *e) {
-    Gfx_Render_Context *g = &g_vm.gfx;
+static void event(const sapp_event *e, void *vm_) {
+    Vm *vm = vm_;
+    Gfx_Render_Context *g = &vm->gfx;
     switch (e->type) {
         case SAPP_EVENTTYPE_KEY_DOWN: {
+            g->key_down_previously[e->key_code] = g->key_down[e->key_code];
+            g->key_up_previously[e->key_code] = g->key_up[e->key_code];
             g->key_up[e->key_code] = false;
             g->key_down[e->key_code] = true;
         } break;
         case SAPP_EVENTTYPE_KEY_UP: {
+            g->key_down_previously[e->key_code] = g->key_down[e->key_code];
+            g->key_up_previously[e->key_code] = g->key_up[e->key_code];
             g->key_down[e->key_code] = false;
             g->key_up[e->key_code] = true;
         } break;
         case SAPP_EVENTTYPE_MOUSE_DOWN: {
+            g->mouse_down_previously[e->mouse_button] = g->mouse_down[e->mouse_button];
+            g->mouse_up_previously[e->mouse_button] = g->mouse_up[e->mouse_button];
             g->mouse_up[e->mouse_button] = false;
             g->mouse_down[e->mouse_button] = true;
         } break;
         case SAPP_EVENTTYPE_MOUSE_UP: {
+            g->mouse_down_previously[e->mouse_button] = g->mouse_down[e->mouse_button];
+            g->mouse_up_previously[e->mouse_button] = g->mouse_up[e->mouse_button];
             g->mouse_down[e->mouse_button] = false;
             g->mouse_up[e->mouse_button] = true;
         } break;
@@ -1397,13 +1404,12 @@ static void program(void) {
             scratch_end(scratch);
         }
 
-        g_vm = vm;
-
         sapp_run(&(sapp_desc){
-            .init_cb = init,
-            .frame_cb = frame,
-            .cleanup_cb = cleanup,
-            .event_cb = event,
+            .user_data = &vm,
+            .init_userdata_cb = init,
+            .frame_userdata_cb = frame,
+            .cleanup_userdata_cb = cleanup,
+            .event_userdata_cb = event,
             .window_title = "bici",
             .logger.func = sokol_logger,
             .high_dpi = true,

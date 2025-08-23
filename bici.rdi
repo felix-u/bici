@@ -31,7 +31,7 @@ target:
   executable: "build/bici.exe"
   working_directory: "../bici"
   enabled: 1
-  arguments: "script screen.asm"
+  arguments: "run os.rom"
 }
 type_view:
 {

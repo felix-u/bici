@@ -1,3 +1,6 @@
+#pragma warning(push)
+#pragma warning(disable: 5287)
+
 #include "sokol.c"
 
 #include "base/base.c"
@@ -17,13 +20,15 @@ structdef(Sokol_State) {
     sg_pass_action pass_action;
     sg_pipeline pipeline;
     sg_bindings bindings;
+    sg_image image;
+    sg_sampler sampler;
 };
 static Sokol_State state;
 
 #define vm_screen_initial_width 640
 #define vm_screen_initial_height 360
 
-enumdef(Vm_Mode, u8) {
+enum {
     VM_MODE_SHORT = 1 << 5,
     VM_MODE_RETURN_STACK = 1 << 6,
     VM_MODE_KEEP = 1 << 7,
@@ -145,7 +150,7 @@ structdef(Vm) {
     u8 active_stack;
     u16 program_counter;
     u8 current_mode;
-    Gfx_Render_Context gfx;
+    Gfx_Render_Context gfx; // TODO(felix): remove
 
     u8 *file_bytes;
 };
@@ -318,13 +323,16 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
                                     u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
 
+                                    breakpoint;
                                     if (fill_x && fill_y) {
                                         gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
                                     } else if (fill_x) {
                                         gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
                                     } else if (fill_y) {
                                         unreachable;
-                                    } else gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                    } else {
+                                        gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                    }
                                 } break;
                                 case vm_screen_sprite: {
                                     if (x >= vm_screen_initial_width) break;
@@ -514,8 +522,14 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
     }
 }
 
+static Arena arena;
+
 static void init(void) {
+    g_vm.gfx.pixels = arena_make(&arena, vm_screen_initial_width * vm_screen_initial_height, sizeof *g_vm.gfx.pixels);
+
     sapp_show_mouse(false);
+
+    g_vm.gfx.virtual_window_size = (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)vm_screen_initial_height };
     gfx_clear(&g_vm.gfx, 0);
 
     sg_setup(&(sg_desc){
@@ -523,38 +537,29 @@ static void init(void) {
         .logger.func = sokol_logger,
     });
 
-    Slice_f32 vertices = slice_of(f32,
-        // positions            colors
-        -0.5f,  0.5f, 0.5f,     1.f, 1.f, 0.f, 1.f,
-         0.5f,  0.5f, 0.5f,     0.f, 1.f, 1.f, 1.f,
-         0.5f, -0.5f, 0.5f,     0.f, 1.f, 1.f, 1.f,
-        -0.5f, -0.5f, 0.5f,     1.f, 1.f, 0.f, 1.f,
-    );
-    state.bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
-        .data = { .ptr = vertices.data, .size = slice_size(vertices) },
-    });
-
-    Slice_u16 indices = slice_of(u16, 0, 1, 2, 0, 2, 3);
-    state.bindings.index_buffer = sg_make_buffer(&(sg_buffer_desc){
-        .usage.index_buffer = true,
-        .data = { .ptr = indices.data, .size = slice_size(indices) },
-    });
-
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = sg_make_shader(quad_shader_desc(sg_query_backend())),
-        .index_type = SG_INDEXTYPE_UINT16,
-        .layout.attrs = {
-            [ATTR_quad_position].format = SG_VERTEXFORMAT_FLOAT3,
-            [ATTR_quad_color0].format = SG_VERTEXFORMAT_FLOAT4,
-        },
-        .label = "quad-pipeline",
     });
 
-    state.pass_action = (sg_pass_action){
-        .colors[0] = {
-            .load_action = SG_LOADACTION_CLEAR,
-            .clear_value = { .a = 1.0f },
-        }
+    sg_image_desc image_description = {
+        .usage = { .stream_update = true },
+        .width = vm_screen_initial_width,
+        .height = vm_screen_initial_height,
+        .pixel_format = SG_PIXELFORMAT_BGRA8,
+    };
+    state.image = sg_make_image(&image_description);
+
+    sg_sampler_desc sampler_description = {
+        .min_filter = SG_FILTER_NEAREST,
+        .mag_filter = SG_FILTER_NEAREST,
+        .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+    };
+    state.sampler = sg_make_sampler(&sampler_description);
+
+    state.bindings = (sg_bindings){
+        .images[0] = state.image,
+        .samplers[0] = state.sampler,
     };
 
     u16 vm_on_system_start_pc = vm_load16(&g_vm, vm_device_system | vm_system_start);
@@ -568,13 +573,25 @@ static void frame(void) {
     memcpy(g->mouse_down_previously, g->mouse_down, sizeof(g->mouse_down));
     memcpy(g->mouse_up_previously, g->mouse_up, sizeof(g->mouse_up));
 
+
     u16 vm_on_screen_update_pc = vm_load16(&g_vm, vm_device_screen | vm_screen_update);
     vm_run_to_break(&g_vm, vm_on_screen_update_pc);
+
+    // TODO(felix): remove
+    static u32 x = 0, y = 0;
+    g_vm.gfx.pixels[y * vm_screen_initial_width + x] = 0xff00ff;
+    x += 1;
+    y += 1;
+    x %= vm_screen_initial_width;
+    y %= vm_screen_initial_height;
+
+    sg_image_data image_data = { .subimage[0][0] = { g->pixels, vm_screen_initial_width * vm_screen_initial_height * sizeof *g->pixels } };
+    sg_update_image(state.image, &image_data);
 
     sg_begin_pass(&(sg_pass){ .action = state.pass_action, .swapchain = sglue_swapchain() });
     sg_apply_pipeline(state.pipeline);
     sg_apply_bindings(&state.bindings);
-    sg_draw(0, 6, 1);
+    sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
 }
@@ -736,8 +753,8 @@ structdef(Parse_Error_Arguments) {
     u32 length;
     File_Id file_id;
 };
-#define parse_error(...) parse_error_argument_struct((Parse_Error_Arguments){ __VA_ARGS__ })
-static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
+#define parse_error(...) parse_error_((Parse_Error_Arguments){ __VA_ARGS__ })
+static void parse_error_(Parse_Error_Arguments arguments) {
     Assembler_Context *assembler = arguments.assembler;
 
     File_Id file_id = assembler->file_id;
@@ -776,7 +793,7 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
 structdef(File_Cursor) { Token_Id token_id; u32 cursor; };
 
 static void program(void) {
-    Arena arena = arena_init(64 * 1024 * 1024);
+    arena = arena_init(64 * 1024 * 1024);
     Slice_String arguments = os_get_arguments(&arena);
 
     if (arguments.count < 3) {
@@ -1424,6 +1441,7 @@ static void program(void) {
         // print("}\nreturn  stack (bottom->top): { ");
         // for (u8 token_id = 0; token_id < vm.stacks[1].data; token_id += 1) print("% ", fmt(u64, vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
         // print("}\n");
+
     }
 
     arena_deinit(&arena);

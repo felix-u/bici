@@ -1,6 +1,9 @@
 // raddbg 0.9.21 project file
 
 recent_file: path: "src/main.c"
+recent_file: path: "src/sokol/sokol_app.h"
+recent_file: path: "src/base/base_gfx.c"
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/misc/amd64/chkstk.asm"
 recent_file: path: "src/base/base_strings.c"
 recent_file: path: "../../../../../temp/SDL3-3.2.16/src/dynapi/sdl_dynapi_procs.h"
 recent_file: path: "src/main.odin"
@@ -16,7 +19,6 @@ recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_com
 recent_file: path: "../../../appfolders/raddbg/minkernel/crts/ucrt/inc/corecrt_internal"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/eh/frame.cpp"
 recent_file: path: "bici.rdi/src/base/base_core.c"
-recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/misc/amd64/chkstk.asm"
 recent_file: path: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.cxx"
 recent_file: path: "D:/a/_work/1/s/src/vctools/langapi/undname/undname.inl"
 recent_file: path: "bici.rdi/src/base/base_strings.c"
@@ -29,7 +31,7 @@ target:
   executable: "build/bici.exe"
   working_directory: "../bici"
   enabled: 1
-  arguments: "script os.asm"
+  arguments: "script screen.asm"
 }
 type_view:
 {

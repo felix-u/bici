@@ -1,8 +1,8 @@
 #if defined(BASE_NO_IMPLEMENTATION) || defined(BASE_NO_IMPLEMENTATION_IO)
 
 structdef(Os_Read_Entire_File_Arguments) { Arena *arena; String path; u64 max_bytes; };
-#define os_read_entire_file(...) os_read_entire_file_argument_struct((Os_Read_Entire_File_Arguments){ __VA_ARGS__ })
-static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments);
+#define os_read_entire_file(...) os_read_entire_file_((Os_Read_Entire_File_Arguments){ __VA_ARGS__ })
+static String os_read_entire_file_(Os_Read_Entire_File_Arguments);
 static bool os_write_entire_file(Arena scratch, String path, String bytes);
 
 #define log_info(...) log_internal("info: " __VA_ARGS__)
@@ -17,7 +17,7 @@ static void print_var_args(char *format, va_list args);
 #else // IMPLEMENTATION
 
 
-static String os_read_entire_file_argument_struct(Os_Read_Entire_File_Arguments arguments) {
+static String os_read_entire_file_(Os_Read_Entire_File_Arguments arguments) {
     String path = arguments.path;
     u64 max_bytes = arguments.max_bytes;
     if (max_bytes == 0) max_bytes = UINT32_MAX;

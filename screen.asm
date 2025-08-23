@@ -50,7 +50,7 @@ load_coordinates_at_address:
     jmp.2r
 
 smiley: [
-    0x0 ; align
+    ; 0x0 ; align
     0x8080 0x8380
     0x8084 0x8185 0x8285 0x8384
 ]

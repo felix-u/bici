@@ -96,8 +96,8 @@ structdef(UI) {
 static          UI_Box *ui_border_box(UI *ui);
 
 structdef(UI_Box_Arguments) { UI *ui; String string; bool only_hash; };
-#define ui_box(...) ui_box_argument_struct((UI_Box_Arguments){ __VA_ARGS__ })
-static UI_Box *ui_box_argument_struct(UI_Box_Arguments arguments);
+#define ui_box(...) ui_box_((UI_Box_Arguments){ __VA_ARGS__ })
+static UI_Box *ui_box_(UI_Box_Arguments arguments);
 
 static          UI_Box *ui_box_frame_local_not_keyed(UI *ui);
 static            void  ui_begin_build(UI *ui);
@@ -156,7 +156,7 @@ static UI_Box *ui_border_box(UI *ui) {
     return panel;
 }
 
-static UI_Box *ui_box_argument_struct(UI_Box_Arguments arguments) {
+static UI_Box *ui_box_(UI_Box_Arguments arguments) {
     UI *ui = arguments.ui;
     String string = arguments.string;
 

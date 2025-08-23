@@ -37,7 +37,7 @@ static void map_make_explicit_item_size(Arena *arena, Map_void *map, u64 capacit
     map->value_index_from_key_hash = (Slice_u64){ .data = indices.data, .count = indices.capacity };
 }
 
-#define map_get(map, key, ...) map_get_argument_struct((Map_Get_Arguments){ \
+#define map_get(map, key, ...) map_get_((Map_Get_Arguments){ \
     ._item_size = sizeof *(map)->values.data, \
     (Map_void *)(map), \
     slice_as_bytes(key), \
@@ -48,7 +48,7 @@ static void map_make_explicit_item_size(Arena *arena, Map_void *map, u64 capacit
     0 ? &(map)->values.data[-1] : put, /* type checking hack */ \
 )
 
-static Map_Result map_get_argument_struct(Map_Get_Arguments arguments) {
+static Map_Result map_get_(Map_Get_Arguments arguments) {
     Map_void *map = arguments.map;
     String key = arguments.key;
     void *put = arguments.put;

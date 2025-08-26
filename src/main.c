@@ -144,13 +144,14 @@ structdef(Vm_Stack) { u8 memory[0x100], data; };
 
 structdef(Vm) {
     Arena *arena;
+    Gfx_Pixel_Buffer pixel_buffer;
+    using(Gfx_Frame_Info, frame_info);
 
     u8 memory[0x10000];
     Vm_Stack stacks[2];
     u8 active_stack;
     u16 program_counter;
     u8 current_mode;
-    Gfx_Render_Context gfx; // TODO(felix): remove
 
     u8 *file_bytes;
 };
@@ -270,22 +271,20 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     switch (device) {
                         case vm_device_mouse: switch (action) {
                             case vm_mouse_left_button: {
-                                to_push |= 0xf0 * gfx_mouse_clicked(vm->gfx, SAPP_MOUSEBUTTON_LEFT);
-                                to_push |= 0x0f * vm->gfx.mouse_down[SAPP_MOUSEBUTTON_LEFT];
+                                to_push |= 0xf0 * gfx_mouse_clicked(vm->frame_info, SAPP_MOUSEBUTTON_LEFT);
+                                to_push |= 0x0f * vm->mouse_down[SAPP_MOUSEBUTTON_LEFT];
                             } break;
                             case vm_mouse_right_button: {
-                                to_push |= 0xf0 * gfx_mouse_clicked(vm->gfx, SAPP_MOUSEBUTTON_RIGHT);
-                                to_push |= 0x0f * vm->gfx.mouse_down[SAPP_MOUSEBUTTON_RIGHT];
+                                to_push |= 0xf0 * gfx_mouse_clicked(vm->frame_info, SAPP_MOUSEBUTTON_RIGHT);
+                                to_push |= 0x0f * vm->mouse_down[SAPP_MOUSEBUTTON_RIGHT];
                             } break;
                             default: panic("[read.1] invalid action #% for mouse device", fmt(u8, action, .base = 16));
                         } break;
                         case vm_device_keyboard: switch (action) {
                             case vm_keyboard_key_state: {
                                 u8 key = vm->memory[vm_device_keyboard | vm_keyboard_key_value];
-                                bool key_down = vm->gfx.key_down[key];
-                                if (key_down) to_push |= 0x0f;
-                                bool key_pressed = key_down && !vm->gfx.key_down_previously[key];
-                                if (key_pressed) to_push |= 0xf0;
+                                to_push |= 0x0f * vm->key_down[key];
+                                to_push |= 0xf0 * gfx_key_pressed(vm->frame_info, key);
                             } break;
                             default: panic("[read.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
                         } break;
@@ -323,13 +322,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
 
                                     if (fill_x && fill_y) {
-                                        gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
+                                        gfx_pixel_buffer_draw_rectangle(vm->pixel_buffer, x, y, width, height, rgb);
                                     } else if (fill_x) {
-                                        gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
+                                        gfx_pixel_buffer_draw_line(vm->pixel_buffer, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
                                     } else if (fill_y) {
                                         unreachable;
                                     } else {
-                                        gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                        gfx_pixel_buffer_set_pixel(vm->pixel_buffer, x, y, rgb);
                                     }
                                 } break;
                                 case vm_screen_sprite: {
@@ -356,7 +355,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                             u8 shift = 7 - (u8)column;
                                             u8 colour = (*sprite & (1 << shift)) >> shift;
                                             if (!use_background_layer && colour == 0) continue;
-                                            gfx_set_pixel(&vm->gfx, x + column, y + row, colours[colour]);
+                                            gfx_pixel_buffer_set_pixel(vm->pixel_buffer, x + column, y + row, colours[colour]);
                                         }
                                     }
 
@@ -428,8 +427,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         } break;
                         case vm_device_mouse: {
                             V2 real_window_size = { .x = sapp_widthf(), .y = sapp_heightf() };
-                            V2 virtual_over_real = v2_div(vm->gfx.virtual_window_size, real_window_size);
-                            V2 virtual_mouse_position = v2_mul(vm->gfx.real_mouse_position, virtual_over_real);
+                            V2 virtual_over_real = v2_div(vm->pixel_buffer.size, real_window_size);
+                            V2 virtual_mouse_position = v2_mul(vm->mouse_position, virtual_over_real);
                             switch (action) {
                                 case vm_mouse_x: {
                                     to_push = (u16)virtual_mouse_position.x;
@@ -524,12 +523,14 @@ static Arena arena;
 
 static void init(void *vm_) {
     Vm *vm = vm_;
-    vm->gfx.pixels = arena_make(&arena, vm_screen_initial_width * vm_screen_initial_height, sizeof *vm->gfx.pixels);
+    vm->pixel_buffer = (Gfx_Pixel_Buffer){
+        .pixels = arena_make(&arena, vm_screen_initial_width * vm_screen_initial_height, sizeof *vm->pixel_buffer.pixels),
+        .size = { .x = vm_screen_initial_width, .y = vm_screen_initial_height },
+    };
 
     sapp_show_mouse(false);
 
-    vm->gfx.virtual_window_size = (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)vm_screen_initial_height };
-    gfx_clear(&vm->gfx, 0);
+    gfx_pixel_buffer_clear(vm->pixel_buffer, 0);
 
     sg_setup(&(sg_desc){
         .environment = sglue_environment(),
@@ -567,12 +568,12 @@ static void init(void *vm_) {
 
 static void frame(void *vm_) {
     Vm *vm = vm_;
-    Gfx_Render_Context *g = &vm->gfx;
 
     u16 vm_on_screen_update_pc = vm_load16(vm, vm_device_screen | vm_screen_update);
     vm_run_to_break(vm, vm_on_screen_update_pc);
 
-    sg_image_data image_data = { .subimage[0][0] = { g->pixels, vm_screen_initial_width * vm_screen_initial_height * sizeof *g->pixels } };
+    Gfx_Pixel_Buffer p = vm->pixel_buffer;
+    sg_image_data image_data = { .subimage[0][0] = { p.pixels, (u32)p.size.x * (u32)p.size.y * sizeof *p.pixels } };
     sg_update_image(state.image, &image_data);
 
     sg_begin_pass(&(sg_pass){ .action = state.pass_action, .swapchain = sglue_swapchain() });
@@ -599,7 +600,7 @@ static void cleanup(void *vm_) {
 
 static void event(const sapp_event *e, void *vm_) {
     Vm *vm = vm_;
-    Gfx_Render_Context *g = &vm->gfx;
+    Gfx_Frame_Info *g = &vm->frame_info;
     switch (e->type) {
         case SAPP_EVENTTYPE_KEY_DOWN: {
             g->key_down_previously[e->key_code] = g->key_down[e->key_code];
@@ -626,7 +627,7 @@ static void event(const sapp_event *e, void *vm_) {
             g->mouse_up[e->mouse_button] = true;
         } break;
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
-            g->real_mouse_position = (V2){ .x = e->mouse_x, .y = e->mouse_y };
+            g->mouse_position = (V2){ .x = e->mouse_x, .y = e->mouse_y };
         } break;
         default: break;
     }
@@ -1421,7 +1422,7 @@ static void program(void) {
         // gfx->font = gfx_font_default_3x5;
 
         // // TODO(felix): program should control this
-        // gfx_clear(gfx, 0);
+        // gfx_pixel_buffer_clear(gfx, 0);
 
         // u16 vm_on_system_start_pc = vm_load16(&vm, vm_device_system + vm_system_start);
         // vm_run_to_break(&vm, vm_on_system_start_pc);

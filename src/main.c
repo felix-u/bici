@@ -1,4 +1,7 @@
-#include "base/base.c"
+#define BASE_IMPLEMENTATION
+#include "base/base.h"
+
+#include "base/base_platform_wingdi.c"
 
 #define vm_screen_initial_width 640
 #define vm_screen_initial_height 360
@@ -110,14 +113,17 @@ enum {
 };
 
 static String vm_opcode_name[vm_opcode_max_value_plus_one] = {
-    #define X(name, val, ...) [val] = stringc(#name),
+    #define X(name, val, ...) [val] = Sc(#name),
     VM_OPCODE_TABLE
     #undef X
 };
 
-structdef(Vm_Stack) { u8 memory[0x100], data; };
+typedef struct {
+    u8 memory[0x100];
+    u8 data;
+} Vm_Stack;
 
-structdef(Vm) {
+typedef struct {
     Arena *arena;
 
     u8 memory[0x10000];
@@ -125,10 +131,10 @@ structdef(Vm) {
     u8 active_stack;
     u16 program_counter;
     u8 current_mode;
-    Gfx_Render_Context gfx;
 
     u8 *file_bytes;
-};
+} Vm;
+static Vm global_vm = {0};
 
 static force_inline u16 get16(u8 *address) {
     u16 result = 0;
@@ -171,7 +177,7 @@ static inline u32 rgb_from_colour(Vm *vm, u8 colour_index) {
     return rgb;
 }
 
-static void vm_run_to_break(Vm *vm, u16 program_counter) {
+static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
     vm->program_counter = program_counter;
     u16 add = 1;
     for (; true; vm->program_counter += add) {
@@ -202,7 +208,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
                 case vm_opcode_push:   vm_push8(vm, vm_load8(vm, vm->program_counter + 1)); add = 1 + 1; break;
-                case vm_opcode_drop:   discard(vm_pop8(vm)); break;
+                case vm_opcode_drop:   (void)vm_pop8(vm); break;
                 case vm_opcode_swap:   { u8 c = vm_pop8(vm), b = vm_pop8(vm); vm_push8(vm, c); vm_push8(vm, b); } break;
                 case vm_opcode_rot:    { u8 c = vm_pop8(vm), b = vm_pop8(vm), a = vm_pop8(vm); vm_push8(vm, b); vm_push8(vm, c); vm_push8(vm, a); } break;
                 case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push8(vm, vm_get8(vm, 1)); break;
@@ -245,26 +251,26 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                     switch (device) {
                         case vm_device_mouse: switch (action) {
                             case vm_mouse_left_button: {
-                                if (vm->gfx.frame_info.mouse_left_clicked) to_push |= 0xf0;
-                                if (vm->gfx.frame_info.mouse_left_down)    to_push |= 0x0f;
+                                if (platform->frame.mouse_clicked[App_Mouse_LEFT]) to_push |= 0xf0;
+                                if (platform->frame.mouse_down[App_Mouse_LEFT])    to_push |= 0x0f;
                             } break;
                             case vm_mouse_right_button: {
-                                if (vm->gfx.frame_info.mouse_right_clicked) to_push |= 0xf0;
-                                if (vm->gfx.frame_info.mouse_right_down)    to_push |= 0x0f;
+                                if (platform->frame.mouse_clicked[App_Mouse_RIGHT]) to_push |= 0xf0;
+                                if (platform->frame.mouse_down[App_Mouse_RIGHT])    to_push |= 0x0f;
                             } break;
-                            default: panic("[read.1] invalid action #% for mouse device", fmt(u8, action, .base = 16));
+                            default: panic("[read.1] invalid action #%02x for mouse device", action);
                         } break;
                         case vm_device_keyboard: switch (action) {
                             case vm_keyboard_key_state: {
                                 u8 key = vm->memory[vm_device_keyboard | (Vm_Device)vm_keyboard_key_value];
-                                bool key_down = vm->gfx.frame_info.key_is_down[key];
+                                bool key_down = platform->frame.key_down[key];
                                 if (key_down) to_push |= 0x0f;
-                                bool key_pressed = key_down && !vm->gfx.frame_info.key_was_down_last_frame[key];
+                                bool key_pressed = platform->frame.key_pressed[key];
                                 if (key_pressed) to_push |= 0xf0;
                             } break;
-                            default: panic("[read.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
+                            default: panic("[read.1] invalid action #%02x for keyboard device", action);
                         } break;
-                        default: panic("[read.1] invalid device #%", fmt(u64, device, .base = 16));
+                        default: panic("[read.1] invalid device #%02x", device);
                     }
                     vm_push8(vm, to_push);
                     // // TODO(felix): not sure about this. do I use the same address for different purposes depending on whether I'm reading or writing?
@@ -290,7 +296,7 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u8 fill_y = argument & 0x40;
 
                                     u8 colour = argument & 0x0f;
-                                    if (colour > 3) panic("[write:screen/pixel] colour #% is invalid; there are only #% palette colours", fmt(u64, colour, .base = 16), fmt(u64, 4));
+                                    if (colour > 3) panic("[write:screen/pixel] colour #%02x is invalid; there are only 4 palette colours", colour);
 
                                     u32 rgb = rgb_from_colour(vm, colour);
 
@@ -298,12 +304,20 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
 
                                     if (fill_x && fill_y) {
-                                        gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
+                                        panic("TODO(felix)");
+                                        (void)width;
+                                        (void)height;
+                                        (void)rgb;
+                                        // gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
                                     } else if (fill_x) {
-                                        gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
+                                        panic("TODO(felix)");
+                                        // gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
                                     } else if (fill_y) {
                                         unreachable;
-                                    } else gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                    } else {
+                                        panic("TODO(felix)");
+                                        // gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                    }
                                 } break;
                                 case vm_screen_sprite: {
                                     if (x >= vm_screen_initial_width) break;
@@ -320,8 +334,8 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     assert(!flip_y);
                                     assert(!flip_x);
 
-                                    u16 column_count = min(8, vm_screen_initial_width - x);
-                                    u16 row_count = min(8, vm_screen_initial_height - y);
+                                    u16 column_count = MIN(8, vm_screen_initial_width - x);
+                                    u16 row_count = MIN(8, vm_screen_initial_height - y);
 
                                     u8 *sprite = &vm->memory[get16(&vm->memory[vm_device_screen | (Vm_Device)vm_screen_data])];
                                     for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
@@ -329,7 +343,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                             u8 shift = 7 - (u8)column;
                                             u8 colour = (*sprite & (1 << shift)) >> shift;
                                             if (!use_background_layer && colour == 0) continue;
-                                            gfx_set_pixel(&vm->gfx, x + column, y + row, colours[colour]);
+
+                                            panic("TODO(felix)");
+                                            (void)colours;
+                                            // gfx_set_pixel(&vm->gfx, x + column, y + row, colours[colour]);
                                         }
                                     }
 
@@ -339,26 +356,26 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     if (auto_y) y += 8;
                                 } break;
                                 case vm_screen_auto: break;
-                                default: panic("[write.1] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                                default: panic("[write.1] invalid action #%02x for screen device", action);
                             }
                             set16(x_address, x);
                             set16(y_address, y);
                         } break;
                         case vm_device_keyboard: switch (action) {
                             case vm_keyboard_key_value: break;
-                            default: panic("[write.1] invalid action #% for keyboard device", fmt(u8, action, .base = 16));
+                            default: panic("[write.1] invalid action #%02x for keyboard device", action);
                         } break;
-                        default: panic("[write.1] invalid device #%", fmt(u8, device, .base = 16));
+                        default: panic("[write.1] invalid device #%02x", device);
                     }
                     vm->memory[vm_device_and_action] = argument;
                 } break;
-                default: panic("unreachable %{#%}", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]), fmt(u64, instruction, .base = 16));
+                default: panic("unreachable %S{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
             } break;
             case VM_MODE_SHORT: switch (instruction & VM_OPCODE_MASK) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
                 case vm_opcode_push:   vm_push16(vm, vm_load16(vm, vm->program_counter + 1)); add = 2 + 1; break;
-                case vm_opcode_drop:   discard(vm_pop16(vm)); break;
+                case vm_opcode_drop:   (void)vm_pop16(vm); break;
                 case vm_opcode_swap:   { u16 c = vm_pop16(vm), b = vm_pop16(vm); vm_push16(vm, c); vm_push16(vm, b); } break;
                 case vm_opcode_rot:    { u16 c = vm_pop16(vm), b = vm_pop16(vm), a = vm_pop16(vm); vm_push16(vm, b); vm_push16(vm, c); vm_push16(vm, a); } break;
                 case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push16(vm, vm_get16(vm, 1)); break;
@@ -397,19 +414,22 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                         case vm_device_screen: switch (action) {
                             case vm_screen_width: to_push = vm_screen_initial_width; break;
                             case vm_screen_height: to_push = vm_screen_initial_height; break;
-                            default: panic("[read.2] invalid action #% for screen device", fmt(u64, action, .base = 16));
+                            default: panic("[read.2] invalid action #%02x for screen device", action);
                         } break;
                         case vm_device_mouse: {
-                            V2 virtual_over_real = v2_div(vm->gfx.frame_info.virtual_window_size, vm->gfx.frame_info.real_window_size);
-                            V2 virtual_mouse_position = v2_mul(vm->gfx.frame_info.real_mouse_position, virtual_over_real);
+                            panic("TODO(felix)");
+                            // V2 virtual_over_real = v2_div(platform->frame.virtual_window_size, platform->frame.real_window_size);
+                            // V2 virtual_mouse_position = v2_mul(platform->frame.real_mouse_position, virtual_over_real);
                             switch (action) {
                                 case vm_mouse_x: {
-                                    to_push = (u16)virtual_mouse_position.x;
+                                    panic("TODO(felix)");
+                                    // to_push = (u16)virtual_mouse_position.x;
                                 } break;
                                 case vm_mouse_y: {
-                                    to_push = (u16)virtual_mouse_position.y;
+                                    panic("TODO(felix)");
+                                    // to_push = (u16)virtual_mouse_position.y;
                                 } break;
-                                default: panic("[read.2] invalid action #% for mouse device", fmt(u8, action, .base = 16));
+                                default: panic("[read.2] invalid action #%02x for mouse device", action);
                             }
                         } break;
                         case vm_device_file: {
@@ -420,10 +440,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                     assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_cursor]) < get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]));
                                     to_push = get16(&vm->file_bytes[get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_cursor])]);
                                 } break;
-                                default: panic("[read.2] invalid action #% for file device", fmt(u8, action, .base = 16));
+                                default: panic("[read.2] invalid action #%02x for file device", action);
                             }
                         } break;
-                        default: panic("[read.2] invalid device #%", fmt(u64, device, .base = 16));
+                        default: panic("[read.2] invalid device #%02x", device);
                     }
                     set16(&vm->memory[vm_device_and_action], to_push);
                     vm_push16(vm, to_push);
@@ -438,10 +458,10 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                             case vm_console_print: {
                                 u16 str_addr = argument;
                                 u8 str_count = vm_load8(vm, str_addr);
-                                String str = { .data = vm->memory + str_addr + 1, .count = str_count };
-                                print("%", fmt(String, str));
+                                String str = { .data = (const char *)(vm->memory + str_addr + 1), .count = str_count };
+                                print("%S", str);
                             } break;
-                            default: panic("[write.2] invalid action #% for console device", fmt(u64, action, .base = 16));
+                            default: panic("[write.2] invalid action #%02x for console device", action);
                         } break;
                         case vm_device_screen: switch (action) {
                             case vm_screen_x: {
@@ -451,17 +471,19 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 set16(&vm->memory[vm_device_screen | (Vm_Device)vm_screen_y], argument);
                             } break;
                             case vm_screen_data: break;
-                            default: panic("[write.2] invalid action #% for screen device", fmt(u8, action, .base = 16));
+                            default: panic("[write.2] invalid action #%02x for screen device", action);
                         } break;
                         case vm_device_file: switch (action) {
                             case vm_file_name: {
                                 u16 string_address = argument;
                                 u8 string_length = vm_load8(vm, string_address);
-                                String file_name = { .data = &vm->memory[string_address + 1], .count = string_length };
+                                String file_name = { .data = (const char *)&vm->memory[string_address + 1], .count = string_length };
 
-                                String bytes = os_read_entire_file(vm->arena, file_name, 0xffff);
+                                bool read_ok = false;
+                                String bytes = os_read_entire_file(vm->arena, cstring_from_string(vm->arena, file_name), &read_ok);
+                                ensure(read_ok);
 
-                                vm->file_bytes = bytes.data;
+                                vm->file_bytes = (u8 *)bytes.data;
 
                                 assert(bytes.count <= 0xffff);
                                 set16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length], (u16)bytes.count);
@@ -479,13 +501,13 @@ static void vm_run_to_break(Vm *vm, u16 program_counter) {
                                 u16 address_to_copy_to = argument;
                                 memcpy(vm->memory + address_to_copy_to, vm->file_bytes, get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]));
                             } break;
-                            default: panic("[write.2] invalid action #% for file device", fmt(u8, action, .base = 16));
+                            default: panic("[write.2] invalid action #%02x for file device", action);
                         } break;
-                        default: panic("[write.2] invalid device #%", fmt(u8, device, .base = 16));
+                        default: panic("[write.2] invalid device #%02x", device);
                     }
                     set16(&vm->memory[vm_device_and_action], argument);
                 } break;
-                default: panic("unreachable %{#%}", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]), fmt(u8, instruction, .base = 16));
+                default: panic("unreachable %S{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
             } break;
             default: unreachable;
         }
@@ -499,78 +521,99 @@ static bool instruction_takes_immediate(u8 instruction) {
     VM_OPCODE_TABLE
     #undef X
     else unreachable;
+    return false;
 }
 
-static void write_u16_swap_bytes(Array_u8 rom, u64 index, u16 value) {
-    assert(index + 1 < rom.capacity);
+static void write_u16_swap_bytes(u8 rom[0x10000], u64 index, u16 value) {
+    assert(index + 1 < 0x10000);
     u8 byte2 = (u8)(value);
     u8 byte1 = (u8)(value >> 8);
-    rom.data[index] = byte1;
-    rom.data[index + 1] = byte2;
+    rom[index] = byte1;
+    rom[index + 1] = byte2;
 }
 
 static force_inline bool is_starting_symbol_character(u8 c) {
     return ascii_is_alpha(c) || c == '_';
 }
 
-enumdef(Token_Kind, u8) {
-    token_kind_ascii_delimiter = 128,
+typedef u8 Token_Kind;
+enum {
+    Token_Kind_ASCII_DELIMITER = 128,
 
-    token_kind_symbol,
-    token_kind_number,
-    token_kind_string,
-    token_kind_opmode,
+    Token_Kind_SYMBOL,
+    Token_Kind_NUMBER,
+    Token_Kind_STRING,
+    Token_Kind_OPMODE,
 
-    token_kind_count,
+    Token_Kind_COUNT,
 };
 
 typedef u8 File_Id;
-#define max_file_id 255
+#define MAX_FILE_ID 255
 
-structdef(Token) {
+typedef struct {
     u32 start_index;
     u8 length;
     Token_Kind kind;
     u16 value;
     u8 base;
-};
+} Token;
+typedef Array(Token) Array_Token;
 
-structdef(Token_Id) { File_Id file_id; i32 index; };
+typedef struct {
+    File_Id file_id;
+    i32 index;
+} Token_Id;
 
-structdef(Label) {
+typedef struct {
     Token_Id token_id;
     u16 address;
-    Map_Label children;
-};
-
+    // TODO(felix)
+    int children;
+    // Map_Label children;
+} Label;
 typedef u32 Label_Id;
+#define MAX_LABELS 1024
 
-structdef(Label_Reference) {
+typedef struct {
     Token_Id token_id;
     union { u16 destination_address; Token_Id destination_label_token_id; };
     u8 width;
     bool is_patch;
     Label_Id parent_id;
-};
+} Label_Reference;
+typedef Array(Label_Reference) Array_Label_Reference;
 
-structdef(Scoped_Reference) {
+typedef struct {
     u16 address;
     Token_Id token_id;
     bool is_relative;
-};
+} Scoped_Reference;
+typedef Array(Scoped_Reference) Array_Scoped_Reference;
 
-structdef(Insertion_Mode) { bool is_active, has_relative_reference; };
+typedef struct {
+    bool is_active;
+    bool has_relative_reference;
+} Insertion_Mode;
 
-structdef(Input_File) { String name; String bytes; Array_Token tokens; };
+typedef struct {
+    String name;
+    String bytes;
+    Array_Token tokens;
+} Input_File;
 
-structdef(Assembler_Context) {
-    Map_Input_File files;
+typedef struct {
+    // TODO(felix)
+    int files;
+    // Map_Input_File files;
     File_Id file_id;
-    Map_Label labels;
+    // TODO(felix)
+    int labels;
+    // Map_Label labels;
     Array_Label_Reference label_references;
     Array_Scoped_Reference scoped_references;
     Insertion_Mode insertion_mode;
-};
+} Assembler_Context;
 
 static Token_Id token_id_shift(Token_Id token_id, i32 shift) {
     Token_Id result = token_id;
@@ -580,7 +623,11 @@ static Token_Id token_id_shift(Token_Id token_id, i32 shift) {
 
 static Input_File *token_get_file(Assembler_Context *assembler, Token_Id token_id) {
     File_Id file_id = token_id.file_id;
-    Input_File *file = &assembler->files.values.data[file_id];
+    panic("TODO(felix)");
+    Input_File *file = 0;
+    (void)assembler;
+    (void)file_id;
+    // Input_File *file = &assembler->files.values.data[file_id];
     return file;
 }
 
@@ -603,13 +650,13 @@ static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
     return token_string;
 }
 
-structdef(Parse_Error_Arguments) {
+typedef struct {
     Assembler_Context *assembler;
     Token token;
     u32 start_index;
     u32 length;
     File_Id file_id;
-};
+} Parse_Error_Arguments;
 #define parse_error(...) parse_error_argument_struct((Parse_Error_Arguments){ __VA_ARGS__ })
 static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
     Assembler_Context *assembler = arguments.assembler;
@@ -626,8 +673,12 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
         length = arguments.token.length;
     } else if (length == 0) length = 1;
 
-    String text = assembler->files.values.data[file_id].bytes;
-    String file_name = assembler->files.values.data[file_id].name;
+    String text = {0};
+    panic("TODO(felix)");
+    // String text = assembler->files.values.data[file_id].bytes;
+    String file_name = {0};
+    panic("TODO(felix)");
+    // String file_name = assembler->files.values.data[file_id].name;
     String lexeme = string_range(text, start_index, start_index + length);
 
     u64 row = 1, column = 1;
@@ -640,87 +691,110 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
         }
     }
 
-    print("note: '%' in %:%:%\n", fmt(String, lexeme), fmt(String, file_name), fmt(u64, row), fmt(u64, column));
+    print("note: '%S' in %S:%llu:%llu\n", lexeme, file_name, row, column);
 
     os_exit(1);
 }
 
 #define usage "usage: bici <compile|run|script> <file...>"
 
-structdef(File_Cursor) { Token_Id token_id; u32 cursor; };
+typedef struct {
+    Token_Id token_id;
+    u32 cursor;
+} File_Cursor;
+typedef Array(File_Cursor) Array_File_Cursor;
 
-static void program(void) {
+static void app_start(Platform *platform) {
     Arena arena = arena_init(64 * 1024 * 1024);
-    Slice_String arguments = os_get_arguments(&arena);
+    u64 arguments_count = 0;
+    const char **arguments = os_get_arguments(&arena, &arguments_count);
 
-    if (arguments.count < 3) {
-        log_error("%", fmt(cstring, usage));
+    if (arguments_count < 3) {
+        log_error("%s", usage);
         os_exit(1);
     }
 
-    enumdef(Command, u8) {
-        command_compile, command_run, command_script,
-        command_count,
-    };
-    String command_string = arguments.data[1];
+    typedef enum {
+        Command_COMPILE,
+        Command_RUN,
+        Command_SCRIPT,
+
+        Command_COUNT,
+    } Command;
+    const char *command_string = arguments[1];
 
     Command command = 0;
-    if (string_equals(command_string, string("compile"))) {
-        if (arguments.count != 4) {
+    if (cstring_equals(command_string, "compile")) {
+        if (arguments_count != 4) {
             log_error("usage: bici compile <file.asm> <file.rom>");
             os_exit(1);
         }
-        command = command_compile;
-    } else if (string_equals(command_string, string("run"))) {
-        if (arguments.count != 3) {
+        command = Command_COMPILE;
+    } else if (cstring_equals(command_string, "run")) {
+        if (arguments_count != 3) {
             log_error("usage: bici run <file.rom>");
             os_exit(1);
         }
-        command = command_run;
-    } else if (string_equals(command_string, string("script"))) {
-        if (arguments.count != 3) {
+        command = Command_RUN;
+    } else if (cstring_equals(command_string, "script")) {
+        if (arguments_count != 3) {
             log_error("usage: bici script <file.asm>");
             os_exit(1);
         }
-        command = command_script;
+        command = Command_SCRIPT;
     } else {
-        log_error("no such command '%'\n%", fmt(String, command_string), fmt(cstring, usage));
+        log_error("no such command '%s'\n%s", command_string, usage);
         os_exit(1);
     }
 
-    String input_filepath = arguments.data[2];
-    u64 max_filesize = 0x10000;
-    String input_bytes = os_read_entire_file(&arena, input_filepath, max_filesize);
+    const char *input_filepath = arguments[2];
+    bool read_ok = false;
+    String input_bytes = os_read_entire_file(&arena, input_filepath, &read_ok);
+    assert(read_ok);
+    assert(input_bytes.count <= 0x10000);
 
-    Array_u8 rom = array_from_c_array(u8, 0x10000);
+    u8 rom_bytes[0x10000] = {0};
+    u8 *rom = rom_bytes;
+    u16 rom_count = 0;
 
-    bool should_compile = command == command_compile || command == command_script;
-    if (!should_compile) rom = (Array_u8)array_from_slice(input_bytes);
+    bool should_compile = command == Command_COMPILE || command == Command_SCRIPT;
+    if (!should_compile) rom = (u8 *)input_bytes.data;
     else {
-        Map_u8 opcode_from_name_map = {0};
-        map_make(&arena, &opcode_from_name_map, 0x1f);
-        for (u8 opcode = 0; opcode <= 0x1f; opcode += 1) {
-            String name = vm_opcode_name[opcode];
-            map_put(&opcode_from_name_map, name, &opcode);
-        }
+        panic("TODO(felix)");
+        // Map_u8 opcode_from_name_map = {0};
+        // map_make(&arena, &opcode_from_name_map, 0x1f);
+        // for (u8 opcode = 0; opcode <= 0x1f; opcode += 1) {
+        //     String name = vm_opcode_name[opcode];
+        //     map_put(&opcode_from_name_map, name, &opcode);
+        // }
 
         Assembler_Context assembler = {
-            .label_references.arena = &arena,
-            .scoped_references.arena = &arena,
+            // TODO(felix)
+            // .label_references.arena = &arena,
+            // .scoped_references.arena = &arena,
         };
-        map_make(&arena, &assembler.files, max_file_id);
-        map_make(&arena, &assembler.labels, 1024);
+        panic("TODO(felix)");
+        // map_make(&arena, &assembler.files, MAX_FILE_ID);
+        // map_make(&arena, &assembler.labels, MAX_LABELS);
 
-        Input_File main_file = { .bytes = input_bytes, .name = input_filepath, .tokens.arena = &arena };
-        File_Id main_file_id = (File_Id)map_put(&assembler.files, input_filepath, &main_file).index;
+        // Input_File main_file = { .bytes = input_bytes, .name = input_filepath };
+        File_Id main_file_id = 0;
+        panic("TODO(felix)");
+        // File_Id main_file_id = (File_Id)map_put(&assembler.files, input_filepath, &main_file).index;
 
-        Array_File_Cursor file_stack = { .arena = &arena };
-        push(&file_stack, (File_Cursor){ .token_id.file_id = main_file_id });
+        Array_File_Cursor file_stack = {0};
+        push(&arena, &file_stack, (File_Cursor){ .token_id.file_id = main_file_id });
 
         while (file_stack.count > 0) {
-            File_Cursor file_cursor = pop(file_stack);
+            // File_Cursor file_cursor = pop(file_stack);
+            File_Cursor file_cursor = {0};
+            panic("TODO(felix)");
             assembler.file_id = file_cursor.token_id.file_id;
-            Input_File *file = &assembler.files.values.data[assembler.file_id];
+
+            // Input_File *file = &assembler.files.values.data[assembler.file_id];
+            Input_File *file = 0;
+            panic("TODO(felix)");
+
             String asm = file->bytes;
 
             for (u32 cursor = file_cursor.cursor; cursor < asm.count;) {
@@ -732,7 +806,7 @@ static void program(void) {
                 u16 value = 0;
                 u8 base = 0;
                 if (is_starting_symbol_character(asm.data[cursor])) {
-                    kind = token_kind_symbol;
+                    kind = Token_Kind_SYMBOL;
                     cursor += 1;
 
                     for (; cursor < asm.count; cursor += 1) {
@@ -742,7 +816,7 @@ static void program(void) {
                     }
                 } else switch (asm.data[cursor]) {
                     case '0': {
-                        kind = token_kind_number;
+                        kind = Token_Kind_NUMBER;
 
                         if (cursor + 1 == asm.count || (asm.data[cursor + 1] != 'x' && asm.data[cursor + 1] != 'b')) {
                             log_error("expected 'x' or 'b' after '0' to begin binary or hexadecimal literal");
@@ -753,7 +827,7 @@ static void program(void) {
                         start_index = cursor;
 
                         if (cursor == asm.count) {
-                            log_error("expected digits following '0%'", fmt(char, base_char));
+                            log_error("expected digits following '0%c'", base_char);
                             parse_error(.start_index = cursor - 2, 2);
                         }
 
@@ -762,7 +836,7 @@ static void program(void) {
                             if (base_char == 'x' && ascii_is_hexadecimal(c)) continue;
                             if (base_char == 'b' && (c == '0' || c == '1')) continue;
                             if (ascii_is_whitespace(c)) break;
-                            log_error("expected base_char % digit", fmt(char, base_char));
+                            log_error("expected base_char %c digit", base_char);
                             parse_error(.start_index = cursor);
                         }
 
@@ -770,7 +844,7 @@ static void program(void) {
                         String number_string = string_range(asm, start_index, cursor);
                         u64 value_unbounded = int_from_string_base(number_string, base);
                         if (value_unbounded >= 0x10000) {
-                            log_error("0d% is too large to fit in 16 bits", fmt(u64, value_unbounded));
+                            log_error("0d%llu is too large to fit in 16 bits", value_unbounded);
                             parse_error(.start_index = start_index, (u8)(cursor - start_index));
                         }
                         value = (u16)value_unbounded;
@@ -785,7 +859,7 @@ static void program(void) {
                         cursor += 1;
                     } break;
                     case '"': {
-                        kind = token_kind_string;
+                        kind = Token_Kind_STRING;
 
                         cursor += 1;
                         start_index = cursor;
@@ -807,7 +881,7 @@ static void program(void) {
                         cursor += 1;
                     } break;
                     case '.': {
-                        kind = token_kind_opmode;
+                        kind = Token_Kind_OPMODE;
 
                         cursor += 1;
                         start_index = cursor;
@@ -822,18 +896,18 @@ static void program(void) {
 
                         u64 length = cursor - start_index;
                         if (length == 0 || length > 3) {
-                            log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %", fmt(u64, length));
+                            log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %llu", length);
                             parse_error(.start_index = start_index, (u8)length);
                         }
                     } break;
                     default: {
-                        log_error("invalid syntax '%'", fmt(char, asm.data[cursor]));
+                        log_error("invalid syntax '%c'", asm.data[cursor]);
                         parse_error(.start_index = cursor);
                     }
                 }
 
                 u64 length = cursor - start_index;
-                if (kind == token_kind_string) length -= 1;
+                if (kind == Token_Kind_STRING) length -= 1;
                 assert(length <= 255);
 
                 Token token = {
@@ -843,7 +917,7 @@ static void program(void) {
                     .value = value,
                     .base = base,
                 };
-                push(&file->tokens, token);
+                push(&arena, &file->tokens, token);
             }
 
             bool parsing_relative_label = false;
@@ -853,7 +927,7 @@ static void program(void) {
 
                 if (assembler.insertion_mode.is_active) {
                     switch (token.kind) {
-                        case token_kind_symbol: case ']': case '$': case '/': case token_kind_number: case token_kind_string: break;
+                        case Token_Kind_SYMBOL: case ']': case '$': case '/': case Token_Kind_NUMBER: case Token_Kind_STRING: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
                             parse_error(&assembler, token);
@@ -867,9 +941,9 @@ static void program(void) {
 
                 switch (token.kind) {
                     case '{': {
-                        Scoped_Reference reference = { .address = (u16)rom.count };
-                        push(&assembler.scoped_references, reference);
-                        rom.count += 2;
+                        Scoped_Reference reference = { .address = rom_count };
+                        push(&arena, &assembler.scoped_references, reference);
+                        rom_count += 2;
                     } break;
                     case '}': {
                         if (assembler.scoped_references.count == 0) {
@@ -877,13 +951,15 @@ static void program(void) {
                             parse_error(&assembler, token);
                         }
 
-                        Scoped_Reference reference = pop(assembler.scoped_references);
+                        // Scoped_Reference reference = pop(assembler.scoped_references);
+                        Scoped_Reference reference = {0};
+                        panic("TODO(felix)");
                         if (reference.is_relative) {
                             log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
                             parse_error(&assembler, token);
                         }
 
-                        write_u16_swap_bytes(rom, reference.address, (u16)rom.count);
+                        write_u16_swap_bytes(rom, reference.address, rom_count);
                     } break;
                     case '[': {
                         if (assembler.insertion_mode.is_active) {
@@ -895,9 +971,9 @@ static void program(void) {
                         bool compile_byte_count_to_closing_bracket = next.kind == '$';
                         if (compile_byte_count_to_closing_bracket) {
                             assembler.insertion_mode.has_relative_reference = true;
-                            Scoped_Reference reference = { .address = (u16)rom.count, .is_relative = true };
-                            push(&assembler.scoped_references, reference);
-                            rom.count += 1;
+                            Scoped_Reference reference = { .address = rom_count, .is_relative = true };
+                            push(&arena, &assembler.scoped_references, reference);
+                            rom_count += 1;
                             file_token_id = token_id_shift(file_token_id, 1);
                         }
                     } break;
@@ -908,32 +984,34 @@ static void program(void) {
                         }
 
                         if (assembler.insertion_mode.has_relative_reference) {
-                            Scoped_Reference reference = pop(assembler.scoped_references);
+                            // Scoped_Reference reference = pop(assembler.scoped_references);
+                            Scoped_Reference reference = {0};
+                            panic("TODO(felix)");
                             if (!reference.is_relative) {
                                 log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
                                 parse_error(&assembler, token);
                             }
 
-                            u64 relative_difference = rom.count - reference.address - 1;
+                            u64 relative_difference = rom_count - reference.address - 1;
                             if (relative_difference > 255) {
-                                log_error("relative difference from '[$' is % bytes, but the maximum is 255", fmt(u64, relative_difference));
+                                log_error("relative difference from '[$' is %llu bytes, but the maximum is 255", relative_difference);
                                 parse_error(&assembler, token);
                             }
 
-                            u8 *location_to_patch = &rom.data[reference.address];
+                            u8 *location_to_patch = &rom[reference.address];
                             *location_to_patch = (u8)relative_difference;
                         }
 
                         assembler.insertion_mode = (Insertion_Mode){0};
                     } break;
                     case '/': {
-                        if (next.kind != token_kind_symbol) {
+                        if (next.kind != Token_Kind_SYMBOL) {
                             log_error("expected relative label following '/'");
                             parse_error(&assembler, token);
                         }
                         parsing_relative_label = true;
                     } break;
-                    case token_kind_symbol: {
+                    case Token_Kind_SYMBOL: {
                         if (parsing_relative_label) {
                             if (next.kind != ':') {
                                 log_error("expected ':' ending relative label definition");
@@ -943,22 +1021,34 @@ static void program(void) {
 
                         bool is_label = next.kind == ':';
                         if (is_label) {
-                            if (map_get(&assembler.labels, token_string).pointer != 0) {
-                                log_error("redefinition of label '%'", fmt(String, token_string));
+                            // bool is_redefinition = map_get(&assembler.labels, token_string).pointer != 0;
+                            bool is_redefinition = true;
+                            panic("TODO(felix)");
+                            if (is_redefinition) {
+                                log_error("redefinition of label '%S'", token_string);
                                 parse_error(&assembler, token);
                             }
 
-                            Label new_label = { .token_id = file_token_id, .address = (u16)rom.count };
-                            map_make(&arena, &new_label.children, 256);
+                            // Label new_label = { .token_id = file_token_id, .address = rom_count };
+                            // map_make(&arena, &new_label.children, 256);
+                            panic("TODO(felix)");
 
-                            Map_Label *labels = 0;
+                            // Map_Label *labels = 0;
+                            int *labels = 0;
+                            panic("TODO(felix)");
                             if (parsing_relative_label) {
-                                Label *parent = slice_get_last(assembler.labels.values);
-                                Map_Label *parent_labels = &parent->children;
+                                // Label *parent = slice_get_last(assembler.labels.values);
+                                panic("TODO(felix)");
+                                // Map_Label *parent_labels = &parent->children;
+                                int *parent_labels = 0;
+                                panic("TODO(felix)");
                                 labels = parent_labels;
 
-                                if (map_get(parent_labels, token_string).index != 0) {
-                                    log_error("redefinition of label '%'", fmt(String, token_string));
+                                // bool is_redefinition = map_get(parent_labels, token_string).index != 0;
+                                is_redefinition = true;
+                                panic("TODO(felix)");
+                                if (is_redefinition) {
+                                    log_error("redefinition of label '%S'", token_string);
                                     parse_error(&assembler, token);
                                 }
 
@@ -967,20 +1057,24 @@ static void program(void) {
                                 labels = &assembler.labels;
                             }
 
-                            map_put(labels, token_string, &new_label);
+                            // map_put(labels, token_string, &new_label);
+                            panic("TODO(felix)");
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
                         }
 
-                        u8 *instruction_match = map_get(&opcode_from_name_map, token_string).pointer;
+                        // u8 *instruction_match = map_get(&opcode_from_name_map, token_string).pointer;
+                        u8 *instruction_match = 0;
+                        panic("TODO(felix)");
 
-                        if (instruction_match != NULL) {
+                        if (instruction_match != 0) {
                             u8 instruction = *instruction_match;
 
-                            bool explicit_mode = next.kind == token_kind_opmode;
+                            bool explicit_mode = next.kind == Token_Kind_OPMODE;
                             if (explicit_mode) {
-                                for_slice (u8 *, c, next_string) {
+                                for (u64 next_string_index = 0; next_string_index < next_string.count; next_string_index += 1) {
+                                    const char *c = &next_string.data[next_string_index];
                                     switch (*c) {
                                         case '2': instruction |= VM_MODE_SHORT; break;
                                         case 'k': instruction |= VM_MODE_KEEP; break;
@@ -992,15 +1086,15 @@ static void program(void) {
                             }
 
                             u8 byte = instruction;
-                            rom.data[rom.count] = byte;
-                            rom.count += 1;
+                            rom[rom_count] = byte;
+                            rom_count += 1;
 
                             if (instruction_takes_immediate(instruction)) {
                                 next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                                 switch (next.kind) {
-                                    case token_kind_symbol: case token_kind_number: case '{': break;
+                                    case Token_Kind_SYMBOL: case Token_Kind_NUMBER: case '{': break;
                                     default: {
-                                        log_error("instruction '%' takes an immediate, but no label or numeric literal is given", fmt(String, vm_opcode_name[instruction & VM_OPCODE_MASK]));
+                                        log_error("instruction '%S' takes an immediate, but no label or numeric literal is given", vm_opcode_name[instruction & VM_OPCODE_MASK]);
                                         parse_error(&assembler, next);
                                     }
                                 }
@@ -1009,31 +1103,32 @@ static void program(void) {
 
                                 u8 width = ((instruction & VM_MODE_SHORT) >> 5) + 1;
 
-                                if (next.kind == token_kind_symbol) {
+                                if (next.kind == Token_Kind_SYMBOL) {
                                     Label_Reference reference = {
                                         .token_id = token_id_shift(file_token_id, 1),
-                                        .destination_address = (u16)rom.count,
+                                        .destination_address = rom_count,
                                         .width = width,
-                                        .parent_id = (Label_Id)(assembler.labels.values.count - 1),
+                                        // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
+                                        // TODO(felix)
                                     };
-                                    push(&assembler.label_references, reference);
-                                    rom.count += reference.width;
+                                    push(&arena, &assembler.label_references, reference);
+                                    rom_count += reference.width;
                                 } else {
-                                    assert(next.kind == token_kind_number);
+                                    assert(next.kind == Token_Kind_NUMBER);
                                     next_string = token_lexeme(&assembler, token_id_shift(file_token_id, 1));
                                     u16 value = next.value;
 
                                     if (width == 1) {
                                         if (value > 255) {
-                                            log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (% is greater than 255); did you mean to use mode '.2'?", fmt(u16, value));
+                                            log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (%u is greater than 255); did you mean to use mode '.2'?", value);
                                             parse_error(&assembler, next);
                                         }
-                                        rom.data[rom.count] = (u8)value;
-                                        rom.count += 1;
+                                        rom[rom_count] = (u8)value;
+                                        rom_count += 1;
                                     } else {
                                         assert(width == 2);
-                                        write_u16_swap_bytes(rom, rom.count, value);
-                                        rom.count += 2;
+                                        write_u16_swap_bytes(rom, rom_count, value);
+                                        rom_count += 2;
                                     }
                                 }
                                 file_token_id = token_id_shift(file_token_id, 1);
@@ -1042,34 +1137,39 @@ static void program(void) {
                             break;
                         }
 
-                        if (string_equals(token_string, string("org")) || string_equals(token_string, string("rorg")) || string_equals(token_string, string("aorg"))) {
-                            if (next.kind != token_kind_number) {
-                                log_error("expected numeric literal (byte offset) after directive '%'", fmt(String, token_string));
+                        if (string_equals(token_string, S("org")) || string_equals(token_string, S("rorg")) || string_equals(token_string, S("aorg"))) {
+                            if (next.kind != Token_Kind_NUMBER) {
+                                log_error("expected numeric literal (byte offset) after directive '%S'", token_string);
                                 parse_error(&assembler, next);
                             }
 
                             u16 value = next.value;
                             bool is_relative = token_string.data[0] == 'r';
-                            if (is_relative) value += (u16)rom.count;
+                            if (is_relative) value += rom_count;
 
-                            if (value < rom.count) {
-                                log_error("offset % is less than current offset %", fmt(u64, value), fmt(u64, rom.count));
+                            if (value < rom_count) {
+                                log_error("offset %u is less than current offset %u", value, rom_count);
                                 parse_error(&assembler, next);
                             }
 
                             bool assert_only = token_string.data[0] == 'a';
-                            if (!assert_only) rom.count = value;
+                            if (!assert_only) rom_count = value;
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
-                        } else if (string_equals(token_string, string("patch"))) {
-                            if (next.kind != token_kind_symbol) {
+                        } else if (string_equals(token_string, S("patch"))) {
+                            if (next.kind != Token_Kind_SYMBOL) {
                                 log_error("expected label to indicate destination offset as first argument to directive 'patch'");
                                 parse_error(&assembler, next);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
-                            Label_Reference reference = { .is_patch = true, .destination_label_token_id = file_token_id, .parent_id = (Label_Id)(assembler.labels.values.count - 1) };
+                            Label_Reference reference = {
+                                .is_patch = true,
+                                .destination_label_token_id = file_token_id,
+                                // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
+                                // TODO(felix)
+                            };
 
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
@@ -1079,44 +1179,54 @@ static void program(void) {
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
-                            if (next.kind != token_kind_symbol && next.kind != token_kind_number) {
+                            if (next.kind != Token_Kind_SYMBOL && next.kind != Token_Kind_NUMBER) {
                                 log_error("expected label or numeric literal to indicate address as second argument to directive 'patch'");
                                 parse_error(&assembler, next);
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             reference.token_id = file_token_id;
-                            push(&assembler.label_references, reference);
-                        } else if (string_equals(token_string, string("include"))) {
-                            if (next.kind != token_kind_string) {
+                            push(&arena, &assembler.label_references, reference);
+                        } else if (string_equals(token_string, S("include"))) {
+                            if (next.kind != Token_Kind_STRING) {
                                 log_error("expected string following directive 'include'");
                                 parse_error(&assembler, next);
                             }
 
                             String include_filepath = next_string;
                             if (string_equals(include_filepath, file->name)) {
-                                log_error("cyclic inclusion of file '%'", fmt(String, file->name));
+                                log_error("cyclic inclusion of file '%S'", file->name);
                                 parse_error(&assembler, next);
                             }
-                            String include_bytes = os_read_entire_file(&arena, include_filepath, 0xffff);
-                            if (include_bytes.count == 0) os_exit(1);
 
-                            Input_File new_file = { .bytes = include_bytes, .name = include_filepath, .tokens.arena = &arena };
-                            File_Id new_file_id = (File_Id)map_put(&assembler.files, include_filepath, &new_file).index;
+                            read_ok = false;
+                            String include_bytes = os_read_entire_file(&arena, cstring_from_string(&arena, include_filepath), &read_ok);
+                            if (!read_ok || include_bytes.count > 0x10000) os_exit(1);
+
+                            // Input_File new_file = { .bytes = include_bytes, .name = include_filepath };
+                            // File_Id new_file_id = (File_Id)map_put(&assembler.files, include_filepath, &new_file).index;
+                            File_Id new_file_id = {0};
+                            panic("TODO(felix)");
 
                             File_Cursor current = { .cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
-                            push(&file_stack, current);
+                            push(&arena, &file_stack, current);
 
                             File_Cursor next_file = { .cursor = 0, .token_id = { .file_id = new_file_id } };
-                            push(&file_stack, next_file);
+                            push(&arena, &file_stack, next_file);
                             goto switch_file;
                         }
 
-                        Label_Reference reference = { .token_id = file_token_id, .destination_address = (u16)rom.count, .width = 2, .parent_id = (Label_Id)(assembler.labels.values.count - 1) };
-                        push(&assembler.label_references, reference);
-                        rom.count += reference.width;
+                        Label_Reference reference = {
+                            .token_id = file_token_id,
+                            .destination_address = rom_count,
+                            .width = 2,
+                            // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
+                            // TODO(felix)
+                        };
+                        push(&arena, &assembler.label_references, reference);
+                        rom_count += reference.width;
                     } break;
-                    case token_kind_number: {
+                    case Token_Kind_NUMBER: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("standalone number literals are only supported in insertion mode (e.g. in [ ... ])");
                             parse_error(&assembler, token);
@@ -1127,29 +1237,29 @@ static void program(void) {
                         bool is_byte = (token.base == 16 && token_string.count <= 2) || (token.base == 2 && token_string.count <= 8);
                         if (is_byte) {
                             assert(value < 256);
-                            rom.data[rom.count] = (u8)value;
-                            rom.count += 1;
+                            rom[rom_count] = (u8)value;
+                            rom_count += 1;
                             break;
                         }
 
                         bool is_short = true;
                         if (is_short) {
-                            write_u16_swap_bytes(rom, rom.count, value);
-                            rom.count += 2;
+                            write_u16_swap_bytes(rom, rom_count, value);
+                            rom_count += 2;
                             break;
                         }
 
                         unreachable;
                     } break;
-                    case token_kind_string: {
+                    case Token_Kind_STRING: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
                             parse_error(&assembler, token);
                         }
 
-                        assert(rom.count + token_string.count <= 0x10000);
-                        memcpy(rom.data + rom.count, token_string.data, token_string.count);
-                        rom.count += token_string.count;
+                        assert(rom_count + token_string.count <= 0x10000);
+                        memcpy(rom + rom_count, token_string.data, token_string.count);
+                        rom_count += (u16)token_string.count;
                     } break;
                     default: {
                         log_error("invalid syntax");
@@ -1168,7 +1278,8 @@ static void program(void) {
             switch_file:;
         }
 
-        for_slice (Label_Reference *, reference, assembler.label_references) {
+        for (u64 reference_index = 0; reference_index < assembler.label_references.count; reference_index += 1) {
+            Label_Reference *reference = &assembler.label_references.data[reference_index];
             Label *source_label = 0, *destination_label = 0;
             Label **to_match[] = { &source_label, &destination_label };
             Token_Id match_against[] = { reference->token_id, reference->destination_label_token_id };
@@ -1181,18 +1292,26 @@ static void program(void) {
                 Token token = *token_get(&assembler, token_id);
                 String reference_string = token_lexeme(&assembler, token_id);
 
-                if (token.kind == token_kind_number) {
+                if (token.kind == Token_Kind_NUMBER) {
                     u16 value = token.value;
                     static Label dummy = {0};
                     dummy.address = value;
                     source_label = &dummy;
                     continue;
                 }
-                assert(token.kind == token_kind_symbol);
+                assert(token.kind == Token_Kind_SYMBOL);
 
-                Label parent = assembler.labels.values.data[reference->parent_id];
-                Label *find = map_get(&parent.children, reference_string).pointer;
-                if (find == 0) find = map_get(&assembler.labels, reference_string).pointer;
+                // Label parent = assembler.labels.values.data[reference->parent_id];
+                panic("TODO(felix)");
+                // Label *find = map_get(&parent.children, reference_string).pointer;
+                Label *find = 0;
+                panic("TODO(felix)");
+
+                if (find == 0) {
+                    // find = map_get(&assembler.labels, reference_string).pointer;
+                    panic("TODO(felix)");
+                }
+
                 if (find != 0) {
                     *match = find;
                     goto done;
@@ -1200,7 +1319,7 @@ static void program(void) {
 
                 done:
                 if (*match == 0) {
-                    log_error("no such label '%'", fmt(String, reference_string));
+                    log_error("no such label '%S'", reference_string);
                     parse_error(&assembler, token, .file_id = token_id.file_id);
                 }
             }
@@ -1209,7 +1328,7 @@ static void program(void) {
                 write_u16_swap_bytes(rom, destination_label->address, source_label->address);
             } else switch (reference->width) {
                 case 1: {
-                    u8 *location_to_patch = &rom.data[reference->destination_address];
+                    u8 *location_to_patch = &rom[reference->destination_address];
                     assert(source_label->address <= 255);
                     *location_to_patch = (u8)source_label->address;
                 } break;
@@ -1220,75 +1339,77 @@ static void program(void) {
             }
         }
 
-        if (command == command_compile) {
-            assert(arguments.count == 4);
-            String output_path = arguments.data[3];
-            os_write_entire_file(arena, output_path, bit_cast(String) rom);
+        if (command == Command_COMPILE) {
+            assert(arguments_count == 4);
+            const char *output_path = arguments[3];
+            os_write_entire_file(output_path, rom, rom_count);
         }
     }
 
-    bool should_run = command == command_script || command == command_run;
-    if (should_run) {
-        if (rom.count == 0) os_exit(1);
+    bool should_run = command == Command_SCRIPT || command == Command_RUN;
+    if (!should_run) {
+        platform->should_quit = true;
+    } else {
+        if (rom_count == 0) os_exit(1);
 
-        Vm vm = { .arena = &arena };
-        memcpy(vm.memory, rom.data, rom.count);
+        Vm *vm = &global_vm;
+        vm->arena = &arena;
+        memcpy(vm->memory, rom, rom_count);
 
         bool print_memory = false;
         if (print_memory) {
-            Scratch scratch = scratch_begin(&arena);
+            Arena scratch = arena;
             String_Builder builder = {0};
             {
-                string_builder_print(&builder, "MEMORY ===\n");
-                for (u16 token_id = 0x100; token_id < rom.count; token_id += 1) {
-                    u8 byte = vm.memory[token_id];
+                string_builder_print(&scratch, &builder, "MEMORY ===\n");
+                for (u16 token_id = 0x100; token_id < rom_count; token_id += 1) {
+                    u8 byte = vm->memory[token_id];
 
-                    String mode_string = string("");
+                    String mode_string = S("");
                     switch ((byte & 0xe0) >> 5) {
-                        case 0x1: mode_string = string("2"); break;
-                        case 0x2: mode_string = string("r"); break;
-                        case 0x3: mode_string = string("r2"); break;
-                        case 0x4: mode_string = string("k"); break;
-                        case 0x5: mode_string = string("k2"); break;
-                        case 0x6: mode_string = string("kr"); break;
-                        case 0x7: mode_string = string("kr2"); break;
+                        case 0x1: mode_string = S("2"); break;
+                        case 0x2: mode_string = S("r"); break;
+                        case 0x3: mode_string = S("r2"); break;
+                        case 0x4: mode_string = S("k"); break;
+                        case 0x5: mode_string = S("k2"); break;
+                        case 0x6: mode_string = S("kr"); break;
+                        case 0x7: mode_string = S("kr2"); break;
                     }
 
-                    string_builder_print(&builder, "[%]\t'%'\t#%\t%;%\n",
-                        fmt(u16, token_id, .base = 16), fmt(char, byte), fmt(u8, byte, .base = 16), fmt(String, vm_opcode_name[byte & VM_OPCODE_MASK]), fmt(String, mode_string)
-                    );
+                    string_builder_print(&scratch, &builder, "[%x]\t'%c'\t#%x\t%S;%S\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
                 }
-                string_builder_print(&builder, "\nRUN ===\n");
+                string_builder_print(&scratch, &builder, "\nRUN ===\n");
             }
-            os_write(builder.string);
-            scratch_end(scratch);
+            os_write_console(builder.data, builder.count);
         }
 
-        Gfx_Render_Context *gfx = &vm.gfx;
-        *gfx = gfx_window_create(&arena, "bici", vm_screen_initial_width, vm_screen_initial_height);
-        ShowCursor(false);
-        gfx->font = gfx_font_default_3x5;
+        panic("TODO(felix)");
+        // Gfx_Render_Context *gfx = &vm.gfx;
+        // *gfx = gfx_window_create(&arena, "bici", vm_screen_initial_width, vm_screen_initial_height);
+        // ShowCursor(false);
+        // gfx->font = gfx_font_default_3x5;
 
         // TODO(felix): program should control this
-        gfx_clear(gfx, 0);
+        panic("TODO(felix)");
+        // gfx_clear(gfx, 0);
 
-        u16 vm_on_system_start_pc = vm_load16(&vm, vm_device_system + vm_system_start);
-        vm_run_to_break(&vm, vm_on_system_start_pc);
-
-        while (!gfx_window_should_close(gfx)) {
-            u16 vm_on_screen_update_pc = vm_load16(&vm, vm_device_screen | (Vm_Device)vm_screen_update);
-            vm_run_to_break(&vm, vm_on_screen_update_pc);
-        }
-
-        u16 vm_on_system_quit_pc = vm_load16(&vm, vm_device_system | (Vm_Device)vm_system_quit);
-        vm_run_to_break(&vm, vm_on_system_quit_pc);
-
-        print("working stack (bottom->top): { ");
-        for (u8 token_id = 0; token_id < vm.stacks[0].data; token_id += 1) print("% ", fmt(u64, vm.stacks[0].memory[token_id], .base = 16));
-        print("}\nreturn  stack (bottom->top): { ");
-        for (u8 token_id = 0; token_id < vm.stacks[1].data; token_id += 1) print("% ", fmt(u64, vm.stacks[VM_MODE_RETURN_STACK].memory[token_id], .base = 16));
-        print("}\n");
+        u16 vm_on_system_start_pc = vm_load16(vm, vm_device_system + vm_system_start);
+        vm_run_to_break(platform, vm, vm_on_system_start_pc);
     }
+}
 
-    arena_deinit(&arena);
+static void app_update_and_render(Platform *platform) {
+    Vm *vm = &global_vm;
+
+    u16 vm_on_screen_update_pc = vm_load16(vm, vm_device_screen | (Vm_Device)vm_screen_update);
+    vm_run_to_break(platform, vm, vm_on_screen_update_pc);
+
+    u16 vm_on_system_quit_pc = vm_load16(vm, vm_device_system | (Vm_Device)vm_system_quit);
+    vm_run_to_break(platform, vm, vm_on_system_quit_pc);
+
+    print("working stack (bottom->top): { ");
+    for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("%llx ", vm->stacks[0].memory[token_id]);
+    print("}\nreturn  stack (bottom->top): { ");
+    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[VM_MODE_RETURN_STACK].memory[token_id]);
+    print("}\n");
 }

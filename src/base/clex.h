@@ -226,7 +226,7 @@ static void clex__skip_identifier(clex_Cursor *c) {
 }
 
 static void clex__skip_to_newline(clex_Cursor *c) {
-    while (!clex__is_newline(c, c->c)) c->c += 1;
+    while (*c->c != 0 && !clex__is_newline(c->c)) c->c += 1;
 }
 
 static void clex__skip_whitespace_except_newline(clex_Cursor *c) {
@@ -249,21 +249,6 @@ static _Bool clex__string_equals(const char *start, const char *end, const char 
         if (*c != compare[i]) return 0;
     }
     return 1;
-}
-
-#define CLEX__TOKEN_STACK_COUNT 2
-typedef struct {
-    clex_Token stack[CLEX__TOKEN_STACK_COUNT];
-    unsigned count;
-} clex__Token_Stack;
-static _Bool clex__pop_token(clex__Token_Stack *tokens, clex_Token *popped) {
-    if (tokens->count == 0) return 0;
-    *popped = tokens->stack[--tokens->count];
-    return 1;
-}
-static void clex__push_token(clex__Token_Stack *tokens, clex_Token push) {
-    CLEX_ASSERT(tokens->count < CLEX__TOKEN_STACK_COUNT);
-    tokens->stack[tokens->count++] = push;
 }
 
 static _Bool clex__skip_escape_sequence(clex_Cursor *c) {
@@ -293,10 +278,6 @@ static _Bool clex__skip_escape_sequence(clex_Cursor *c) {
 
 CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
     l->token = (clex_Token){0};
-
-    // TODO(felix): Not threadsafe. Can we replace this anyway?
-    static clex__Token_Stack tokens = {0};
-    if (clex__pop_token(&tokens, &l->token)) return 1;
 
     next_token:;
 
@@ -502,25 +483,12 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             const char *operator = c->c;
 
             _Bool doubled = c->c[1] == *c->c;
-            c->c += doubled;
-
             if (doubled) switch (*operator) {
                 case '+': case '-': case '<': case '>': case '=': case '&': case '|': break;
-                // these are just repeated operators with no special meaning conveyed by this
-                case '!': case '~': case '^': case '*': {
-                    clex_Token token = {
-                        .kind = (clex_Token_Kind)*operator,
-                        .data = { .start = operator + 1, .end = operator + 2 },
-                    };
-                    clex__push_token(&tokens, token);
-
-                    token.data.start += 1;
-                    token.data.end += 1;
-                    l->token = token;
-                    return 1;
-                } break;
+                case '!': case '~': case '^': case '*': doubled = 0; break;
                 default: goto error;
             }
+            c->c += doubled;
 
             _Bool assignment = c->c[1] == '=';
             c->c += assignment;

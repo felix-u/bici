@@ -87,10 +87,10 @@ enum {
 };
 
 META(link "Gdi32")
-WIN32_CALL(int) ChoosePixelFormat(void *hdc, const PIXELFORMATDESCRIPTOR *);
-WIN32_CALL(int) DescribePixelFormat(void *hdc, int pixel_format, unsigned bytes, PIXELFORMATDESCRIPTOR *);
-WIN32_CALL(int) SetPixelFormat(void *hdc, int format, const PIXELFORMATDESCRIPTOR *);
-WIN32_CALL(int) SwapBuffers(void *hdc);
+int ChoosePixelFormat(void *hdc, const PIXELFORMATDESCRIPTOR *);
+int DescribePixelFormat(void *hdc, int pixel_format, unsigned bytes, PIXELFORMATDESCRIPTOR *);
+int SetPixelFormat(void *hdc, int format, const PIXELFORMATDESCRIPTOR *);
+int SwapBuffers(void *hdc);
 
 // https://registry.khronos.org/OpenGL/api/GL/wglext.h
 
@@ -112,10 +112,10 @@ WIN32_CALL(int) SwapBuffers(void *hdc);
 
 META(link "Opengl32")
 typedef int (* PROC)(void);
-WIN32_CALL(void *) wglCreateContext(void *hdc);
-WIN32_CALL(int) wglDeleteContext(void *hglrc);
-WIN32_CALL(PROC)   wglGetProcAddress(const char *name);
-WIN32_CALL(int)    wglMakeCurrent(void *hdc, void *hglrc);
+void * wglCreateContext(void *hdc);
+int wglDeleteContext(void *hglrc);
+PROC   wglGetProcAddress(const char *name);
+int    wglMakeCurrent(void *hdc, void *hglrc);
 
 struct Platform_Implementation {
     Platform base;

@@ -63,17 +63,8 @@ _Static_assert(sizeof(f64) == 8, "");
 #endif
 
 #if BASE_OS == BASE_OS_LINUX
-    void exit(int); // TODO(felix): can remove?
-    void abort(void); // TODO(felix): own implementation to not depend on libc
-    void *calloc(size_t item_count, size_t item_size); // TODO(felix): remove once using virtual alloc arena
-    void free(void *pointer); // TODO(felix): remove once using virtual alloc arena
-    // TODO(felix): which of these can be removed in favour of doing direct syscalls?
-        #include <fcntl.h>
-        #include <unistd.h>
-    #include <stdio.h> // TODO(felix): only needed for FILE. remove!
+    #error "TODO(felix)"
 #elif BASE_OS & BASE_OS_ANY_APPLE
-    // TODO(felix): same notes as above
-
     #define _WSTATUS(x)    ((x) & 0177)
     #define	_WSTOPPED      0177
     #define WEXITSTATUS(x) (int)(((unsigned)(x) >> 8) & 0xff)
@@ -186,50 +177,44 @@ _Static_assert(sizeof(f64) == 8, "");
     #define os_abort() abort()
     #define os_exit(code) exit(code)
 #elif BASE_OS == BASE_OS_WINDOWS
-    #if COMPILER_CLANG || COMPILER_MSVC
-        #define WIN32_CALL(T) __declspec(dllimport) T __stdcall
-    #endif
-
     #define os_abort() ExitProcess(1)
     #define os_exit(code) ExitProcess(code)
 
     META(link "Kernel32")
-    WIN32_CALL(int)           CloseHandle(void *);
+    int   CloseHandle(void *);
     struct _SECURITY_ATTRIBUTES;
-    WIN32_CALL(int)           CreateDirectoryA(const char *path, struct _SECURITY_ATTRIBUTES *);
-    WIN32_CALL(void *)        CreateFileA(const char *file_name, unsigned long desired_access, unsigned long share_mode, struct _SECURITY_ATTRIBUTES *, unsigned long creation_disposition, unsigned long flags_and_attributes, void *template_file);
-    #if !defined(_PROCESSTHREADSAPI_H_)
-        typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
-            unsigned long cb;
-            char *lpReserved;
-            char *lpDesktop;
-            char *lpTitle;
-            unsigned long dwX;
-            unsigned long dwY;
-            unsigned long dwXSize;
-            unsigned long dwYSize;
-            unsigned long dwXCountChars;
-            unsigned long dwYCountChars;
-            unsigned long dwFillAttribute;
-            unsigned long dwFlags;
-            unsigned short wShowWindow;
-            unsigned short cbReserved2;
-            unsigned char *lpReserved2;
-            void *hStdInput;
-            void *hStdOutput;
-            void *hStdError;
-        } STARTUPINFOA;
-        typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information
-            void *hProcess;
-            void *hThread;
-            unsigned long dwProcessId;
-            unsigned long dwThreadId;
-        } PROCESS_INFORMATION;
-    #endif
-    WIN32_CALL(int)           CreateProcessA(const char *application_name, char *command_line, struct _SECURITY_ATTRIBUTES *process_attributes, struct _SECURITY_ATTRIBUTES *thread_attributes, int should_inherit_handles, unsigned long creation_flags, void *environment, const char *current_directory, STARTUPINFOA *, PROCESS_INFORMATION *);
-    WIN32_CALL(int)           DeleteFileA(const char *file_name);
-    WIN32_CALL(void)          ExitProcess(unsigned exit_code);
-    WIN32_CALL(int) FindClose(void *find_file_handle);
+    int   CreateDirectoryA(const char *path, struct _SECURITY_ATTRIBUTES *);
+    void *CreateFileA(const char *file_name, unsigned long desired_access, unsigned long share_mode, struct _SECURITY_ATTRIBUTES *, unsigned long creation_disposition, unsigned long flags_and_attributes, void *template_file);
+    typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
+        unsigned long cb;
+        char *lpReserved;
+        char *lpDesktop;
+        char *lpTitle;
+        unsigned long dwX;
+        unsigned long dwY;
+        unsigned long dwXSize;
+        unsigned long dwYSize;
+        unsigned long dwXCountChars;
+        unsigned long dwYCountChars;
+        unsigned long dwFillAttribute;
+        unsigned long dwFlags;
+        unsigned short wShowWindow;
+        unsigned short cbReserved2;
+        unsigned char *lpReserved2;
+        void *hStdInput;
+        void *hStdOutput;
+        void *hStdError;
+    } STARTUPINFOA;
+    typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information
+        void *hProcess;
+        void *hThread;
+        unsigned long dwProcessId;
+        unsigned long dwThreadId;
+    } PROCESS_INFORMATION;
+    int  CreateProcessA(const char *application_name, char *command_line, struct _SECURITY_ATTRIBUTES *process_attributes, struct _SECURITY_ATTRIBUTES *thread_attributes, int should_inherit_handles, unsigned long creation_flags, void *environment, const char *current_directory, STARTUPINFOA *, PROCESS_INFORMATION *);
+    int  DeleteFileA(const char *file_name);
+    void ExitProcess(unsigned exit_code);
+    int FindClose(void *find_file_handle);
     typedef struct {
         unsigned long dwLowDateTime;
         unsigned long dwHighDateTime;
@@ -250,32 +235,30 @@ _Static_assert(sizeof(f64) == 8, "");
         unsigned long dwCreatorType; // Obsolete. Do not use
         unsigned short wFinderFlags; // Obsolete. Do not use
     } WIN32_FIND_DATAA;
-    WIN32_CALL(void *) FindFirstFileA(const char *file_name, WIN32_FIND_DATAA *);
-    WIN32_CALL(int) FindNextFileA(void *find_file_handle, WIN32_FIND_DATAA *);
-    WIN32_CALL(unsigned short *) GetCommandLineW(void);
-    WIN32_CALL(int)           GetExitCodeProcess(void *process, unsigned long *exit_code);
-    WIN32_CALL(unsigned long) GetFileAttributesA(const char *file_name);
-    #if !defined(_WINNT_)
-        typedef long long LARGE_INTEGER;
-    #endif
-    WIN32_CALL(int)           GetFileSizeEx(void *file, LARGE_INTEGER *file_size);
-    WIN32_CALL(unsigned long) GetFinalPathNameByHandleA(void *handle, char *path, unsigned long path_size, unsigned long flags);
-    WIN32_CALL(unsigned long) GetLastError(void);
-    WIN32_CALL(void *)        GetProcessHeap(void);
-    WIN32_CALL(void *)        GetStdHandle(unsigned long standard_handle);
-    WIN32_CALL(void *)        HeapAlloc(void *heap, unsigned long flags, u64 bytes);
-    WIN32_CALL(int)           HeapFree(void *heap, unsigned long flags, void *memory);
-    WIN32_CALL(void)          OutputDebugStringA(const char *output_string);
-    WIN32_CALL(int)           QueryPerformanceCounter(LARGE_INTEGER *performance_count);
-    WIN32_CALL(int)           QueryPerformanceFrequency(LARGE_INTEGER *frequency);
+    void           *FindFirstFileA(const char *file_name, WIN32_FIND_DATAA *);
+    int             FindNextFileA(void *find_file_handle, WIN32_FIND_DATAA *);
+    unsigned short *GetCommandLineW(void);
+    int             GetExitCodeProcess(void *process, unsigned long *exit_code);
+    unsigned long   GetFileAttributesA(const char *file_name);
+    typedef long long LARGE_INTEGER;
+    int             GetFileSizeEx(void *file, LARGE_INTEGER *file_size);
+    unsigned long   GetFinalPathNameByHandleA(void *handle, char *path, unsigned long path_size, unsigned long flags);
+    unsigned long   GetLastError(void);
+    void *          GetProcessHeap(void);
+    void *          GetStdHandle(unsigned long standard_handle);
+    void *          HeapAlloc(void *heap, unsigned long flags, u64 bytes);
+    int             HeapFree(void *heap, unsigned long flags, void *memory);
+    void            OutputDebugStringA(const char *output_string);
+    int             QueryPerformanceCounter(LARGE_INTEGER *performance_count);
+    int             QueryPerformanceFrequency(LARGE_INTEGER *frequency);
     struct _OVERLAPPED;
-    WIN32_CALL(int)           ReadFile(void *file, void *buffer, unsigned long number_of_bytes_to_read, unsigned long *number_of_bytes_read, struct _OVERLAPPED *);
-    WIN32_CALL(unsigned long) WaitForSingleObject(void *handle, unsigned long milliseconds);
-    WIN32_CALL(int)           WriteFile(void *file, const void *buffer, unsigned long number_of_bytes_to_write, unsigned long *number_of_bytes_written, struct _OVERLAPPED *);
+    int             ReadFile(void *file, void *buffer, unsigned long number_of_bytes_to_read, unsigned long *number_of_bytes_read, struct _OVERLAPPED *);
+    unsigned long   WaitForSingleObject(void *handle, unsigned long milliseconds);
+    int             WriteFile(void *file, const void *buffer, unsigned long number_of_bytes_to_write, unsigned long *number_of_bytes_written, struct _OVERLAPPED *);
 
     META(link "Shell32")
-    WIN32_CALL(unsigned short **) CommandLineToArgvW(const unsigned short *command_line, int *number_of_arguments);
-    WIN32_CALL(void *) ShellExecuteA(void *handle, const char *operation, const char *file, const char *parameters, const char *directory, int show_command_count);
+    unsigned short **CommandLineToArgvW(const unsigned short *command_line, int *number_of_arguments);
+    void            *ShellExecuteA(void *handle, const char *operation, const char *file, const char *parameters, const char *directory, int show_command_count);
 #elif BASE_OS == BASE_OS_WASM
     typedef u64 size_t;
     #define os_abort() // TODO(felix)

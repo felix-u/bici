@@ -77,24 +77,24 @@ typedef struct {
 } WNDCLASSA;
 
 META(link "Gdi32")
-WIN32_CALL(int) ReleaseDC(void *window_handle, void *device_context_handle);
+int ReleaseDC(void *window_handle, void *device_context_handle);
 
 META(link "User32")
-WIN32_CALL(void *)         CreateWindowExA(unsigned long extended_style, const char *class_name, const char *window_name, unsigned long style, int x, int y, int width, int height, void *window_parent_handle, void *menu_handle, void *instance_handle, void *param);
-WIN32_CALL(long long)      DefWindowProcA(void *window_handle, unsigned message, unsigned long long wparam, long long lparam);
-WIN32_CALL(int)            DestroyWindow(void *window_handle);
-WIN32_CALL(long long)      DispatchMessageA(const MSG *);
-WIN32_CALL(void *)         GetDC(void *window_handle);
-WIN32_CALL(unsigned)       GetDpiForWindow(void *window_handle);
-WIN32_CALL(int)            GetMonitorInfoA(void *monitor_handle, MONITORINFO *);
-WIN32_CALL(void *)         LoadCursorA(void *instance_handle, const char *cursor_name);
-WIN32_CALL(void *)         MonitorFromWindow(void *window_handle, unsigned long flags);
-WIN32_CALL(int)            PeekMessageA(MSG *, void *window_handle, unsigned message_filter_min, unsigned message_filter_max, unsigned remove_message);
-WIN32_CALL(void)           PostQuitMessage(int exit_code);
-WIN32_CALL(unsigned short) RegisterClassA(const WNDCLASSA *);
-WIN32_CALL(int)            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
-WIN32_CALL(int)            ShowWindow(void *window_handle, int show_command);
-WIN32_CALL(int)            TranslateMessage(const MSG *);
+void *         CreateWindowExA(unsigned long extended_style, const char *class_name, const char *window_name, unsigned long style, int x, int y, int width, int height, void *window_parent_handle, void *menu_handle, void *instance_handle, void *param);
+long long      DefWindowProcA(void *window_handle, unsigned message, unsigned long long wparam, long long lparam);
+int            DestroyWindow(void *window_handle);
+long long      DispatchMessageA(const MSG *);
+void *         GetDC(void *window_handle);
+unsigned       GetDpiForWindow(void *window_handle);
+int            GetMonitorInfoA(void *monitor_handle, MONITORINFO *);
+void *         LoadCursorA(void *instance_handle, const char *cursor_name);
+void *         MonitorFromWindow(void *window_handle, unsigned long flags);
+int            PeekMessageA(MSG *, void *window_handle, unsigned message_filter_min, unsigned message_filter_max, unsigned remove_message);
+void           PostQuitMessage(int exit_code);
+unsigned short RegisterClassA(const WNDCLASSA *);
+int            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
+int            ShowWindow(void *window_handle, int show_command);
+int            TranslateMessage(const MSG *);
 
 static void *win32_create_window(const char *window_name, WNDPROC window_procedure) {
     const char *class_name = window_name;

@@ -2,10 +2,10 @@
 
 #include "base/base_platform_windows_common.c"
 
-WIN32_CALL(long) DwmFlush(void);
+long DwmFlush(void);
 
 META(link "Gdi32")
-WIN32_CALL(void *) CreateCompatibleDC(void *device_context_handle);
+void * CreateCompatibleDC(void *device_context_handle);
 #if !defined(_WINGDI_)
     typedef struct {
         unsigned long biSize;
@@ -31,11 +31,11 @@ WIN32_CALL(void *) CreateCompatibleDC(void *device_context_handle);
         RGBQUAD bmiColors[1];
     } BITMAPINFO;
 #endif
-WIN32_CALL(void *) CreateDIBSection(void *device_context_handle, const BITMAPINFO *, unsigned usage, void **bits, void *section_handle, unsigned long offset);
-WIN32_CALL(int)    DeleteDC(void *device_context_handle);
-WIN32_CALL(int)    DeleteObject(void *object_handle);
-WIN32_CALL(void *) SelectObject(void *device_context_handle, void *object_handle);
-WIN32_CALL(int)    StretchBlt(void *destination_device_context_handle, int destination_x, int destination_y, int destination_width, int destination_height, void *source_device_context_handle, int source_x, int source_y, int source_width, int source_height, unsigned long raster_operation);
+void * CreateDIBSection(void *device_context_handle, const BITMAPINFO *, unsigned usage, void **bits, void *section_handle, unsigned long offset);
+int    DeleteDC(void *device_context_handle);
+int    DeleteObject(void *object_handle);
+void * SelectObject(void *device_context_handle, void *object_handle);
+int    StretchBlt(void *destination_device_context_handle, int destination_x, int destination_y, int destination_width, int destination_height, void *source_device_context_handle, int source_x, int source_y, int source_width, int source_height, unsigned long raster_operation);
 
 struct Platform_Implementation {
     Platform base;

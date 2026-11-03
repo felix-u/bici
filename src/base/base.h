@@ -2650,8 +2650,6 @@ static const char *build_linker_initial_command[Build_Linker_COUNT][BASE_OS_COUN
         "-nologo",
         "-machine:X64",
         "-incremental:no",
-        "-opt:ref", // TODO(felix): move to release flags and add no_ variants to debug flags
-        "-opt:icf",
         "-fixed",
         0,
     },
@@ -2702,55 +2700,22 @@ static const char *build_linker_initial_command[Build_Linker_COUNT][BASE_OS_COUN
     },
 };
 
-// TODO(felix): Seems this can be compiler-specific only. OS-specific versions repeat exactly.
-static const char *build_compiler_mode_flags[Build_Mode_COUNT][Build_Compiler_COUNT][BASE_OS_COUNT][BUILD_FLAGS_MAX] = {
+static const char *build_compiler_mode_flags[Build_Mode_COUNT][Build_Compiler_COUNT][BUILD_FLAGS_MAX] = {
     [Build_Mode_DEBUG] = {
-        [Build_Compiler_MSVC][BASE_OS_WINDOWS] = { "-MTd", "-Z7", 0 },
-        [Build_Compiler_CLANG][BASE_OS_WINDOWS] = {
+        [Build_Compiler_MSVC] = { "-MTd", "-Z7", 0 },
+        // NOTE(felix): With clang for wasm, ubsan traps with no stack trace, which at the stage in WASM platform development I'm at while writing this, gets in the way of the stack traces for my `panic()`s in C code.
+        // TODO(felix): Make this configurable - the sanitisers are helpful too.
+        [Build_Compiler_CLANG] = {
             "-g3",
             "-fsanitize=undefined",
             "-fsanitize-trap",
-            "-O0",
-            0,
-        },
-        [Build_Compiler_CLANG][BASE_OS_MACOS] = {
-            "-g3",
-            "-fsanitize=undefined",
-            "-fsanitize-trap",
-            "-O0",
-            0,
-        },
-        [Build_Compiler_CLANG][BASE_OS_IOS_DEVICE] = {
-            "-g3",
-            "-fsanitize=undefined",
-            "-fsanitize-trap",
-            "-O0",
-            0,
-        },
-        [Build_Compiler_CLANG][BASE_OS_IOS_SIMULATOR] = {
-            "-g3",
-            "-fsanitize=undefined",
-            "-fsanitize-trap",
-            "-O0",
-            0,
-        },
-        // NOTE(felix): with clang for wasm, ubsan traps with no stack trace, which at the stage in WASM platform development I'm at while writing this, gets in the way of the stack traces for my `panic()`s in C code.
-        // TODO(felix): make this configurable - the sanitisers are helpful too
-        [Build_Compiler_CLANG][BASE_OS_WASM] = {
-            "-fsanitize=undefined",
-            "-fsanitize-trap",
-            "-g3",
             "-O0",
             0,
         },
     },
     [Build_Mode_RELEASE] = {
-        [Build_Compiler_MSVC][BASE_OS_WINDOWS]        = { "-MT", "-O2", 0 },
-        [Build_Compiler_CLANG][BASE_OS_WINDOWS]       = { "-O3", 0 },
-        [Build_Compiler_CLANG][BASE_OS_MACOS]         = { "-O3", 0 },
-        [Build_Compiler_CLANG][BASE_OS_IOS_DEVICE]    = { "-O3", 0 },
-        [Build_Compiler_CLANG][BASE_OS_IOS_SIMULATOR] = { "-O3", 0 },
-        [Build_Compiler_CLANG][BASE_OS_WASM]          = { "-O3", 0 },
+        [Build_Compiler_MSVC]  = { "-MT", "-O2", 0 },
+        [Build_Compiler_CLANG] = { "-O3", 0 },
     },
 };
 
@@ -3628,7 +3593,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             if (!object->no_extra_errors) build_push_arguments(scratch.arena, &compile, build_compiler_extra_errors[compiler]);
             build_push_arguments(scratch.arena, &compile, build_compiler_disabled_errors[compiler]);
 
-            build_push_arguments(scratch.arena, &compile, build_compiler_mode_flags[build_mode][compiler][target_os]);
+            build_push_arguments(scratch.arena, &compile, build_compiler_mode_flags[build_mode][compiler]);
             if (build_mode == Build_Mode_DEBUG) push(scratch.arena, &compile, "-DBUILD_DEBUG=1");
             if (use_asan) push(scratch.arena, &compile, "-fsanitize=address");
 
@@ -3675,6 +3640,8 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 }
             } else {
                 if (linker == Build_Linker_MSVC) {
+                    push(scratch.arena, &link, "-opt:ref");
+                    push(scratch.arena, &link, "-opt:icf");
                     push(scratch.arena, &link, "-subsystem:console");
                     // TODO(felix): subsystem:windows and entry:main don't work currently (silent crash). I'm pretty sure this has to do with the entrypoint being set incorrectly. I'm also not sure about the WINDOWS_SUBSYSTEM_[...] #defines in base_context.h
                     // push(&link, "-subsystem:windows");

@@ -1327,10 +1327,17 @@ static inline bool ascii_is_whitespace(char c) { return c == ' ' || c == '\n' ||
 static void reserve_exactly_(Arena *arena, Array_void *a, u64 item_size, u64 new_capacity, bool zero) {
     if (a->capacity >= new_capacity) return;
 
+    assert(item_size > 0);
+    assert(new_capacity <= UINT64_MAX / item_size);
     u64 byte_count = new_capacity * item_size;
-    assert(byte_count >= new_capacity); // overflow
 
-    // TODO(felix): assert the array was allocated on the arena passed in, unless I can think of any situation where it'd be useful for that not to be true
+    if (a->data != 0) {
+        u64 arena_end = (u64)arena->mem + arena->offset;
+        u64 data_end = (u64)a->data + a->capacity * item_size;
+        bool is_array_on_this_arena = (u64)arena->mem <= (u64)a->data && data_end <= arena_end;
+        assert(is_array_on_this_arena);
+    }
+
     void *raw = arena_make_(arena, byte_count, 1, false);
     memcpy(raw, a->data, a->count * item_size);
 
@@ -1417,13 +1424,21 @@ static Arena arena_init(u64 initial_size_bytes) {
 static void *arena_make_(Arena *arena, u64 item_count, u64 item_size, bool zero) {
     assert(arena != 0);
     assert(item_size > 0);
+    if (item_count > UINT64_MAX / item_size) {
+        breakpoint;
+        os_abort();
+    }
     u64 byte_count = item_count * item_size;
     if (byte_count == 0) return 0;
 
     u64 alignment = 2 * sizeof(void *);
     u64 modulo = arena->offset & (alignment - 1);
-    u64 pad = alignment - modulo;
-    if (byte_count > arena->capacity - arena->offset - pad) panic("allocation failure");
+    u64 pad = (alignment - modulo) & (alignment - 1);
+    u64 available = arena->capacity - arena->offset;
+    if (pad > available || byte_count > available - pad) {
+        breakpoint;
+        os_abort();
+    }
 
     if (modulo != 0) {
         if (BUILD_DEBUG) {

@@ -6,7 +6,25 @@
 
 #define META(...)
 
-#include <stdarg.h> // NOTE(felix): doesn't seem like anything can be done about this one
+#if COMPILER_CLANG || COMPILER_GCC
+    typedef __builtin_va_list va_list;
+    #define va_start(arguments, last_parameter)  __builtin_va_start(arguments, last_parameter)
+    #define va_arg(arguments, T)                 __builtin_va_arg(arguments, T)
+    #define va_end(arguments)                    __builtin_va_end(arguments)
+    #define va_copy(destination, source)         __builtin_va_copy(destination, source)
+#elif COMPILER_MSVC && BASE_ARCH == BASE_ARCH_X86_64
+    typedef char *va_list;
+    void __va_start(va_list *arguments, ...);
+    #define va_start(arguments, last_parameter) ((void)__va_start(&(arguments), last_parameter))
+    #define va_arg(arguments, T) \
+        ((sizeof(T) > 8 || (sizeof(T) & (sizeof(T) - 1)) != 0) \
+            ? **(T **)(((arguments) += 8) - 8) \
+            :  *(T * )(((arguments) += 8) - 8))
+    #define va_end(arguments) ((void)((arguments) = (va_list)0))
+    #define va_copy(destination, source) ((destination) = (source))
+#else
+    #error "UNIMPLEMENTED"
+#endif
 
 #if !defined(__bool_true_false_are_defined)
     #if defined(bool)
@@ -174,6 +192,12 @@ _Static_assert(sizeof(f64) == 8, "");
     #define os_abort() abort()
     #define os_exit(code) exit(code)
 #elif BASE_OS == BASE_OS_WINDOWS
+    #if BASE_ARCH_BITS == 64
+        typedef u64 size_t;
+    #else
+        #error "UNIMPLEMENTED"
+    #endif
+
     #define os_abort() ExitProcess(1)
     #define os_exit(code) ExitProcess(code)
 
@@ -1146,6 +1170,9 @@ static V2   draw_command_bounds(Draw_Command command);
 static void draw_many(Platform *platform, Draw_Command *commands, u64 count);
 
 #define UI_FUNCTION static
+#define ui_va_list va_list
+#define ui_va_start va_start
+#define ui_va_end va_end
 #include "base/ui.h"
 
 static ui_Box *base_ui_begin(ui_State *ui, App_Frame_Info *frame);

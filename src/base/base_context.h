@@ -50,6 +50,31 @@
     #error "could not context-crack OS; define BASE_OS manually before including this file"
 #endif // OS_...
 
+#define BASE_ARCH_X86_64 (1 << 0)
+#define BASE_ARCH_ARM64  (1 << 1)
+#define BASE_ARCH_WASM32 (1 << 2)
+#define BASE_ARCH_COUNT  (1 << 3)
+
+#if defined(BASE_ARCH)
+    //
+#elif defined(__wasm32__)
+    #define BASE_ARCH BASE_ARCH_WASM32
+#elif defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+    #define BASE_ARCH BASE_ARCH_ARM64
+#elif defined(__x86_64__) || defined(_M_X64)
+    #define BASE_ARCH BASE_ARCH_X86_64
+#else
+    #error "UNIMPLEMENTED. Define BASE_ARCH manually."
+#endif // ARCH_...
+
+#if BASE_ARCH == BASE_ARCH_X86_64 || BASE_ARCH == BASE_ARCH_ARM64
+    #define BASE_ARCH_BITS 64
+#elif BASE_ARCH == BASE_ARCH_WASM32
+    #define BASE_ARCH_BITS 32
+#else
+    #error "UNREACHABLE"
+#endif
+
 #if defined(__clang__)
     #define COMPILER_CLANG 1
 #elif defined(__GNUC__)

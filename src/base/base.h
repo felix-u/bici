@@ -24,9 +24,11 @@
     #define __bool_true_false_are_defined 1
 #endif
 
+#define BASE__GLUE(a, b) a##b
+#define BASE__GLUE_GLUE(a, b) BASE__GLUE(a, b)
+
 #if BASE_C_VERSION < 2011
-    // TODO(felix): is there a typedef hack we can do here?
-    #define _Static_assert(expression, message)
+    #define _Static_assert(expression, message) typedef char BASE__GLUE_GLUE(BASE__STATIC_ASSERT_LINE_, __LINE__)[(expression) ? 1 : -1]
 #endif
 
 typedef unsigned char       u8;
@@ -1309,13 +1311,13 @@ static const char **os_get_arguments(Arena *arena, u64 *out_count) {
 
 #define STRINGIFY(...) #__VA_ARGS__
 
-static inline bool ascii_is_alpha(u8 c) { return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'); }
+static inline bool ascii_is_alpha(char c) { return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'); }
 
-static inline bool ascii_is_decimal(u8 c) { return '0' <= c && c <= '9'; }
+static inline bool ascii_is_decimal(char c) { return '0' <= c && c <= '9'; }
 
-static inline bool ascii_is_hexadecimal(u8 c) { return ('0' <= c && c <= '9') || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'); }
+static inline bool ascii_is_hexadecimal(char c) { return ('0' <= c && c <= '9') || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'); }
 
-static inline bool ascii_is_whitespace(u8 c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
+static inline bool ascii_is_whitespace(char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
 
 #define POISON_BYTE 0xcd
 

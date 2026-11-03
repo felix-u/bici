@@ -49,16 +49,18 @@ typedef enum {
     X(jsi,    0x1e, 1)/* OBLIGATORY MODE .2 */\
     X(jni,    0x1f, 1)/* OBLIGATORY MODE .2 */\
 
-typedef enum {
+typedef u16 Vm_Device;
+enum {
     Vm_Device_SYSTEM   = 0x00,
     Vm_Device_CONSOLE  = 0x10,
     Vm_Device_SCREEN   = 0x20,
     Vm_Device_MOUSE    = 0x30,
     Vm_Device_KEYBOARD = 0x40,
     Vm_Device_FILE     = 0x50,
-} Vm_Device;
+};
 
-typedef enum {
+typedef u16 Vm_System_Action;
+enum {
     Vm_System_RESERVED = 0x0,
     Vm_System_END      = 0x2,
     Vm_System_START    = 0x4,
@@ -67,13 +69,15 @@ typedef enum {
     Vm_System_COLOUR_1 = 0xa,
     Vm_System_COLOUR_2 = 0xc,
     Vm_System_COLOUR_3 = 0xe,
-} Vm_System_Action;
+};
 
-typedef enum {
+typedef u16 Vm_Console_Action;
+enum {
     Vm_Console_PRINT = 0x0,
-} Vm_Console_Action;
+};
 
-typedef enum {
+typedef u16 Vm_Screen_Action;
+enum {
     Vm_Screen_UPDATE = 0x0,
     Vm_Screen_WIDTH  = 0x2,
     Vm_Screen_HEIGHT = 0x4,
@@ -83,27 +87,30 @@ typedef enum {
     Vm_Screen_SPRITE = 0xb,
     Vm_Screen_DATA   = 0xc,
     Vm_Screen_AUTO   = 0xe,
-} Vm_Screen_Action;
+};
 
-typedef enum {
+typedef u16 Vm_Mouse_Action;
+enum {
     Vm_Mouse_X = 0x0,
     Vm_Mouse_Y = 0x2,
     Vm_Mouse_LEFT_BUTTON = 0x4,
     Vm_Mouse_RIGHT_BUTTON = 0x5,
-} Vm_Mouse_Action;
+};
 
-typedef enum {
+typedef u16 Vm_Keyboard_Action;
+enum {
     Vm_Keyboard_KEY_VALUE = 0x0,
     Vm_Keyboard_KEY_STATE = 0x1,
-} Vm_Keyboard_Action;
+};
 
-typedef enum {
+typedef u16 Vm_File_Action;
+enum {
     Vm_File_NAME   = 0x0,
     Vm_File_LENGTH = 0x2,
     Vm_File_CURSOR = 0x4,
     Vm_File_READ   = 0x6,
     Vm_File_COPY   = 0x8,
-} Vm_File_Action;
+};
 
 enum {
     #define X(name, val, ...) vm_opcode_##name = val,
@@ -533,7 +540,7 @@ static void write_u16_swap_bytes(u8 rom[0x10000], u64 index, u16 value) {
     rom[index + 1] = byte2;
 }
 
-static force_inline bool is_starting_symbol_character(u8 c) {
+static force_inline bool is_starting_symbol_character(char c) {
     return ascii_is_alpha(c) || c == '_';
 }
 
@@ -650,17 +657,15 @@ static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
 }
 
 typedef struct {
-    Assembler_Context *assembler;
     Token token;
     u32 start_index;
     u32 length;
     File_Id file_id;
 } Parse_Error_Arguments;
-#define parse_error(...) parse_error_argument_struct((Parse_Error_Arguments){ __VA_ARGS__ })
-static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
-    Assembler_Context *assembler = arguments.assembler;
-
+static void parse_error(Assembler_Context *assembler, Parse_Error_Arguments arguments) {
     File_Id file_id = assembler->file_id;
+    (void)file_id;
+    panic("TODO(felix)");
     if (arguments.file_id != 0) file_id = arguments.file_id;
 
     u32 start_index = arguments.start_index;
@@ -682,7 +687,7 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
 
     u64 row = 1, column = 1;
     for (u64 i = 0; i < start_index; i += 1) {
-        u8 c = text.data[i];
+        u8 c = (u8)text.data[i];
         column += 1;
         if (c == '\n') {
             row += 1;
@@ -807,7 +812,7 @@ static void app_start(Platform *platform) {
                     cursor += 1;
 
                     for (; cursor < asm.count; cursor += 1) {
-                        u8 c = asm.data[cursor];
+                        char c = asm.data[cursor];
                         bool is_symbol_character = is_starting_symbol_character(c) || ascii_is_decimal(c);
                         if (!is_symbol_character) break;
                     }
@@ -817,32 +822,32 @@ static void app_start(Platform *platform) {
 
                         if (cursor + 1 == asm.count || (asm.data[cursor + 1] != 'x' && asm.data[cursor + 1] != 'b')) {
                             log_error("expected 'x' or 'b' after '0' to begin binary or hexadecimal literal");
-                            parse_error(.start_index = cursor + 1, 1);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = cursor + 1, .length = 1 });
                         }
-                        u8 base_char = asm.data[cursor + 1];
+                        char base_char = asm.data[cursor + 1];
                         cursor += 2;
                         start_index = cursor;
 
                         if (cursor == asm.count) {
                             log_error("expected digits following '0%c'", base_char);
-                            parse_error(.start_index = cursor - 2, 2);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = cursor - 2, .length = 2 });
                         }
 
                         for (; cursor < asm.count; cursor += 1) {
-                            u8 c = asm.data[cursor];
+                            char c = asm.data[cursor];
                             if (base_char == 'x' && ascii_is_hexadecimal(c)) continue;
                             if (base_char == 'b' && (c == '0' || c == '1')) continue;
                             if (ascii_is_whitespace(c)) break;
                             log_error("expected base_char %c digit", base_char);
-                            parse_error(.start_index = cursor);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = cursor });
                         }
 
                         base = base_char == 'b' ? 2 : 16;
                         String number_string = string_range(asm, start_index, cursor);
-                        u64 value_unbounded = int_from_string_base(number_string, base);
+                        u64 value_unbounded = (u64)int_from_string_base(number_string, base);
                         if (value_unbounded >= 0x10000) {
                             log_error("0d%llu is too large to fit in 16 bits", value_unbounded);
-                            parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = start_index, .length = (u8)(cursor - start_index) });
                         }
                         value = (u16)value_unbounded;
                     } break;
@@ -852,7 +857,7 @@ static void app_start(Platform *platform) {
                         continue;
                     } break;
                     case ':': case '$': case '{': case '}': case '[': case ']': case ',': case '/': {
-                        kind = asm.data[cursor];
+                        kind = (Token_Kind)asm.data[cursor];
                         cursor += 1;
                     } break;
                     case '"': {
@@ -861,17 +866,17 @@ static void app_start(Platform *platform) {
                         cursor += 1;
                         start_index = cursor;
                         for (; cursor < asm.count; cursor += 1) {
-                            u8 c = asm.data[cursor];
+                            char c = asm.data[cursor];
                             if (c == '"') break;
                             if (c == '\n') {
                                 log_error("expected '\"' to close string before newline");
-                                parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                                parse_error(&assembler, (Parse_Error_Arguments){ .start_index = start_index, .length = (u8)(cursor - start_index) });
                             }
                         }
 
                         if (cursor == asm.count) {
                             log_error("expected '\"' to close string before end of file");
-                            parse_error(.start_index = start_index, (u8)(cursor - start_index));
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = start_index, .length = (u8)(cursor - start_index) });
                         }
 
                         assert(asm.data[cursor] == '"');
@@ -883,23 +888,23 @@ static void app_start(Platform *platform) {
                         cursor += 1;
                         start_index = cursor;
                         for (; cursor < asm.count; cursor += 1) {
-                            u8 c = asm.data[cursor];
+                            char c = asm.data[cursor];
                             if (ascii_is_whitespace(c)) break;
                             if (c != '2' && c != 'k' && c != 'r') {
                                 log_error("only characters '2', 'k', and 'r' are valid op modes");
-                                parse_error(.start_index = cursor);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .start_index = cursor });
                             }
                         }
 
                         u64 length = cursor - start_index;
                         if (length == 0 || length > 3) {
                             log_error("a valid op mode contains 1, 2, or 3 characters (as in op.2kr), but this one has %llu", length);
-                            parse_error(.start_index = start_index, (u8)length);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .start_index = start_index, .length = (u8)length });
                         }
                     } break;
                     default: {
                         log_error("invalid syntax '%c'", asm.data[cursor]);
-                        parse_error(.start_index = cursor);
+                        parse_error(&assembler, (Parse_Error_Arguments){ .start_index = cursor });
                     }
                 }
 
@@ -927,7 +932,7 @@ static void app_start(Platform *platform) {
                         case Token_Kind_SYMBOL: case ']': case '$': case '/': case Token_Kind_NUMBER: case Token_Kind_STRING: break;
                         default: {
                             log_error("insertion mode only supports addresses (e.g. label) and numeric literals");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
                     };
                 }
@@ -945,7 +950,7 @@ static void app_start(Platform *platform) {
                     case '}': {
                         if (assembler.scoped_references.count == 0) {
                             log_error("'}' has no matching '{'");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
                         // Scoped_Reference reference = pop(assembler.scoped_references);
@@ -953,7 +958,7 @@ static void app_start(Platform *platform) {
                         panic("TODO(felix)");
                         if (reference.is_relative) {
                             log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
                         write_u16_swap_bytes(rom, reference.address, rom_count);
@@ -961,7 +966,7 @@ static void app_start(Platform *platform) {
                     case '[': {
                         if (assembler.insertion_mode.is_active) {
                             log_error("cannot enter insertion mode while already in insertion mode");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
                         assembler.insertion_mode.is_active = true;
 
@@ -977,7 +982,7 @@ static void app_start(Platform *platform) {
                     case ']': {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("']' has no matching '['");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
                         if (assembler.insertion_mode.has_relative_reference) {
@@ -986,13 +991,13 @@ static void app_start(Platform *platform) {
                             panic("TODO(felix)");
                             if (!reference.is_relative) {
                                 log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
-                                parse_error(&assembler, token);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                             }
 
                             u64 relative_difference = rom_count - reference.address - 1;
                             if (relative_difference > 255) {
                                 log_error("relative difference from '[$' is %llu bytes, but the maximum is 255", relative_difference);
-                                parse_error(&assembler, token);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                             }
 
                             u8 *location_to_patch = &rom[reference.address];
@@ -1004,7 +1009,7 @@ static void app_start(Platform *platform) {
                     case '/': {
                         if (next.kind != Token_Kind_SYMBOL) {
                             log_error("expected relative label following '/'");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
                         parsing_relative_label = true;
                     } break;
@@ -1012,7 +1017,7 @@ static void app_start(Platform *platform) {
                         if (parsing_relative_label) {
                             if (next.kind != ':') {
                                 log_error("expected ':' ending relative label definition");
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
                         }
 
@@ -1023,7 +1028,7 @@ static void app_start(Platform *platform) {
                             panic("TODO(felix)");
                             if (is_redefinition) {
                                 log_error("redefinition of label '%S'", token_string);
-                                parse_error(&assembler, token);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                             }
 
                             // Label new_label = { .token_id = file_token_id, .address = rom_count };
@@ -1032,6 +1037,7 @@ static void app_start(Platform *platform) {
 
                             // Map_Label *labels = 0;
                             int *labels = 0;
+                            (void)labels;
                             panic("TODO(felix)");
                             if (parsing_relative_label) {
                                 // Label *parent = slice_get_last(assembler.labels.values);
@@ -1046,12 +1052,13 @@ static void app_start(Platform *platform) {
                                 panic("TODO(felix)");
                                 if (is_redefinition) {
                                     log_error("redefinition of label '%S'", token_string);
-                                    parse_error(&assembler, token);
+                                    parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                                 }
 
                                 parsing_relative_label = false;
                             } else {
-                                labels = &assembler.labels;
+                                // labels = &assembler.labels;
+                                panic("TODO(felix)");
                             }
 
                             // map_put(labels, token_string, &new_label);
@@ -1092,7 +1099,7 @@ static void app_start(Platform *platform) {
                                     case Token_Kind_SYMBOL: case Token_Kind_NUMBER: case '{': break;
                                     default: {
                                         log_error("instruction '%s' takes an immediate, but no label or numeric literal is given", vm_opcode_name[instruction & VM_OPCODE_MASK]);
-                                        parse_error(&assembler, next);
+                                        parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                                     }
                                 }
 
@@ -1118,7 +1125,7 @@ static void app_start(Platform *platform) {
                                     if (width == 1) {
                                         if (value > 255) {
                                             log_error("attempt to supply 16-bit value to instruction taking 8-bit immediate (%u is greater than 255); did you mean to use mode '.2'?", value);
-                                            parse_error(&assembler, next);
+                                            parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                                         }
                                         rom[rom_count] = (u8)value;
                                         rom_count += 1;
@@ -1137,7 +1144,7 @@ static void app_start(Platform *platform) {
                         if (string_equals(token_string, S("org")) || string_equals(token_string, S("rorg")) || string_equals(token_string, S("aorg"))) {
                             if (next.kind != Token_Kind_NUMBER) {
                                 log_error("expected numeric literal (byte offset) after directive '%S'", token_string);
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             u16 value = next.value;
@@ -1146,7 +1153,7 @@ static void app_start(Platform *platform) {
 
                             if (value < rom_count) {
                                 log_error("offset %u is less than current offset %u", value, rom_count);
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             bool assert_only = token_string.data[0] == 'a';
@@ -1157,7 +1164,7 @@ static void app_start(Platform *platform) {
                         } else if (string_equals(token_string, S("patch"))) {
                             if (next.kind != Token_Kind_SYMBOL) {
                                 log_error("expected label to indicate destination offset as first argument to directive 'patch'");
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -1171,14 +1178,14 @@ static void app_start(Platform *platform) {
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                             if (next.kind != ',') {
                                 log_error("expected ',' after between first and second arguments to directive 'patch'");
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
                             if (next.kind != Token_Kind_SYMBOL && next.kind != Token_Kind_NUMBER) {
                                 log_error("expected label or numeric literal to indicate address as second argument to directive 'patch'");
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             file_token_id = token_id_shift(file_token_id, 1);
@@ -1187,13 +1194,13 @@ static void app_start(Platform *platform) {
                         } else if (string_equals(token_string, S("include"))) {
                             if (next.kind != Token_Kind_STRING) {
                                 log_error("expected string following directive 'include'");
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             String include_filepath = next_string;
                             if (string_equals(include_filepath, file->name)) {
                                 log_error("cyclic inclusion of file '%S'", file->name);
-                                parse_error(&assembler, next);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
                             read_ok = false;
@@ -1226,7 +1233,7 @@ static void app_start(Platform *platform) {
                     case Token_Kind_NUMBER: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("standalone number literals are only supported in insertion mode (e.g. in [ ... ])");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
                         u16 value = token.value;
@@ -1251,7 +1258,7 @@ static void app_start(Platform *platform) {
                     case Token_Kind_STRING: {
                         if (!assembler.insertion_mode.is_active) {
                             log_error("strings can only be used in insertion mode (e.g. inside [ ... ])");
-                            parse_error(&assembler, token);
+                            parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
                         assert(rom_count + token_string.count <= 0x10000);
@@ -1260,7 +1267,7 @@ static void app_start(Platform *platform) {
                     } break;
                     default: {
                         log_error("invalid syntax");
-                        parse_error(&assembler, token);
+                        parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                     }
                 }
             }
@@ -1269,7 +1276,7 @@ static void app_start(Platform *platform) {
                 Scoped_Reference reference = assembler.scoped_references.data[0];
                 Token token = *token_get(&assembler, reference.token_id);
                 log_error("anonymous reference ('{') without matching '}'");
-                parse_error(&assembler, token);
+                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
             }
 
             switch_file:;
@@ -1317,7 +1324,7 @@ static void app_start(Platform *platform) {
                 done:
                 if (*match == 0) {
                     log_error("no such label '%S'", reference_string);
-                    parse_error(&assembler, token, .file_id = token_id.file_id);
+                    parse_error(&assembler, (Parse_Error_Arguments){ .token = token, .file_id = token_id.file_id });
                 }
             }
 
@@ -1371,6 +1378,7 @@ static void app_start(Platform *platform) {
                         case 0x5: mode_string = "k2"; break;
                         case 0x6: mode_string = "kr"; break;
                         case 0x7: mode_string = "kr2"; break;
+                        default: unreachable;
                     }
 
                     string_builder_print(&scratch, &builder, "[%x]\t'%c'\t#%x\t%s;%s\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
@@ -1407,6 +1415,6 @@ static void app_update_and_render(Platform *platform) {
     print("working stack (bottom->top): { ");
     for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("%llx ", vm->stacks[0].memory[token_id]);
     print("}\nreturn  stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[Vm_Mode_RETURN_STACK].memory[token_id]);
+    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[1].memory[token_id]);
     print("}\n");
 }

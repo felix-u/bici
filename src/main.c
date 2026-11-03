@@ -767,7 +767,7 @@ static void app_start(Platform *platform) {
         const char *opcode_from_name[VM_OPCODE_MAX_VALUE_PLUS_ONE * 16] = {0};
         for (u8 opcode = 0; opcode < VM_OPCODE_MAX_VALUE_PLUS_ONE; opcode += 1) {
             const char *name = vm_opcode_name[opcode];
-            u64 hash = hash_djb2(name, cstring_length(name));
+            u64 hash = ds_hash_fnv1a(name, cstring_length(name));
 
             assert(is_power_of_2(sizeof opcode_from_name / sizeof *opcode_from_name));
             u64 index = hash & ((sizeof opcode_from_name / sizeof *opcode_from_name) - 1);

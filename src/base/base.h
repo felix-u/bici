@@ -524,9 +524,6 @@ static f64 acos_(f64 x) {
 
 static const char **os_get_arguments(Arena *, u64 *out_count);
 
-static u64 hash_djb2(const void *bytes, u64 byte_count);
-static u64 hash_lookup_msi(u64 hash, u64 exponent, u64 index);
-
 #define v(vector) (&(vector).x)
 typedef struct { f32 x, y; } V2;
 typedef struct { f32 x, y, z; } V3;
@@ -1340,21 +1337,6 @@ static u64 grow_capacity(u64 current, u64 minimum) {
     current += !current;
     while (current < minimum) current *= 2;
     return current;
-}
-
-static u64 hash_djb2(const void *bytes, u64 byte_count) {
-    u64 hash = 5381;
-    for (u64 i = 0; i < byte_count; i += 1) {
-        hash += (hash << 5) + ((const u8 *)bytes)[i];
-    }
-    return hash;
-}
-
-static u64 hash_lookup_msi(u64 hash, u64 exponent, u64 index) {
-    u64 mask = ((u64)1 << exponent) - 1;
-    u64 step = (hash >> (64 - exponent)) | 1;
-    u64 new = (index + step) & mask;
-    return new;
 }
 
 static bool intersect_point_in_rectangle(V2 point, V4 rectangle) {

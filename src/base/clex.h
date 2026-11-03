@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-05-24
+// https://github.com/felix-u 2026-11-03
 // Public domain. NO WARRANTY - use at your own risk
 
 #if !defined(CLEX_H)
@@ -200,9 +200,7 @@ CLEX_FUNCTION clex_Lexer clex_init(const char *path, const char *path_end, const
     return lexer;
 }
 
-static _Bool clex__is_newline(clex_Cursor *cursor, const char *c) {
-    // TODO(felix): remove
-    (void)cursor;
+static _Bool clex__is_newline(const char *c) {
     if (*c == '\n') return 1;
     if (*c == '\r' && c[1] == '\n') return 1;
     return 0;
@@ -483,17 +481,14 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                 const char *comment_end = comment;
 
                 if (single_line_comment) {
-                    while (comment_end != 0 && !clex__is_newline(c, comment_end)) comment_end += 1;
+                    while (*comment_end != 0 && !clex__is_newline(comment_end)) comment_end += 1;
+                    c->c = comment_end;
                 } else {
                     CLEX_ASSERT(old_comment);
-                    while (comment_end != 0) {
-                        if (*comment_end == '*' && comment_end[1] == '/') break;
-                        comment_end += 1;
-                    }
+                    while (*comment_end != 0 && !(*comment_end == '*' && comment_end[1] == '/')) comment_end += 1;
+                    if (*comment_end == 0) goto error;
+                    c->c = comment_end + 2;
                 }
-                if (*comment_end == 0) goto error;
-
-                c->c = comment_end + 1;
 
                 if (!(l->flags & clex_PARSE_COMMENTS)) goto next_token;
 
@@ -586,11 +581,11 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                     continue;
                 }
                 if (*c->c == '"') break;
-                if (clex__is_newline(c, c->c)) goto error;
+                if (clex__is_newline(c->c)) goto error;
 
                 c->c += 1;
             }
-            CLEX_ASSERT(*c->c != 0);
+            if (*c->c == 0) goto error;
 
             const char *string_end = c->c++;
             l->token = (clex_Token){

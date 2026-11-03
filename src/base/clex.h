@@ -89,19 +89,24 @@ typedef enum {
     clex_Token_END_OK,
 } clex_Token_Kind;
 
-typedef enum {
-    clex_Suffix_FLOAT = 1 << 0,
+typedef unsigned short clex_Token_Flags;
+enum {
+    clex_Token_Flag_SUFFIX_FLOAT           = 1 << 0,
+    clex_Token_Flag_SUFFIX_UNSIGNED        = 1 << 1,
+    clex_Token_Flag_SUFFIX_LONG            = 1 << 2,
+    clex_Token_Flag_SUFFIX_LONG_LONG       = 1 << 3,
+    clex_Token_Flag_SUFFIX_BIT_PRECISE_INT = 1 << 4,
 
-    clex_Suffix_UNSIGNED = 1 << 1,
-    clex_Suffix_LONG = 1 << 2,
-    clex_Suffix_LONG_LONG = 1 << 3,
-    clex_Suffix_BIT_PRECISE_INT = 1 << 4,
-} clex_Suffixes;
+    clex_Token_Flag_BASE_2  = 1 << 5,
+    clex_Token_Flag_BASE_8  = 1 << 6,
+    clex_Token_Flag_BASE_10 = 1 << 7,
+    clex_Token_Flag_BASE_16 = 1 << 8,
+};
 
 typedef struct {
     clex_Token_Kind kind;
     clex_Data data, data2;
-    clex_Suffixes suffixes;
+    clex_Token_Flags flags;
 } clex_Token;
 
 typedef enum {
@@ -377,78 +382,6 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             };
             return 1;
         } break;
-        case '0': {
-            const char *integer = c->c;
-            char next = c->c[1];
-
-            if (next == '.') {
-                const char *floating = c->c;
-
-                c->c += 2;
-                while ('0' <= *c->c && *c->c <= '9') c->c += 1;
-                if (*c->c == 0) goto error;
-
-                const char *floating_end = c->c;
-                _Bool float_suffix = *c->c == 'f';
-                c->c += float_suffix;
-
-                l->token = (clex_Token){
-                    .kind = clex_Token_FLOAT,
-                    .data = { .start = floating, .end = floating_end },
-                    .suffixes = float_suffix * clex_Suffix_FLOAT,
-                };
-                return 1;
-            }
-
-            if (next == 'b' || next == 'B') {
-                CLEX_ASSERT(0 && "TODO(felix)");
-            }
-
-            if (next == 'x' || next == 'X') {
-                const char *hex = c->c;
-
-                c->c += 2;
-                for (;; c->c += 1) {
-                    char lowercase = *c->c | 0x20;
-                    if (!(('0' <= *c->c && *c->c <= '9') || ('a' <= lowercase && lowercase <= 'f'))) break;
-                }
-
-                const char *hex_end = c->c;
-                // TODO(felix): suffixes
-
-                l->token = (clex_Token){
-                    .kind = clex_Token_INTEGER,
-                    .data = { .start = hex, .end = hex_end },
-                    // TODO(felix): hex flag
-                };
-                return 1;
-            }
-
-            if ('1' <= next && next <= '7') {
-                const char *octal = c->c;
-
-                c->c += 1;
-                while ('0' <= *c->c && *c->c <= '7') c->c += 1;
-                if (*c->c == '8' || *c->c == '9') goto error;
-
-                const char *octal_end = c->c;
-                // TODO(felix): suffixes
-
-                l->token = (clex_Token){
-                    .kind = clex_Token_INTEGER,
-                    .data = { .start = octal, .end = octal_end },
-                };
-                return 1;
-            }
-
-            if (next == '8' || next == '9') goto error;
-
-            l->token = (clex_Token){
-                .kind = clex_Token_INTEGER,
-                .data = { .start = integer, .end = ++c->c },
-            };
-            return 1;
-        } break;
         case '!': case '%': case '&': case '*': case '+': case '-': case '/': case '<': case '>': case '^': case '|': // can be immediately followed by `=`
         case '=': case '~':
         {
@@ -646,53 +579,75 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
     //      character-constant:
     //          encoding-prefix[opt] ' c-char-sequence '
 
-    if ('1' <= *c->c && *c->c <= '9') {
+    if (clex__is_digit(*c->c)) {
         const char *number = c->c;
-        while ('0' <= *c->c && *c->c <= '9') c->c += 1;
 
-        _Bool floating = *c->c == '.';
+        unsigned base = 10;
+        clex_Token_Flags flags = clex_Token_Flag_BASE_10;
+        if (*c->c == '0') switch (c->c[1] | 0x20) {
+            case 'b': base = 2;  flags = clex_Token_Flag_BASE_2;  c->c += 2; break;
+            case 'x': base = 16; flags = clex_Token_Flag_BASE_16; c->c += 2; break;
+            case '.': break; // decimal fraction, as in 0.5
+            default:  base = 8;  flags = clex_Token_Flag_BASE_8;  c->c += 1; break;
+        }
+
+        const char *digits = c->c;
+        for (unsigned value = 0; value < base; c->c += value < base) {
+            unsigned decimal_value = (unsigned)(*c->c - '0');
+            unsigned letter_value = (unsigned)((*c->c | 0x20) - 'a');
+            _Bool is_decimal_digit = decimal_value < 10;
+            _Bool is_hex_letter = letter_value < 6;
+
+            value = is_decimal_digit * decimal_value;
+            value += is_hex_letter * (letter_value + 10);
+            value += !(is_decimal_digit || is_hex_letter) * base;
+        }
+
+        _Bool is_prefix_without_digits = c->c == digits && base != 8;
+        _Bool is_digit_invalid_for_base = clex__is_digit(*c->c);
+        if (is_prefix_without_digits || is_digit_invalid_for_base) goto error;
+
+        _Bool floating = base == 10 && *c->c == '.';
         c->c += floating;
-        if (floating) while ('0' <= *c->c && *c->c <= '9') c->c += 1;
+        if (floating) while (clex__is_digit(*c->c)) c->c += 1;
         const char *number_end = c->c;
 
-        _Bool unsigned_suffix = 0, long_suffix = 0, long_long_suffix = 0, bit_suffix = 0, floating_suffix = 0;
         for (;;) {
             const char *old_c = c->c;
 
-            floating_suffix = *c->c == 'f';
+            _Bool floating_suffix = *c->c == 'f';
             c->c += floating_suffix;
 
-            unsigned_suffix = (*c->c | 0x20) == 'u';
+            _Bool unsigned_suffix = (*c->c | 0x20) == 'u';
             c->c += unsigned_suffix;
 
-            long_suffix = (*c->c | 0x20) == 'l';
-            long_long_suffix = long_suffix && c->c[1] == *c->c;
+            _Bool long_suffix = (*c->c | 0x20) == 'l';
+            _Bool long_long_suffix = long_suffix && c->c[1] == *c->c;
             long_suffix = long_suffix && !long_long_suffix;
             c->c += long_suffix;
             c->c += 2 * long_long_suffix;
 
-            bit_suffix = 0;
+            _Bool bit_suffix = 0;
             if ((*c->c | 0x20) == 'w' && c->c[1] != 0) {
                 char next = 'B' | (*c->c & 0x20);
                 bit_suffix = c->c[1] == next;
             }
             c->c += 2 * bit_suffix;
 
+            flags |= floating_suffix * clex_Token_Flag_SUFFIX_FLOAT;
+            flags |= unsigned_suffix * clex_Token_Flag_SUFFIX_UNSIGNED;
+            flags |= long_suffix * clex_Token_Flag_SUFFIX_LONG;
+            flags |= long_long_suffix * clex_Token_Flag_SUFFIX_LONG_LONG;
+            flags |= bit_suffix * clex_Token_Flag_SUFFIX_BIT_PRECISE_INT;
+
             _Bool no_more_suffixes = c->c == old_c;
             if (no_more_suffixes) break;
         }
 
-        clex_Suffixes suffixes = 0;
-        suffixes |= floating_suffix * clex_Suffix_FLOAT;
-        suffixes |= unsigned_suffix * clex_Suffix_UNSIGNED;
-        suffixes |= long_suffix * clex_Suffix_LONG;
-        suffixes |= long_long_suffix * clex_Suffix_LONG_LONG;
-        suffixes |= bit_suffix * clex_Suffix_BIT_PRECISE_INT;
-
         l->token = (clex_Token){
             .kind = floating ? clex_Token_FLOAT : clex_Token_INTEGER,
             .data = { .start = number, .end = number_end },
-            .suffixes = suffixes,
+            .flags = flags,
         };
         return 1;
     }

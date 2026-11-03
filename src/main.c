@@ -3,14 +3,14 @@
 
 #include "base/base_platform_wingdi.c"
 
-#define vm_screen_initial_width 640
-#define vm_screen_initial_height 360
+#define Vm_Screen_INITIAL_WIDTH 640
+#define Vm_Screen_INITIAL_HEIGHT 360
 
 typedef enum {
-    VM_MODE_SHORT = 1 << 5,
-    VM_MODE_RETURN_STACK = 1 << 6,
-    VM_MODE_KEEP = 1 << 7,
-    VM_MODE_MASK = VM_MODE_SHORT | VM_MODE_RETURN_STACK | VM_MODE_KEEP,
+    Vm_Mode_SHORT        = 1 << 5,
+    Vm_Mode_RETURN_STACK = 1 << 6,
+    Vm_Mode_KEEP         = 1 << 7,
+    VM_MODE_MASK         = Vm_Mode_SHORT | Vm_Mode_RETURN_STACK | Vm_Mode_KEEP,
 } Vm_Mode;
 #define VM_OPCODE_MASK (~(VM_MODE_MASK))
 
@@ -50,70 +50,71 @@ typedef enum {
     X(jni,    0x1f, 1)/* OBLIGATORY MODE .2 */\
 
 typedef enum {
-    vm_device_system   = 0x00,
-    vm_device_console  = 0x10,
-    vm_device_screen   = 0x20,
-    vm_device_mouse    = 0x30,
-    vm_device_keyboard = 0x40,
-    vm_device_file     = 0x50,
+    Vm_Device_SYSTEM   = 0x00,
+    Vm_Device_CONSOLE  = 0x10,
+    Vm_Device_SCREEN   = 0x20,
+    Vm_Device_MOUSE    = 0x30,
+    Vm_Device_KEYBOARD = 0x40,
+    Vm_Device_FILE     = 0x50,
 } Vm_Device;
 
 typedef enum {
-    vm_system_reserved = 0x0,
-    vm_system_end      = 0x2,
-    vm_system_start    = 0x4,
-    vm_system_quit     = 0x6,
-    vm_system_colour_0 = 0x8,
-    vm_system_colour_1 = 0xa,
-    vm_system_colour_2 = 0xc,
-    vm_system_colour_3 = 0xe,
+    Vm_System_RESERVED = 0x0,
+    Vm_System_END      = 0x2,
+    Vm_System_START    = 0x4,
+    Vm_System_QUIT     = 0x6,
+    Vm_System_COLOUR_0 = 0x8,
+    Vm_System_COLOUR_1 = 0xa,
+    Vm_System_COLOUR_2 = 0xc,
+    Vm_System_COLOUR_3 = 0xe,
 } Vm_System_Action;
 
 typedef enum {
-    vm_console_print = 0x0,
+    Vm_Console_PRINT = 0x0,
 } Vm_Console_Action;
 
 typedef enum {
-    vm_screen_update = 0x0,
-    vm_screen_width  = 0x2,
-    vm_screen_height = 0x4,
-    vm_screen_x      = 0x6,
-    vm_screen_y      = 0x8,
-    vm_screen_pixel  = 0xa,
-    vm_screen_sprite = 0xb,
-    vm_screen_data   = 0xc,
-    vm_screen_auto   = 0xe,
+    Vm_Screen_UPDATE = 0x0,
+    Vm_Screen_WIDTH  = 0x2,
+    Vm_Screen_HEIGHT = 0x4,
+    Vm_Screen_X      = 0x6,
+    Vm_Screen_Y      = 0x8,
+    Vm_Screen_PIXEL  = 0xa,
+    Vm_Screen_SPRITE = 0xb,
+    Vm_Screen_DATA   = 0xc,
+    Vm_Screen_AUTO   = 0xe,
 } Vm_Screen_Action;
 
 typedef enum {
-    vm_mouse_x = 0x0,
-    vm_mouse_y = 0x2,
-    vm_mouse_left_button = 0x4,
-    vm_mouse_right_button = 0x5,
+    Vm_Mouse_X = 0x0,
+    Vm_Mouse_Y = 0x2,
+    Vm_Mouse_LEFT_BUTTON = 0x4,
+    Vm_Mouse_RIGHT_BUTTON = 0x5,
 } Vm_Mouse_Action;
 
 typedef enum {
-    vm_keyboard_key_value = 0x0,
-    vm_keyboard_key_state = 0x1,
+    Vm_Keyboard_KEY_VALUE = 0x0,
+    Vm_Keyboard_KEY_STATE = 0x1,
 } Vm_Keyboard_Action;
 
 typedef enum {
-    vm_file_name    = 0x0,
-    vm_file_length  = 0x2,
-    vm_file_cursor = 0x4,
-    vm_file_read    = 0x6,
-    vm_file_copy    = 0x8,
+    Vm_File_NAME   = 0x0,
+    Vm_File_LENGTH = 0x2,
+    Vm_File_CURSOR = 0x4,
+    Vm_File_READ   = 0x6,
+    Vm_File_COPY   = 0x8,
 } Vm_File_Action;
 
 enum {
     #define X(name, val, ...) vm_opcode_##name = val,
     VM_OPCODE_TABLE
     #undef X
-    vm_opcode_max_value_plus_one
+    VM_OPCODE_MAX_VALUE_PLUS_ONE,
+    VM_OPCODE_MAX_VALUE = VM_OPCODE_MAX_VALUE_PLUS_ONE - 1,
 };
 
-static String vm_opcode_name[vm_opcode_max_value_plus_one] = {
-    #define X(name, val, ...) [val] = Sc(#name),
+static const char *vm_opcode_name[VM_OPCODE_MAX_VALUE_PLUS_ONE] = {
+    #define X(name, val, ...) [val] = #name,
     VM_OPCODE_TABLE
     #undef X
 };
@@ -156,20 +157,20 @@ static force_inline void set16(u8 *address, u16 value) {
 
 static u8   vm_get8(Vm *vm, u8 i_back) { return *(vm_stack + (u8)(vm_sp - i_back)); }
 static void vm_push8(Vm *vm, u8 byte) { vm_s(vm_sp) = byte; vm_sp += 1; }
-static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!(vm->current_mode & VM_MODE_KEEP)) vm_sp -= 1; return val; }
+static u8   vm_pop8(Vm *vm) { u8 val = vm_s(vm_sp - 1); if (!(vm->current_mode & Vm_Mode_KEEP)) vm_sp -= 1; return val; }
 static u8   vm_load8(Vm *vm, u16 addr) { return vm_mem(addr); }
 static void vm_store8(Vm *vm, u16 addr, u8 val) { vm_mem(addr) = val; }
 
 static u16  vm_get16(Vm *vm, u8 i_back) { return (u16)vm_s(vm_sp - 2 * i_back + 1) | (u16)(vm_s(vm_sp - 2 * i_back) << 8); }
 static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm, (u8)byte2); }
-static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!(vm->current_mode & VM_MODE_KEEP)) vm_sp -= 2; return val; }
+static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!(vm->current_mode & Vm_Mode_KEEP)) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO(felix): ensure correct
 
 static inline u32 rgb_from_colour(Vm *vm, u8 colour_index) {
     assert(colour_index < 4);
-    Vm_System_Action colour_offset = vm_system_colour_0 + colour_index * 2;
-    u16 colour = get16(&vm->memory[vm_device_system | (Vm_Device)colour_offset]);
+    Vm_System_Action colour_offset = Vm_System_COLOUR_0 + colour_index * 2;
+    u16 colour = get16(&vm->memory[Vm_Device_SYSTEM | (Vm_Device)colour_offset]);
     u32 r = ((u32)colour & 0x0f00) >> 8;
     u32 g = ((u32)colour & 0x00f0) >> 4;
     u32 b = ((u32)colour & 0x000f) >> 0;
@@ -185,7 +186,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
         u8 instruction = vm_mem(vm->program_counter);
 
         vm->current_mode = instruction & VM_MODE_MASK;
-        vm->active_stack = instruction & VM_MODE_RETURN_STACK;
+        vm->active_stack = instruction & Vm_Mode_RETURN_STACK;
 
         switch (instruction & VM_OPCODE_MASK) {
             case vm_opcode_break: return;
@@ -193,7 +194,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
             case vm_opcode_jei: if ( vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jni: if (!vm_pop8(vm)) { vm->program_counter = vm_load16(vm, vm->program_counter + 1); add = 0; } else add = 3; continue;
             case vm_opcode_jsi: {
-                vm->active_stack = VM_MODE_RETURN_STACK;
+                vm->active_stack = Vm_Mode_RETURN_STACK;
                 vm_push16(vm, vm->program_counter + 3);
                 vm->active_stack = 0;
                 vm->program_counter = vm_load16(vm, vm->program_counter + 1);
@@ -203,7 +204,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
             default: break;
         }
 
-        switch (instruction & VM_MODE_SHORT) {
+        switch (instruction & Vm_Mode_SHORT) {
             case 0: switch (instruction & VM_OPCODE_MASK) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
@@ -211,8 +212,8 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                 case vm_opcode_drop:   (void)vm_pop8(vm); break;
                 case vm_opcode_swap:   { u8 c = vm_pop8(vm), b = vm_pop8(vm); vm_push8(vm, c); vm_push8(vm, b); } break;
                 case vm_opcode_rot:    { u8 c = vm_pop8(vm), b = vm_pop8(vm), a = vm_pop8(vm); vm_push8(vm, b); vm_push8(vm, c); vm_push8(vm, a); } break;
-                case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push8(vm, vm_get8(vm, 1)); break;
-                case vm_opcode_over:   assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push8(vm, vm_get8(vm, 2)); break;
+                case vm_opcode_dup:    assert(!(vm->current_mode & Vm_Mode_KEEP)); vm_push8(vm, vm_get8(vm, 1)); break;
+                case vm_opcode_over:   assert(!(vm->current_mode & Vm_Mode_KEEP)); vm_push8(vm, vm_get8(vm, 2)); break;
                 case vm_opcode_eq:     vm_push8(vm, vm_pop8(vm) == vm_pop8(vm)); break;
                 case vm_opcode_neq:    vm_push8(vm, vm_pop8(vm) != vm_pop8(vm)); break;
                 case vm_opcode_gt:     { u8 right = vm_pop8(vm), left = vm_pop8(vm); vm_push8(vm, left > right); } break;
@@ -229,7 +230,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                 case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;
                 case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop8(vm)) { vm->program_counter = addr; add = 0; } } break;
                 case vm_opcode_jst:    {
-                    vm->active_stack = VM_MODE_RETURN_STACK;
+                    vm->active_stack = Vm_Mode_RETURN_STACK;
                     vm_push16(vm, vm->program_counter + 1);
                     vm->active_stack = 0;
                     vm->program_counter = vm_pop16(vm);
@@ -237,32 +238,32 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                 } break;
                 case vm_opcode_stash:  { // TODO(felix): fix
                     u8 val = vm_pop8(vm);
-                    vm->active_stack = vm->active_stack == 0 ? VM_MODE_RETURN_STACK : 0;
+                    vm->active_stack = vm->active_stack == 0 ? Vm_Mode_RETURN_STACK : 0;
                     vm_push8(vm, val);
-                    vm->active_stack = vm->active_stack == 0 ? VM_MODE_RETURN_STACK : 0;
+                    vm->active_stack = vm->active_stack == 0 ? Vm_Mode_RETURN_STACK : 0;
                 } break;
                 case vm_opcode_load:   { u16 addr = vm_pop16(vm); u8 val = vm_load8(vm, addr); vm_push8(vm, val); } break;
                 case vm_opcode_store:  { u16 addr = vm_pop16(vm); u8 val = vm_pop8(vm); vm_store8(vm, addr, val); } break;
                 case vm_opcode_read:   {
-                    u8 vm_device_and_action = vm_pop8(vm);
-                    Vm_Device device = vm_device_and_action & 0xf0;
-                    u8 action = vm_device_and_action & 0x0f;
+                    u8 Vm_Device_AND_ACTION = vm_pop8(vm);
+                    Vm_Device device = Vm_Device_AND_ACTION & 0xf0;
+                    u8 action = Vm_Device_AND_ACTION & 0x0f;
                     u8 to_push = 0;
                     switch (device) {
-                        case vm_device_mouse: switch (action) {
-                            case vm_mouse_left_button: {
+                        case Vm_Device_MOUSE: switch (action) {
+                            case Vm_Mouse_LEFT_BUTTON: {
                                 if (platform->frame.mouse_clicked[App_Mouse_LEFT]) to_push |= 0xf0;
                                 if (platform->frame.mouse_down[App_Mouse_LEFT])    to_push |= 0x0f;
                             } break;
-                            case vm_mouse_right_button: {
+                            case Vm_Mouse_RIGHT_BUTTON: {
                                 if (platform->frame.mouse_clicked[App_Mouse_RIGHT]) to_push |= 0xf0;
                                 if (platform->frame.mouse_down[App_Mouse_RIGHT])    to_push |= 0x0f;
                             } break;
                             default: panic("[read.1] invalid action #%02x for mouse device", action);
                         } break;
-                        case vm_device_keyboard: switch (action) {
-                            case vm_keyboard_key_state: {
-                                u8 key = vm->memory[vm_device_keyboard | (Vm_Device)vm_keyboard_key_value];
+                        case Vm_Device_KEYBOARD: switch (action) {
+                            case Vm_Keyboard_KEY_STATE: {
+                                u8 key = vm->memory[Vm_Device_KEYBOARD | (Vm_Device)Vm_Keyboard_KEY_VALUE];
                                 bool key_down = platform->frame.key_down[key];
                                 if (key_down) to_push |= 0x0f;
                                 bool key_pressed = platform->frame.key_pressed[key];
@@ -274,23 +275,23 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                     }
                     vm_push8(vm, to_push);
                     // // TODO(felix): not sure about this. do I use the same address for different purposes depending on whether I'm reading or writing?
-                    // vm->memory[vm_device_and_action] = to_push;
+                    // vm->memory[Vm_Device_AND_ACTION] = to_push;
                 } break;
                 case vm_opcode_write:  {
-                    u8 vm_device_and_action = vm_pop8(vm);
-                    Vm_Device device = vm_device_and_action & 0xf0;
-                    u8 action = vm_device_and_action & 0x0f;
+                    u8 Vm_Device_AND_ACTION = vm_pop8(vm);
+                    Vm_Device device = Vm_Device_AND_ACTION & 0xf0;
+                    u8 action = Vm_Device_AND_ACTION & 0x0f;
                     u8 argument = vm_pop8(vm);
                     switch (device) {
-                        case vm_device_screen: {
-                            u8 *x_address = &vm->memory[vm_device_screen | (Vm_Device)vm_screen_x];
-                            u8 *y_address = &vm->memory[vm_device_screen | (Vm_Device)vm_screen_y];
+                        case Vm_Device_SCREEN: {
+                            u8 *x_address = &vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_X];
+                            u8 *y_address = &vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_Y];
                             u16 x = get16(x_address);
                             u16 y = get16(y_address);
                             switch (action) {
-                                case vm_screen_pixel: {
-                                    if (x >= vm_screen_initial_width) break;
-                                    if (y >= vm_screen_initial_height) break;
+                                case Vm_Screen_PIXEL: {
+                                    if (x >= Vm_Screen_INITIAL_WIDTH) break;
+                                    if (y >= Vm_Screen_INITIAL_HEIGHT) break;
 
                                     u8 fill_x = argument & 0x80;
                                     u8 fill_y = argument & 0x40;
@@ -300,8 +301,8 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
 
                                     u32 rgb = rgb_from_colour(vm, colour);
 
-                                    u16 width = fill_x ? (vm_screen_initial_width - x) : 1;
-                                    u16 height = fill_y ? (vm_screen_initial_height - y) : 1;
+                                    u16 width = fill_x ? (Vm_Screen_INITIAL_WIDTH - x) : 1;
+                                    u16 height = fill_y ? (Vm_Screen_INITIAL_HEIGHT - y) : 1;
 
                                     if (fill_x && fill_y) {
                                         panic("TODO(felix)");
@@ -311,7 +312,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                         // gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
                                     } else if (fill_x) {
                                         panic("TODO(felix)");
-                                        // gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)vm_screen_initial_width, .y = (f32)y }, 1.f, rgb);
+                                        // gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)Vm_Screen_INITIAL_WIDTH, .y = (f32)y }, 1.f, rgb);
                                     } else if (fill_y) {
                                         unreachable;
                                     } else {
@@ -319,9 +320,9 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                         // gfx_set_pixel(&vm->gfx, x, y, rgb);
                                     }
                                 } break;
-                                case vm_screen_sprite: {
-                                    if (x >= vm_screen_initial_width) break;
-                                    if (y >= vm_screen_initial_height) break;
+                                case Vm_Screen_SPRITE: {
+                                    if (x >= Vm_Screen_INITIAL_WIDTH) break;
+                                    if (y >= Vm_Screen_INITIAL_HEIGHT) break;
 
                                     u8 two_bits_per_pixel = argument & 0x80;
                                     u8 use_background_layer = argument & 0x40;
@@ -334,10 +335,10 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                     assert(!flip_y);
                                     assert(!flip_x);
 
-                                    u16 column_count = MIN(8, vm_screen_initial_width - x);
-                                    u16 row_count = MIN(8, vm_screen_initial_height - y);
+                                    u16 column_count = MIN(8, Vm_Screen_INITIAL_WIDTH - x);
+                                    u16 row_count = MIN(8, Vm_Screen_INITIAL_HEIGHT - y);
 
-                                    u8 *sprite = &vm->memory[get16(&vm->memory[vm_device_screen | (Vm_Device)vm_screen_data])];
+                                    u8 *sprite = &vm->memory[get16(&vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_DATA])];
                                     for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
                                         for (u16 column = 0; column < column_count; column += 1) {
                                             u8 shift = 7 - (u8)column;
@@ -350,36 +351,36 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                         }
                                     }
 
-                                    u8 auto_x = vm->memory[vm_device_screen | (Vm_Device)vm_screen_auto] & 0x01;
-                                    u8 auto_y = vm->memory[vm_device_screen | (Vm_Device)vm_screen_auto] & 0x02;
+                                    u8 auto_x = vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_AUTO] & 0x01;
+                                    u8 auto_y = vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_AUTO] & 0x02;
                                     if (auto_x) x += 8;
                                     if (auto_y) y += 8;
                                 } break;
-                                case vm_screen_auto: break;
+                                case Vm_Screen_AUTO: break;
                                 default: panic("[write.1] invalid action #%02x for screen device", action);
                             }
                             set16(x_address, x);
                             set16(y_address, y);
                         } break;
-                        case vm_device_keyboard: switch (action) {
-                            case vm_keyboard_key_value: break;
+                        case Vm_Device_KEYBOARD: switch (action) {
+                            case Vm_Keyboard_KEY_VALUE: break;
                             default: panic("[write.1] invalid action #%02x for keyboard device", action);
                         } break;
                         default: panic("[write.1] invalid device #%02x", device);
                     }
-                    vm->memory[vm_device_and_action] = argument;
+                    vm->memory[Vm_Device_AND_ACTION] = argument;
                 } break;
-                default: panic("unreachable %S{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
+                default: panic("unreachable %s{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
             } break;
-            case VM_MODE_SHORT: switch (instruction & VM_OPCODE_MASK) {
+            case Vm_Mode_SHORT: switch (instruction & VM_OPCODE_MASK) {
                 case vm_opcode_jmi: case vm_opcode_jei: case vm_opcode_jni: case vm_opcode_jsi: case vm_opcode_break:
                     panic("reached full-byte opcodes in generic switch case");
                 case vm_opcode_push:   vm_push16(vm, vm_load16(vm, vm->program_counter + 1)); add = 2 + 1; break;
                 case vm_opcode_drop:   (void)vm_pop16(vm); break;
                 case vm_opcode_swap:   { u16 c = vm_pop16(vm), b = vm_pop16(vm); vm_push16(vm, c); vm_push16(vm, b); } break;
                 case vm_opcode_rot:    { u16 c = vm_pop16(vm), b = vm_pop16(vm), a = vm_pop16(vm); vm_push16(vm, b); vm_push16(vm, c); vm_push16(vm, a); } break;
-                case vm_opcode_dup:    assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push16(vm, vm_get16(vm, 1)); break;
-                case vm_opcode_over:   assert(!(vm->current_mode & VM_MODE_KEEP)); vm_push16(vm, vm_get16(vm, 2)); break;
+                case vm_opcode_dup:    assert(!(vm->current_mode & Vm_Mode_KEEP)); vm_push16(vm, vm_get16(vm, 1)); break;
+                case vm_opcode_over:   assert(!(vm->current_mode & Vm_Mode_KEEP)); vm_push16(vm, vm_get16(vm, 2)); break;
                 case vm_opcode_eq:     vm_push8(vm, vm_pop16(vm) == vm_pop16(vm)); break;
                 case vm_opcode_neq:    vm_push8(vm, vm_pop16(vm) != vm_pop16(vm)); break;
                 case vm_opcode_gt:     { u16 right = vm_pop16(vm), left = vm_pop16(vm); vm_push8(vm, left > right); } break;
@@ -396,66 +397,66 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                 case vm_opcode_jmp:    vm->program_counter = vm_pop16(vm); add = 0; break;
                 case vm_opcode_jme:    { u16 addr = vm_pop16(vm); if (vm_pop16(vm)) { vm->program_counter = addr; add = 0; } } break;
                 case vm_opcode_jst:    {
-                    vm->active_stack = VM_MODE_RETURN_STACK;
+                    vm->active_stack = Vm_Mode_RETURN_STACK;
                     vm_push16(vm, vm->program_counter + 1);
                     vm->active_stack = 0;
                     vm->program_counter = vm_pop16(vm);
                     add = 0;
                 } break;
-                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = VM_MODE_RETURN_STACK; vm_push16(vm, val); vm->active_stack = 0; } break;
+                case vm_opcode_stash:  { u16 val = vm_pop16(vm); vm->active_stack = Vm_Mode_RETURN_STACK; vm_push16(vm, val); vm->active_stack = 0; } break;
                 case vm_opcode_load:   { u16 addr = vm_pop16(vm); u16 val = vm_load16(vm, addr); vm_push16(vm, val); } break;
                 case vm_opcode_store:  { u16 addr = vm_pop16(vm); u16 val = vm_pop16(vm); vm_store16(vm, addr, val); } break;
                 case vm_opcode_read:   {
-                    u8 vm_device_and_action = vm_pop8(vm);
-                    Vm_Device device = vm_device_and_action & 0xf0;
-                    u8 action = vm_device_and_action & 0x0f;
-                    u16 to_push = get16(&vm->memory[vm_device_and_action]);
+                    u8 Vm_Device_AND_ACTION = vm_pop8(vm);
+                    Vm_Device device = Vm_Device_AND_ACTION & 0xf0;
+                    u8 action = Vm_Device_AND_ACTION & 0x0f;
+                    u16 to_push = get16(&vm->memory[Vm_Device_AND_ACTION]);
                     switch (device) {
-                        case vm_device_screen: switch (action) {
-                            case vm_screen_width: to_push = vm_screen_initial_width; break;
-                            case vm_screen_height: to_push = vm_screen_initial_height; break;
+                        case Vm_Device_SCREEN: switch (action) {
+                            case Vm_Screen_WIDTH: to_push = Vm_Screen_INITIAL_WIDTH; break;
+                            case Vm_Screen_HEIGHT: to_push = Vm_Screen_INITIAL_HEIGHT; break;
                             default: panic("[read.2] invalid action #%02x for screen device", action);
                         } break;
-                        case vm_device_mouse: {
+                        case Vm_Device_MOUSE: {
                             panic("TODO(felix)");
                             // V2 virtual_over_real = v2_div(platform->frame.virtual_window_size, platform->frame.real_window_size);
                             // V2 virtual_mouse_position = v2_mul(platform->frame.real_mouse_position, virtual_over_real);
                             switch (action) {
-                                case vm_mouse_x: {
+                                case Vm_Mouse_X: {
                                     panic("TODO(felix)");
                                     // to_push = (u16)virtual_mouse_position.x;
                                 } break;
-                                case vm_mouse_y: {
+                                case Vm_Mouse_Y: {
                                     panic("TODO(felix)");
                                     // to_push = (u16)virtual_mouse_position.y;
                                 } break;
                                 default: panic("[read.2] invalid action #%02x for mouse device", action);
                             }
                         } break;
-                        case vm_device_file: {
-                            assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_name]) != 0);
+                        case Vm_Device_FILE: {
+                            assert(get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_NAME]) != 0);
                             switch (action) {
-                                case vm_file_length: break;
-                                case vm_file_read: {
-                                    assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_cursor]) < get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]));
-                                    to_push = get16(&vm->file_bytes[get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_cursor])]);
+                                case Vm_File_LENGTH: break;
+                                case Vm_File_READ: {
+                                    assert(get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_CURSOR]) < get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH]));
+                                    to_push = get16(&vm->file_bytes[get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_CURSOR])]);
                                 } break;
                                 default: panic("[read.2] invalid action #%02x for file device", action);
                             }
                         } break;
                         default: panic("[read.2] invalid device #%02x", device);
                     }
-                    set16(&vm->memory[vm_device_and_action], to_push);
+                    set16(&vm->memory[Vm_Device_AND_ACTION], to_push);
                     vm_push16(vm, to_push);
                 } break;
                 case vm_opcode_write:  {
-                    u8 vm_device_and_action = vm_pop8(vm);
-                    Vm_Device device = vm_device_and_action & 0xf0;
-                    u8 action = vm_device_and_action & 0x0f;
+                    u8 Vm_Device_AND_ACTION = vm_pop8(vm);
+                    Vm_Device device = Vm_Device_AND_ACTION & 0xf0;
+                    u8 action = Vm_Device_AND_ACTION & 0x0f;
                     u16 argument = vm_pop16(vm);
                     switch (device) {
-                        case vm_device_console: switch (action) {
-                            case vm_console_print: {
+                        case Vm_Device_CONSOLE: switch (action) {
+                            case Vm_Console_PRINT: {
                                 u16 str_addr = argument;
                                 u8 str_count = vm_load8(vm, str_addr);
                                 String str = { .data = (const char *)(vm->memory + str_addr + 1), .count = str_count };
@@ -463,18 +464,18 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                             } break;
                             default: panic("[write.2] invalid action #%02x for console device", action);
                         } break;
-                        case vm_device_screen: switch (action) {
-                            case vm_screen_x: {
-                                set16(&vm->memory[vm_device_screen | (Vm_Device)vm_screen_x], argument);
+                        case Vm_Device_SCREEN: switch (action) {
+                            case Vm_Screen_X: {
+                                set16(&vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_X], argument);
                             } break;
-                            case vm_screen_y: {
-                                set16(&vm->memory[vm_device_screen | (Vm_Device)vm_screen_y], argument);
+                            case Vm_Screen_Y: {
+                                set16(&vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_Y], argument);
                             } break;
-                            case vm_screen_data: break;
+                            case Vm_Screen_DATA: break;
                             default: panic("[write.2] invalid action #%02x for screen device", action);
                         } break;
-                        case vm_device_file: switch (action) {
-                            case vm_file_name: {
+                        case Vm_Device_FILE: switch (action) {
+                            case Vm_File_NAME: {
                                 u16 string_address = argument;
                                 u8 string_length = vm_load8(vm, string_address);
                                 String file_name = { .data = (const char *)&vm->memory[string_address + 1], .count = string_length };
@@ -486,28 +487,28 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                 vm->file_bytes = (u8 *)bytes.data;
 
                                 assert(bytes.count <= 0xffff);
-                                set16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length], (u16)bytes.count);
+                                set16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH], (u16)bytes.count);
                             } break;
-                            case vm_file_length: {
-                                assert(argument <= get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]));
+                            case Vm_File_LENGTH: {
+                                assert(argument <= get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH]));
                             } break;
-                            case vm_file_cursor: {
-                                assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_name]) != 0);
+                            case Vm_File_CURSOR: {
+                                assert(get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_NAME]) != 0);
                             } break;
-                            case vm_file_copy: {
-                                assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_name]) != 0);
+                            case Vm_File_COPY: {
+                                assert(get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_NAME]) != 0);
                                 assert(vm->file_bytes != 0);
-                                assert(get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]) != 0);
+                                assert(get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH]) != 0);
                                 u16 address_to_copy_to = argument;
-                                memcpy(vm->memory + address_to_copy_to, vm->file_bytes, get16(&vm->memory[vm_device_file | (Vm_Device)vm_file_length]));
+                                memcpy(vm->memory + address_to_copy_to, vm->file_bytes, get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH]));
                             } break;
                             default: panic("[write.2] invalid action #%02x for file device", action);
                         } break;
                         default: panic("[write.2] invalid device #%02x", device);
                     }
-                    set16(&vm->memory[vm_device_and_action], argument);
+                    set16(&vm->memory[Vm_Device_AND_ACTION], argument);
                 } break;
-                default: panic("unreachable %S{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
+                default: panic("unreachable %s{#%02x}", vm_opcode_name[instruction & VM_OPCODE_MASK], instruction);
             } break;
             default: unreachable;
         }
@@ -549,7 +550,7 @@ enum {
 };
 
 typedef u8 File_Id;
-#define MAX_FILE_ID 255
+#define MAX_FILES 255
 
 typedef struct {
     u32 start_index;
@@ -603,13 +604,11 @@ typedef struct {
 } Input_File;
 
 typedef struct {
-    // TODO(felix)
-    int files;
-    // Map_Input_File files;
+    Input_File files[MAX_FILES];
+    int files_count;
+    Label labels[MAX_LABELS];
+    int labels_count;
     File_Id file_id;
-    // TODO(felix)
-    int labels;
-    // Map_Label labels;
     Array_Label_Reference label_references;
     Array_Scoped_Reference scoped_references;
     Insertion_Mode insertion_mode;
@@ -696,7 +695,7 @@ static void parse_error_argument_struct(Parse_Error_Arguments arguments) {
     os_exit(1);
 }
 
-#define usage "usage: bici <compile|run|script> <file...>"
+#define USAGE_HELP_TEXT "usage: bici <compile|run|script> <file...>"
 
 typedef struct {
     Token_Id token_id;
@@ -710,7 +709,7 @@ static void app_start(Platform *platform) {
     const char **arguments = os_get_arguments(&arena, &arguments_count);
 
     if (arguments_count < 3) {
-        log_error("%s", usage);
+        log_error("%s", USAGE_HELP_TEXT);
         os_exit(1);
     }
 
@@ -743,7 +742,7 @@ static void app_start(Platform *platform) {
         }
         command = Command_SCRIPT;
     } else {
-        log_error("no such command '%s'\n%s", command_string, usage);
+        log_error("no such command '%s'\n%s", command_string, USAGE_HELP_TEXT);
         os_exit(1);
     }
 
@@ -760,22 +759,20 @@ static void app_start(Platform *platform) {
     bool should_compile = command == Command_COMPILE || command == Command_SCRIPT;
     if (!should_compile) rom = (u8 *)input_bytes.data;
     else {
-        panic("TODO(felix)");
-        // Map_u8 opcode_from_name_map = {0};
-        // map_make(&arena, &opcode_from_name_map, 0x1f);
-        // for (u8 opcode = 0; opcode <= 0x1f; opcode += 1) {
-        //     String name = vm_opcode_name[opcode];
-        //     map_put(&opcode_from_name_map, name, &opcode);
-        // }
+        const char *opcode_from_name[VM_OPCODE_MAX_VALUE_PLUS_ONE * 16] = {0};
+        for (u8 opcode = 0; opcode < VM_OPCODE_MAX_VALUE_PLUS_ONE; opcode += 1) {
+            const char *name = vm_opcode_name[opcode];
+            u64 hash = hash_djb2(name, cstring_length(name));
 
-        Assembler_Context assembler = {
-            // TODO(felix)
-            // .label_references.arena = &arena,
-            // .scoped_references.arena = &arena,
-        };
-        panic("TODO(felix)");
-        // map_make(&arena, &assembler.files, MAX_FILE_ID);
-        // map_make(&arena, &assembler.labels, MAX_LABELS);
+            assert(is_power_of_2(sizeof opcode_from_name / sizeof *opcode_from_name));
+            u64 index = hash & ((sizeof opcode_from_name / sizeof *opcode_from_name) - 1);
+
+            const char **name_in_map = &opcode_from_name[index];
+            assert(*name_in_map == 0);
+            *name_in_map = vm_opcode_name[opcode];
+        }
+
+        Assembler_Context assembler = {0};
 
         // Input_File main_file = { .bytes = input_bytes, .name = input_filepath };
         File_Id main_file_id = 0;
@@ -1076,9 +1073,9 @@ static void app_start(Platform *platform) {
                                 for (u64 next_string_index = 0; next_string_index < next_string.count; next_string_index += 1) {
                                     const char *c = &next_string.data[next_string_index];
                                     switch (*c) {
-                                        case '2': instruction |= VM_MODE_SHORT; break;
-                                        case 'k': instruction |= VM_MODE_KEEP; break;
-                                        case 'r': instruction |= VM_MODE_RETURN_STACK; break;
+                                        case '2': instruction |= Vm_Mode_SHORT; break;
+                                        case 'k': instruction |= Vm_Mode_KEEP; break;
+                                        case 'r': instruction |= Vm_Mode_RETURN_STACK; break;
                                         default: unreachable;
                                     }
                                 }
@@ -1094,14 +1091,14 @@ static void app_start(Platform *platform) {
                                 switch (next.kind) {
                                     case Token_Kind_SYMBOL: case Token_Kind_NUMBER: case '{': break;
                                     default: {
-                                        log_error("instruction '%S' takes an immediate, but no label or numeric literal is given", vm_opcode_name[instruction & VM_OPCODE_MASK]);
+                                        log_error("instruction '%s' takes an immediate, but no label or numeric literal is given", vm_opcode_name[instruction & VM_OPCODE_MASK]);
                                         parse_error(&assembler, next);
                                     }
                                 }
 
                                 if (next.kind == '{') continue;
 
-                                u8 width = ((instruction & VM_MODE_SHORT) >> 5) + 1;
+                                u8 width = ((instruction & Vm_Mode_SHORT) >> 5) + 1;
 
                                 if (next.kind == Token_Kind_SYMBOL) {
                                     Label_Reference reference = {
@@ -1365,18 +1362,18 @@ static void app_start(Platform *platform) {
                 for (u16 token_id = 0x100; token_id < rom_count; token_id += 1) {
                     u8 byte = vm->memory[token_id];
 
-                    String mode_string = S("");
+                    const char *mode_string = "";
                     switch ((byte & 0xe0) >> 5) {
-                        case 0x1: mode_string = S("2"); break;
-                        case 0x2: mode_string = S("r"); break;
-                        case 0x3: mode_string = S("r2"); break;
-                        case 0x4: mode_string = S("k"); break;
-                        case 0x5: mode_string = S("k2"); break;
-                        case 0x6: mode_string = S("kr"); break;
-                        case 0x7: mode_string = S("kr2"); break;
+                        case 0x1: mode_string = "2"; break;
+                        case 0x2: mode_string = "r"; break;
+                        case 0x3: mode_string = "r2"; break;
+                        case 0x4: mode_string = "k"; break;
+                        case 0x5: mode_string = "k2"; break;
+                        case 0x6: mode_string = "kr"; break;
+                        case 0x7: mode_string = "kr2"; break;
                     }
 
-                    string_builder_print(&scratch, &builder, "[%x]\t'%c'\t#%x\t%S;%S\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
+                    string_builder_print(&scratch, &builder, "[%x]\t'%c'\t#%x\t%s;%s\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
                 }
                 string_builder_print(&scratch, &builder, "\nRUN ===\n");
             }
@@ -1385,7 +1382,7 @@ static void app_start(Platform *platform) {
 
         panic("TODO(felix)");
         // Gfx_Render_Context *gfx = &vm.gfx;
-        // *gfx = gfx_window_create(&arena, "bici", vm_screen_initial_width, vm_screen_initial_height);
+        // *gfx = gfx_window_create(&arena, "bici", Vm_Screen_INITIAL_WIDTH, Vm_Screen_INITIAL_HEIGHT);
         // ShowCursor(false);
         // gfx->font = gfx_font_default_3x5;
 
@@ -1393,7 +1390,7 @@ static void app_start(Platform *platform) {
         panic("TODO(felix)");
         // gfx_clear(gfx, 0);
 
-        u16 vm_on_system_start_pc = vm_load16(vm, vm_device_system + vm_system_start);
+        u16 vm_on_system_start_pc = vm_load16(vm, Vm_Device_SYSTEM + Vm_System_START);
         vm_run_to_break(platform, vm, vm_on_system_start_pc);
     }
 }
@@ -1401,15 +1398,15 @@ static void app_start(Platform *platform) {
 static void app_update_and_render(Platform *platform) {
     Vm *vm = &global_vm;
 
-    u16 vm_on_screen_update_pc = vm_load16(vm, vm_device_screen | (Vm_Device)vm_screen_update);
+    u16 vm_on_screen_update_pc = vm_load16(vm, Vm_Device_SCREEN | (Vm_Device)Vm_Screen_UPDATE);
     vm_run_to_break(platform, vm, vm_on_screen_update_pc);
 
-    u16 vm_on_system_quit_pc = vm_load16(vm, vm_device_system | (Vm_Device)vm_system_quit);
+    u16 vm_on_system_quit_pc = vm_load16(vm, Vm_Device_SYSTEM | (Vm_Device)Vm_System_QUIT);
     vm_run_to_break(platform, vm, vm_on_system_quit_pc);
 
     print("working stack (bottom->top): { ");
     for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("%llx ", vm->stacks[0].memory[token_id]);
     print("}\nreturn  stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[VM_MODE_RETURN_STACK].memory[token_id]);
+    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[Vm_Mode_RETURN_STACK].memory[token_id]);
     print("}\n");
 }

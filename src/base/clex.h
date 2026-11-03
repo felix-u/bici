@@ -65,9 +65,8 @@ typedef enum {
     clex_Token_EQUALITY_CHECK = '=' + clex_Token__DOUBLE_OPERATOR,
     clex_Token_RIGHT_SHIFT    = '>' + clex_Token__DOUBLE_OPERATOR,
     clex_Token_OR             = '|' + clex_Token__DOUBLE_OPERATOR,
-    clex_Token_Kind__DOUBLE_OPERATOR_END = clex_Token__DOUBLE_OPERATOR + 128,
+    clex_Token__DOUBLE_OPERATOR_END = clex_Token__DOUBLE_OPERATOR + 128,
 
-    // TODO(felix): ASCII order
     clex_Token__ASSIGNMENT_OPERATOR,
     clex_Token_NOT_EQUALS            = '!' + clex_Token__ASSIGNMENT_OPERATOR,
     clex_Token_MODULO_ASSIGN         = '%' + clex_Token__ASSIGNMENT_OPERATOR,
@@ -80,7 +79,7 @@ typedef enum {
     clex_Token_GREATER_THAN_OR_EQUAL = '>' + clex_Token__ASSIGNMENT_OPERATOR,
     clex_Token_XOR_ASSIGN            = '^' + clex_Token__ASSIGNMENT_OPERATOR,
     clex_Token_BIT_OR_ASSIGN         = '|' + clex_Token__ASSIGNMENT_OPERATOR,
-    clex_Token__ASSIGNMENT_OPERATOR_END = clex_Token__DOUBLE_OPERATOR + 128,
+    clex_Token__ASSIGNMENT_OPERATOR_END = clex_Token__ASSIGNMENT_OPERATOR + 128,
 
     clex_Token__ASSIGNMENT_DOUBLE_OPERATOR = clex_Token__DOUBLE_OPERATOR + clex_Token__ASSIGNMENT_OPERATOR,
     clex_Token_LEFT_SHIFT_ASSIGN  = '<' + clex_Token__ASSIGNMENT_DOUBLE_OPERATOR,

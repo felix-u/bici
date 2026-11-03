@@ -345,9 +345,7 @@ static V2 platform_measure_text(Platform_Base *platform, String text, f32 font_s
 
 static void program(void) {
     static Arena persistent_arena;
-    persistent_arena = arena_init(32 * 1024 * 1024);
     static Arena frame_arena;
-    frame_arena = arena_init(32 * 1024 * 1024);
 
     static Platform platform = {
         .base = {

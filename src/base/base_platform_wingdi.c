@@ -65,9 +65,7 @@ static i64 window_procedure__(void *window, u32 message, u64 w, i64 l) {
 
 static void program(void) {
     static Arena persistent_arena;
-    persistent_arena = arena_init(4 * 1024 * 1024);
     static Arena frame_arena;
-    frame_arena = arena_init(4 * 1024 * 1024);
 
     static Platform_Implementation platform = { .base = {
         .persistent_arena = &persistent_arena,
@@ -113,7 +111,7 @@ static void program(void) {
             ReleaseDC(platform.window, window_dc);
         }
 
-        for (Arena frame_scratch = *platform.base.frame_arena; !platform.base.should_quit; *platform.base.frame_arena = frame_scratch) {
+        for (Scratch frame_scratch = scratch_begin(platform.base.frame_arena); !platform.base.should_quit; scratch_end(frame_scratch)) {
             platform.base.draw_commands = (Array_Draw_Command){0};
 
             win32_process_messages(&platform.base.should_quit);

@@ -165,7 +165,7 @@ static Class object__get_class(id id) {
 struct Platform_Implementation {
     Platform base;
 
-    Arena frame_scratch;
+    Scratch frame_scratch;
     Class AppDelegate_class;
     Class TickDriver_class;
     id tick_driver;
@@ -308,9 +308,7 @@ static _Bool platform__did_launch(id self, SEL command, id app, id options) {
 
     {
         static Arena persistent_arena;
-        persistent_arena = arena_init(4 * 1024 * 1024);
         static Arena frame_arena;
-        frame_arena = arena_init(4 * 1024 * 1024);
         platform__.base = (Platform){
             .persistent_arena = &persistent_arena,
             .frame_arena = &frame_arena,
@@ -318,7 +316,7 @@ static _Bool platform__did_launch(id self, SEL command, id app, id options) {
 
         app_start(&platform__.base);
 
-        platform__.frame_scratch = *platform__.base.frame_arena;
+        platform__.frame_scratch = scratch_begin(platform__.base.frame_arena);
     }
 
     Class UIScreen = objc__get_class("UIScreen");
@@ -524,7 +522,7 @@ static void platform__tick(id self, SEL command, id link) {
     (void)command;
     (void)link;
 
-    *platform__.base.frame_arena = platform__.frame_scratch;
+    scratch_end(platform__.frame_scratch);
     Array_Draw_Command *draw_commands = &platform__.base.draw_commands;
     *draw_commands = (Array_Draw_Command){0};
 

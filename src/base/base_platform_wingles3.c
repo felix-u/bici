@@ -160,9 +160,7 @@ static i64 window_procedure__(void *window, u32 message, u64 w, i64 l) {
 
 static void program(void) {
     static Arena persistent_arena;
-    persistent_arena = arena_init(16 * 1024 * 1024);
     static Arena frame_arena;
-    frame_arena = arena_init(4 * 1024 * 1024);
 
     static Platform_Implementation platform = { .base = {
         .persistent_arena = &persistent_arena,
@@ -434,11 +432,11 @@ static void program(void) {
         int line_gap = 0;
         stbtt_GetFontVMetrics(&platform.font_info, &platform.font_ascent, &platform.font_descent, &line_gap);
 
-        Arena scratch = *platform.base.persistent_arena;
-        unsigned char *atlas = arena_make(&scratch, ATLAS_SIZE * ATLAS_SIZE, unsigned char);
+        Scratch scratch = scratch_begin(platform.base.persistent_arena);
+        unsigned char *atlas = arena_make(scratch.arena, ATLAS_SIZE * ATLAS_SIZE, unsigned char);
 
         stbtt_pack_context pack_context = {0};
-        int pack_ok = stbtt_PackBegin(&pack_context, atlas, ATLAS_SIZE, ATLAS_SIZE, 0, 1, &scratch);
+        int pack_ok = stbtt_PackBegin(&pack_context, atlas, ATLAS_SIZE, ATLAS_SIZE, 0, 1, scratch.arena);
         ensure(pack_ok);
         stbtt_PackSetOversampling(&pack_context, 2, 1);
         pack_ok = stbtt_PackFontRanges(&pack_context, ttf, 0, ranges, ATLAS_FONT_SIZES_COUNT);
@@ -454,9 +452,11 @@ static void program(void) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        scratch_end(scratch);
     }
 
-    for (Arena frame_scratch = *platform.base.frame_arena; !platform.base.should_quit; *platform.base.frame_arena = frame_scratch) {
+    for (Scratch frame_scratch = scratch_begin(platform.base.frame_arena); !platform.base.should_quit; scratch_end(frame_scratch)) {
         platform.base.draw_commands = (Array_Draw_Command){0};
 
         win32_process_messages(&platform.base.should_quit);

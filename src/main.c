@@ -709,7 +709,7 @@ typedef struct {
 typedef Array(File_Cursor) Array_File_Cursor;
 
 static void app_start(Platform *platform) {
-    Arena arena = arena_init(64 * 1024 * 1024);
+    Arena arena = {0};
     u64 arguments_count = 0;
     const char **arguments = os_get_arguments(&arena, &arguments_count);
 
@@ -1362,10 +1362,10 @@ static void app_start(Platform *platform) {
 
         bool print_memory = false;
         if (print_memory) {
-            Arena scratch = arena;
+            Scratch scratch = scratch_begin(&arena);
             String_Builder builder = {0};
             {
-                string_builder_print(&scratch, &builder, "MEMORY ===\n");
+                string_builder_print(scratch.arena, &builder, "MEMORY ===\n");
                 for (u16 token_id = 0x100; token_id < rom_count; token_id += 1) {
                     u8 byte = vm->memory[token_id];
 
@@ -1381,11 +1381,12 @@ static void app_start(Platform *platform) {
                         default: unreachable;
                     }
 
-                    string_builder_print(&scratch, &builder, "[%x]\t'%c'\t#%x\t%s;%s\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
+                    string_builder_print(scratch.arena, &builder, "[%x]\t'%c'\t#%x\t%s;%s\n", token_id, byte, byte, vm_opcode_name[byte & VM_OPCODE_MASK], mode_string);
                 }
-                string_builder_print(&scratch, &builder, "\nRUN ===\n");
+                string_builder_print(scratch.arena, &builder, "\nRUN ===\n");
             }
             os_write_console(builder.data, builder.count);
+            scratch_end(scratch);
         }
 
         panic("TODO(felix)");

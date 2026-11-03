@@ -122,10 +122,8 @@ void platform__start(void) {
 
     static Arena persistent_arena, frame_arena;
 
-    persistent_arena = arena_init(16 * 1024 * 1024);
     base->persistent_arena = &persistent_arena;
 
-    frame_arena = arena_init(16 * 1024 * 1024);
     base->frame_arena = &frame_arena;
 
     app_start(base);
@@ -137,7 +135,7 @@ void platform__start(void) {
 }
 
 void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_x, f32 mouse_y) {
-    Arena scratch = *platform__.base.frame_arena;
+    Scratch scratch = scratch_begin(platform__.base.frame_arena);
     App_Frame_Info *frame = &platform__.base.frame;
 
     static Time_Averaged_Sampler sampler = {0};
@@ -185,7 +183,7 @@ void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_
     cpu_draw_commands(*surface, &platform__.font, platform__.base.draw_commands.data, platform__.base.draw_commands.count);
 
     app_frame_info_reset_end_of_frame(frame);
-    *platform__.base.frame_arena = scratch;
+    scratch_end(scratch);
 }
 
 static V2 platform_measure_text(Platform *platform, String text, f32 font_size) {

@@ -265,13 +265,8 @@ _Static_assert(sizeof(f64) == 8, "");
     #define os_exit(code) // TODO(felix)
 #endif // BASE_OS
 
-#if COMPILER_CLANG || COMPILER_GCC // they share many builtins
+#if COMPILER_CLANG || COMPILER_GCC // they share some builtins
     #define builtin_unreachable __builtin_unreachable()
-    #define force_inline inline __attribute__((always_inline))
-    #if BASE_OS == BASE_OS_WINDOWS
-        // TODO(felix): this is only for memcmp, etc. fix!
-        #include <string.h>
-    #endif
 #endif
 
 #if COMPILER_CLANG
@@ -286,7 +281,6 @@ _Static_assert(sizeof(f64) == 8, "");
     #define builtin_assume(expr) __assume(expr)
     #define breakpoint __debugbreak()
     #define builtin_unreachable assert(false)
-    #define force_inline inline __forceinline
 
 #elif COMPILER_STANDARD
     // NOTE(felix): I don't even know why I have this. Getting my base layer working with a non-major compiler is not a priority
@@ -294,7 +288,6 @@ _Static_assert(sizeof(f64) == 8, "");
     #define builtin_assume(expr) assert(expr)
     #define breakpoint builtin_assume(false)
     #define builtin_unreachable assert(false)
-    #define force_inline inline
 
 #endif // COMPILER
 
@@ -397,7 +390,7 @@ static void swap_remove_(Array_void *array, u64 index, u64 item_size);
 #define CLAMP_HIGH MIN
 #define CLAMP(value, low, high) CLAMP_HIGH(CLAMP_LOW((value), (low)), (high))
 
-static force_inline int memcmp_(const void *a_, const void *b_, u64 byte_count) {
+static inline int memcmp_(const void *a_, const void *b_, u64 byte_count) {
     const u8 *a = a_, *b = b_;
     for (u64 i = 0; i < byte_count; i += 1) {
         if (a[i] != b[i]) return a[i] - b[i];
@@ -405,7 +398,7 @@ static force_inline int memcmp_(const void *a_, const void *b_, u64 byte_count) 
     return 0;
 }
 
-static force_inline void *memcpy_(void *destination_, const void *source_, u64 byte_count) {
+static inline void *memcpy_(void *destination_, const void *source_, u64 byte_count) {
     u8 *destination = destination_;
     const u8 *source = source_;
     if (byte_count != 0) {
@@ -416,7 +409,7 @@ static force_inline void *memcpy_(void *destination_, const void *source_, u64 b
     return destination;
 }
 
-static force_inline void *memset_(void *destination_, int byte_, u64 byte_count) {
+static inline void *memset_(void *destination_, int byte_, u64 byte_count) {
     assert(byte_ < 256);
     u8 byte = (u8)byte_;
     u8 *destination = destination_;
@@ -443,14 +436,14 @@ static force_inline void *memset_(void *destination_, int byte_, u64 byte_count)
     }
 #endif
 
-static force_inline f32 ceilf_(f32 x) {
+static inline f32 ceilf_(f32 x) {
     assert((f32)INT64_MIN <= x && x <= (f32)INT64_MAX);
     i64 as_i64 = (i64)x;
     f32 result = (f32)((f32)as_i64 + (f32)(x > (f32)as_i64));
     return result;
 }
 
-static force_inline f32 floorf_(f32 x) {
+static inline f32 floorf_(f32 x) {
     assert((f32)INT64_MIN <= x && x <= (f32)INT64_MAX);
     i64 as_i64 = (i64)x;
     f32 result = (f32)((f32)as_i64 - (f32)(x < (f32)as_i64));
@@ -616,21 +609,21 @@ static f32 sinf_(f32 x) {
     return sign * result_unsigned;
 }
 
-static force_inline f64 ceil_(f64 x) {
+static inline f64 ceil_(f64 x) {
     assert((f64)INT64_MIN <= x && x <= (f64)INT64_MAX);
     i64 as_i64 = (i64)x;
     f64 result = (f64)((f64)as_i64 + (f64)(x > (f64)as_i64));
     return result;
 }
 
-static force_inline f64 floor_(f64 x) {
+static inline f64 floor_(f64 x) {
     assert((f64)INT64_MIN <= x && x <= (f64)INT64_MAX);
     i64 as_i64 = (i64)x;
     f64 result = (f64)((f64)as_i64 - (f64)(x < (f64)as_i64));
     return result;
 }
 
-static force_inline f64 round(f64 x) {
+static inline f64 round(f64 x) {
     if (x >= 0) return floor_(x + 0.5);
     else return ceil_(x - 0.5);
 }
@@ -786,7 +779,7 @@ static f32 tanhf_(f32 x) {
     #define llabs _abs64
     // NOTE(felix): because I got `warning C4163: 'fabsf': not available as an intrinsic function`
     // NOTE(felix): corecrt_math.h defines fabsf as an inline function casting fabs to f32. Might be good to benchmark that approach versus what I'm doing here
-    static force_inline f32 fabsf(f32 x) { return x < 0 ? -x : x; }
+    static inline f32 fabsf(f32 x) { return x < 0 ? -x : x; }
 #elif COMPILER_CLANG || COMPILER_GCC
     #define INFINITY __builtin_inff()
     #if LINK_CRT
@@ -843,7 +836,7 @@ static f32 tanhf_(f32 x) {
     #endif
 #endif
 
-static force_inline f32 roundf(f32 x) {
+static inline f32 roundf(f32 x) {
     if (x >= 0) return floorf(x + 0.5f);
     else return ceilf(x - 0.5f);
 }
@@ -857,84 +850,84 @@ static force_inline f32 roundf(f32 x) {
 static bool intersect_point_in_rectangle(V2 point, V4 rectangle);
 static bool is_power_of_2(u64 x);
 
-static force_inline f32 radians_from_degrees(f32 degrees);
+static inline f32 radians_from_degrees(f32 degrees);
 
 static void rgba_double_from_hex(u32 hex, double rgba[4]);
 static V4   rgba_float_from_hex(u32 hex);
 static u32  rgba_hex_from_float(V4 rgba);
 
-static force_inline bool f32_difference_within_margin(f32 a, f32 b, f32 margin);
-static       inline f32  f32_stable_lerp(f32 a, f32 b, f32 k, f32 delta_time_seconds);
-static force_inline f32  f32_lerp(f32 a, f32 b, f32 amount);
+static inline bool f32_difference_within_margin(f32 a, f32 b, f32 margin);
+static inline f32  f32_stable_lerp(f32 a, f32 b, f32 k, f32 delta_time_seconds);
+static inline f32  f32_lerp(f32 a, f32 b, f32 amount);
 
-static force_inline V2   v2(f32 value);
-static force_inline V2   v2_add(V2 a, V2 b);
-static force_inline V2   v2_div(V2 a, V2 b);
-static       inline f32  v2_dot(V2 a, V2 b);
-static force_inline bool v2_difference_within_margin(V2 a, V2 b, f32 margin);
-static       inline f32  v2_len(V2 v);
-static       inline f32  v2_len_squared(V2 v);
-static       inline V2   v2_lerp(V2 a, V2 b, f32 amount);
-static force_inline V2   v2_max(V2 a, V2 b);
-static force_inline V2   v2_min(V2 a, V2 b);
-static force_inline V2   v2_mul(V2 a, V2 b);
-static       inline V2   v2_norm(V2 v);
-static force_inline V2   v2_reciprocal(V2 v);
-static       inline V2   v2_rotate(V2 v, f32 angle_radians);
-static       inline V2   v2_round(V2 v);
-static       inline V2   v2_round_down(V2 v);
-static force_inline V2   v2_scale(V2 v, f32 s);
-static       inline V2   v2_stable_lerp(V2 a, V2 b, f32 k, f32 delta_time_seconds);
-static force_inline V2   v2_sub(V2 a, V2 b);
+static inline V2   v2(f32 value);
+static inline V2   v2_add(V2 a, V2 b);
+static inline V2   v2_div(V2 a, V2 b);
+static inline f32  v2_dot(V2 a, V2 b);
+static inline bool v2_difference_within_margin(V2 a, V2 b, f32 margin);
+static inline f32  v2_len(V2 v);
+static inline f32  v2_len_squared(V2 v);
+static inline V2   v2_lerp(V2 a, V2 b, f32 amount);
+static inline V2   v2_max(V2 a, V2 b);
+static inline V2   v2_min(V2 a, V2 b);
+static inline V2   v2_mul(V2 a, V2 b);
+static inline V2   v2_norm(V2 v);
+static inline V2   v2_reciprocal(V2 v);
+static inline V2   v2_rotate(V2 v, f32 angle_radians);
+static inline V2   v2_round(V2 v);
+static inline V2   v2_round_down(V2 v);
+static inline V2   v2_scale(V2 v, f32 s);
+static inline V2   v2_stable_lerp(V2 a, V2 b, f32 k, f32 delta_time_seconds);
+static inline V2   v2_sub(V2 a, V2 b);
 
-static force_inline V3   v3_add(V3 a, V3 b);
-static       inline V3   v3_cross(V3 a, V3 b);
-static       inline f32  v3_dot(V3 a, V3 b);
-static force_inline bool v3_difference_within_margin(V3 a, V3 b, f32 margin);
-static force_inline V3   v3_forward_from_view(M4 view);
-static       inline f32  v3_len(V3 v);
-static       inline f32  v3_len_squared(V3 v);
-static       inline V3   v3_lerp(V3 a, V3 b, f32 amount);
-static force_inline V3   v3_neg(V3 v);
-static       inline V3   v3_norm(V3 v);
-static force_inline V3   v3_right_from_view(M4 view);
-static force_inline V3   v3_scale(V3 v, f32 s);
-static force_inline V3   v3_sub(V3 a, V3 b);
-static       inline V3   v3_unproject(V3 pos, M4 view_projection);
-static force_inline V3   v3_up_from_view(M4 view);
+static inline V3   v3_add(V3 a, V3 b);
+static inline V3   v3_cross(V3 a, V3 b);
+static inline f32  v3_dot(V3 a, V3 b);
+static inline bool v3_difference_within_margin(V3 a, V3 b, f32 margin);
+static inline V3   v3_forward_from_view(M4 view);
+static inline f32  v3_len(V3 v);
+static inline f32  v3_len_squared(V3 v);
+static inline V3   v3_lerp(V3 a, V3 b, f32 amount);
+static inline V3   v3_neg(V3 v);
+static inline V3   v3_norm(V3 v);
+static inline V3   v3_right_from_view(M4 view);
+static inline V3   v3_scale(V3 v, f32 s);
+static inline V3   v3_sub(V3 a, V3 b);
+static inline V3   v3_unproject(V3 pos, M4 view_projection);
+static inline V3   v3_up_from_view(M4 view);
 
-static force_inline V4   v4_add(V4 a, V4 b);
-static       inline f32  v4_dot(V4 a, V4 b);
-static force_inline bool v4_difference_within_margin(V4 a, V4 b, f32 margin);
-static       inline V4   v4_lerp(V4 a, V4 b, f32 amount);
-static       inline V4   v4_round(V4 v);
-static force_inline V4   v4_scale(V4 v, f32 s);
-static       inline V4   v4_stable_lerp(V4 a, V4 b, f32 k, f32 delta_time_seconds);
-static force_inline V4   v4_sub(V4 a, V4 b);
-static force_inline V4   v4v(V3 xyz, f32 w);
-static force_inline V3   v4_xyz(V4 v);
+static inline V4   v4_add(V4 a, V4 b);
+static inline f32  v4_dot(V4 a, V4 b);
+static inline bool v4_difference_within_margin(V4 a, V4 b, f32 margin);
+static inline V4   v4_lerp(V4 a, V4 b, f32 amount);
+static inline V4   v4_round(V4 v);
+static inline V4   v4_scale(V4 v, f32 s);
+static inline V4   v4_stable_lerp(V4 a, V4 b, f32 k, f32 delta_time_seconds);
+static inline V4   v4_sub(V4 a, V4 b);
+static inline V4   v4v(V3 xyz, f32 w);
+static inline V3   v4_xyz(V4 v);
 
 static inline Quat quat_from_rotation(V3 axis, f32 angle);
 static inline Quat quat_mul_quat(Quat a, Quat b);
 static inline V3   quat_rotate_v3(Quat q, V3 v);
 
-static force_inline M3 m3_fill_diagonal(f32 value);
-static       inline M3 m3_from_rotation(f32 radians, V2 pivot);
-static       inline M3 m3_inverse(M3 m);
-static       inline M3 m3_model(V2 scale, f32 radians, V2 pivot, V2 post_translation);
-static       inline V3 m3_mul_v3(M3 m, V3 v);
-static       inline M3 m3_transpose(M3 m);
+static inline M3 m3_fill_diagonal(f32 value);
+static inline M3 m3_from_rotation(f32 radians, V2 pivot);
+static inline M3 m3_inverse(M3 m);
+static inline M3 m3_model(V2 scale, f32 radians, V2 pivot, V2 post_translation);
+static inline V3 m3_mul_v3(M3 m, V3 v);
+static inline M3 m3_transpose(M3 m);
 
-static force_inline M4 m4_fill_diagonal(f32 value);
-static       inline M4 m4_from_rotation(V3 axis, f32 angle);
-static       inline M4 m4_from_top_left_m3(M3 m);
-static       inline M4 m4_from_translation(V3 translation);
-static       inline M4 m4_inverse(M4 m);
-static       inline M4 m4_look_at(V3 eye, V3 centre, V3 up_direction);
-static       inline M4 m4_mul_m4(M4 a, M4 b);
-static       inline V4 m4_mul_v4(M4 m, V4 v);
-static       inline M4 m4_perspective_projection(f32 fov_vertical_radians, f32 width_over_height, f32 range_near, f32 range_far);
-static force_inline M4 m4_transpose(M4 m);
+static inline M4 m4_fill_diagonal(f32 value);
+static inline M4 m4_from_rotation(V3 axis, f32 angle);
+static inline M4 m4_from_top_left_m3(M3 m);
+static inline M4 m4_from_translation(V3 translation);
+static inline M4 m4_inverse(M4 m);
+static inline M4 m4_look_at(V3 eye, V3 centre, V3 up_direction);
+static inline M4 m4_mul_m4(M4 a, M4 b);
+static inline V4 m4_mul_v4(M4 m, V4 v);
+static inline M4 m4_perspective_projection(f32 fov_vertical_radians, f32 width_over_height, f32 range_near, f32 range_far);
+static inline M4 m4_transpose(M4 m);
 
 #define CPU_DRAW_FUNCTION static
 #include "base/cpu_draw.h"
@@ -1198,7 +1191,7 @@ static void    base_ui_render(ui_State *ui, ui_Box *box);
 #if defined(BASE_IMPLEMENTATION)
 
 
-static force_inline bool assert_expression(bool value) {
+static inline bool assert_expression(bool value) {
     assert(value);
     return true;
 }
@@ -1491,7 +1484,7 @@ static bool is_power_of_2(u64 x) {
     return (x & (x - 1)) == 0;
 }
 
-static force_inline f32 radians_from_degrees(f32 degrees) { return degrees * PI_F32 / 180.f; }
+static inline f32 radians_from_degrees(f32 degrees) { return degrees * PI_F32 / 180.f; }
 
 static void rgba_double_from_hex(u32 hex, double rgba[4]) {
     double pack = 1.0 / 255.0;
@@ -1519,7 +1512,7 @@ static u32 rgba_hex_from_float(V4 rgba) {
     return result;
 }
 
-static force_inline bool f32_difference_within_margin(f32 a, f32 b, f32 margin) {
+static inline bool f32_difference_within_margin(f32 a, f32 b, f32 margin) {
     bool result = fabsf(a - b) <= margin;
     return result;
 }
@@ -1532,17 +1525,17 @@ static inline f32 f32_stable_lerp(f32 a, f32 b, f32 k, f32 delta_time_seconds) {
     return result;
 }
 
-static force_inline f32 f32_lerp(f32 a, f32 b, f32 amount) { return a + amount * (b - a); }
+static inline f32 f32_lerp(f32 a, f32 b, f32 amount) { return a + amount * (b - a); }
 
-static force_inline V2 v2(f32 value) { return (V2){ .x = value, .y = value }; }
+static inline V2 v2(f32 value) { return (V2){ .x = value, .y = value }; }
 
-static force_inline V2 v2_add(V2 a, V2 b) { return (V2){ .x = a.x + b.x, .y = a.y + b.y }; }
+static inline V2 v2_add(V2 a, V2 b) { return (V2){ .x = a.x + b.x, .y = a.y + b.y }; }
 
-static force_inline V2 v2_div(V2 a, V2 b) { return (V2){ .x = a.x / b.x, .y = a.y / b.y }; }
+static inline V2 v2_div(V2 a, V2 b) { return (V2){ .x = a.x / b.x, .y = a.y / b.y }; }
 
 static inline f32 v2_dot(V2 a, V2 b) { return a.x * b.x + a.y * b.y; }
 
-static force_inline bool v2_difference_within_margin(V2 a, V2 b, f32 margin) {
+static inline bool v2_difference_within_margin(V2 a, V2 b, f32 margin) {
     bool result = fabsf(a.x - b.x) <= margin;
     result = result && fabsf(a.y - b.y) <= margin;
     return result;
@@ -1557,11 +1550,11 @@ static inline V2 v2_lerp(V2 a, V2 b, f32 amount) {
     return v2_add(a, add);
 }
 
-static force_inline V2 v2_max(V2 a, V2 b) { return (V2){ .x = MAX(a.x, b.x), .y = MAX(a.y, b.y) }; }
+static inline V2 v2_max(V2 a, V2 b) { return (V2){ .x = MAX(a.x, b.x), .y = MAX(a.y, b.y) }; }
 
-static force_inline V2 v2_min(V2 a, V2 b) { return (V2){ .x = MIN(a.x, b.x), .y = MIN(a.y, b.y) }; }
+static inline V2 v2_min(V2 a, V2 b) { return (V2){ .x = MIN(a.x, b.x), .y = MIN(a.y, b.y) }; }
 
-static force_inline V2 v2_mul(V2 a, V2 b) { return (V2){ .x = a.x * b.x, .y = a.y * b.y }; }
+static inline V2 v2_mul(V2 a, V2 b) { return (V2){ .x = a.x * b.x, .y = a.y * b.y }; }
 
 static inline V2 v2_norm(V2 v) {
     f32 length = v2_len(v);
@@ -1569,7 +1562,7 @@ static inline V2 v2_norm(V2 v) {
     return (V2){ .x = v.x / length, .y = v.y / length };
 }
 
-static force_inline V2 v2_reciprocal(V2 v) { return (V2){ .x = 1.f / v.x, .y = 1.f / v.y }; }
+static inline V2 v2_reciprocal(V2 v) { return (V2){ .x = 1.f / v.x, .y = 1.f / v.y }; }
 
 static inline V2 v2_rotate(V2 v, f32 angle_radians) {
     f32 sin_angle = sinf(angle_radians);
@@ -1582,7 +1575,7 @@ static inline V2 v2_round(V2 v) { return (V2){ .x = roundf(v.x), .y = roundf(v.y
 
 static inline V2 v2_round_down(V2 v) { return v2_round(v2_sub(v, (V2){ .x = 0.5f, .y = 0.5f })); }
 
-static force_inline V2 v2_scale(V2 v, f32 s) { return (V2){ .x = v.x * s, .y = v.y * s }; }
+static inline V2 v2_scale(V2 v, f32 s) { return (V2){ .x = v.x * s, .y = v.y * s }; }
 
 static inline V2 v2_stable_lerp(V2 a, V2 b, f32 k, f32 delta_time_seconds) {
     for (u64 i = 0; i < 2; i += 1) {
@@ -1591,9 +1584,9 @@ static inline V2 v2_stable_lerp(V2 a, V2 b, f32 k, f32 delta_time_seconds) {
     return a;
 }
 
-static force_inline V2 v2_sub(V2 a, V2 b) { return (V2){ .x = a.x - b.x, .y = a.y - b.y }; }
+static inline V2 v2_sub(V2 a, V2 b) { return (V2){ .x = a.x - b.x, .y = a.y - b.y }; }
 
-static force_inline V3 v3_add(V3 a, V3 b) { return (V3){ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z }; }
+static inline V3 v3_add(V3 a, V3 b) { return (V3){ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z }; }
 
 static inline V3 v3_cross(V3 a, V3 b) {
     return (V3) {
@@ -1605,14 +1598,14 @@ static inline V3 v3_cross(V3 a, V3 b) {
 
 static inline f32 v3_dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
-static force_inline bool v3_difference_within_margin(V3 a, V3 b, f32 margin) {
+static inline bool v3_difference_within_margin(V3 a, V3 b, f32 margin) {
     bool result = fabsf(a.x - b.x) <= margin;
     result = result && fabsf(a.y - b.y) <= margin;
     result = result && fabsf(a.z - b.z) <= margin;
     return result;
 }
 
-static force_inline V3 v3_forward_from_view(M4 view) {
+static inline V3 v3_forward_from_view(M4 view) {
     return (V3){ .x = -view.c[0][2], .y = -view.c[1][2], .z = -view.c[2][2] };
 }
 
@@ -1625,7 +1618,7 @@ static inline V3 v3_lerp(V3 a, V3 b, f32 amount) {
     return v3_add(a, add);
 }
 
-static force_inline V3 v3_neg(V3 v) { return (V3){ .x = -v.x, .y = -v.y, .z = -v.z }; }
+static inline V3 v3_neg(V3 v) { return (V3){ .x = -v.x, .y = -v.y, .z = -v.z }; }
 
 static inline V3 v3_norm(V3 v) {
     f32 length = v3_len(v);
@@ -1637,13 +1630,13 @@ static inline V3 v3_norm(V3 v) {
     };
 }
 
-static force_inline V3 v3_right_from_view(M4 view) {
+static inline V3 v3_right_from_view(M4 view) {
     return (V3){ .x = view.c[0][0], .y = view.c[1][0], .z = view.c[2][0] };
 }
 
-static force_inline V3 v3_scale(V3 v, f32 s) { return (V3){ .x = v.x * s, .y = v.y * s, .z = v.z * s }; }
+static inline V3 v3_scale(V3 v, f32 s) { return (V3){ .x = v.x * s, .y = v.y * s, .z = v.z * s }; }
 
-static force_inline V3 v3_sub(V3 a, V3 b) { return (V3){ .x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z }; }
+static inline V3 v3_sub(V3 a, V3 b) { return (V3){ .x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z }; }
 
 static inline V3 v3_unproject(V3 pos, M4 view_projection) {
     M4 view_projection_inv = m4_inverse(view_projection);
@@ -1656,11 +1649,11 @@ static inline V3 v3_unproject(V3 pos, M4 view_projection) {
     return v3_scale(q_trans_xyz, 1.f / q_trans.w);
 }
 
-static force_inline V3 v3_up_from_view(M4 view) {
+static inline V3 v3_up_from_view(M4 view) {
     return (V3){ .x = view.c[0][1], .y = view.c[1][1], .z = view.c[2][1] };
 }
 
-static force_inline V4 v4_add(V4 a, V4 b) { return (V4){ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z, .w = a.w + b.w }; }
+static inline V4 v4_add(V4 a, V4 b) { return (V4){ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z, .w = a.w + b.w }; }
 
 static inline f32 v4_dot(V4 a, V4 b) {
     f32 dot = 0;
@@ -1668,7 +1661,7 @@ static inline f32 v4_dot(V4 a, V4 b) {
     return dot;
 }
 
-static force_inline bool v4_difference_within_margin(V4 a, V4 b, f32 margin) {
+static inline bool v4_difference_within_margin(V4 a, V4 b, f32 margin) {
     bool result = fabsf(a.x - b.x) <= margin;
     result = result && fabsf(a.y - b.y) <= margin;
     result = result && fabsf(a.z - b.z) <= margin;
@@ -1689,7 +1682,7 @@ static inline V4 v4_round(V4 v) {
     return v;
 }
 
-static force_inline V4 v4_scale(V4 v, f32 s) { return (V4){ .x = v.x * s, .y = v.y * s, .z = v.z * s, .w = v.w * s }; }
+static inline V4 v4_scale(V4 v, f32 s) { return (V4){ .x = v.x * s, .y = v.y * s, .z = v.z * s, .w = v.w * s }; }
 
 static inline V4 v4_stable_lerp(V4 a, V4 b, f32 k, f32 delta_time_seconds) {
     for (u64 i = 0; i < 4; i += 1) {
@@ -1698,11 +1691,11 @@ static inline V4 v4_stable_lerp(V4 a, V4 b, f32 k, f32 delta_time_seconds) {
     return a;
 }
 
-static force_inline V4 v4_sub(V4 a, V4 b) { return (V4){ .x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z, .w = a.w - b.w }; }
+static inline V4 v4_sub(V4 a, V4 b) { return (V4){ .x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z, .w = a.w - b.w }; }
 
 static V4 v4v(V3 xyz, f32 w) { return (V4){ .x = xyz.x, .y = xyz.y, .z = xyz.z, .w = w }; }
 
-static force_inline V3 v4_xyz(V4 v) {
+static inline V3 v4_xyz(V4 v) {
     V3 result = { .x = v.x, .y = v.y, .z = v.z };
     return result;
 }
@@ -1737,7 +1730,7 @@ static inline V3 quat_rotate_v3(Quat q, V3 v) {
     return result;
 }
 
-static force_inline M3 m3_fill_diagonal(f32 value) {
+static inline M3 m3_fill_diagonal(f32 value) {
     M3 result = { .c = { [0][0] = value, [1][1] = value, [2][2] = value } };
     return result;
 }
@@ -1812,7 +1805,7 @@ static inline M3 m3_transpose(M3 m) {
     return result;
 }
 
-static force_inline M4 m4_fill_diagonal(f32 value) {
+static inline M4 m4_fill_diagonal(f32 value) {
     return (M4){ .c = { [0][0] = value, [1][1] = value, [2][2] = value, [3][3] = value } };
 }
 
@@ -1931,7 +1924,7 @@ static inline M4 m4_perspective_projection(f32 fov_vertical_radians, f32 width_o
     } };
 }
 
-static force_inline M4 m4_transpose(M4 m) {
+static inline M4 m4_transpose(M4 m) {
     M4 result = {0};
     for (int i = 0; i < 4; i += 1) for (int j = 0; j < 4; j += 1) {
         result.c[i][j] = m.c[j][i];

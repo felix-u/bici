@@ -144,14 +144,14 @@ typedef struct {
 } Vm;
 static Vm global_vm = {0};
 
-static force_inline u16 get16(u8 *address) {
+static inline u16 get16(u8 *address) {
     u16 result = 0;
     result |= (u16)*address << 8;
     result |= (u16)*(address + 1);
     return result;
 }
 
-static force_inline void set16(u8 *address, u16 value) {
+static inline void set16(u8 *address, u16 value) {
     *address = (u8)(value >> 8);
     *(address + 1) = (u8)value;
 }
@@ -540,7 +540,7 @@ static void write_u16_swap_bytes(u8 rom[0x10000], u64 index, u16 value) {
     rom[index + 1] = byte2;
 }
 
-static force_inline bool is_starting_symbol_character(char c) {
+static inline bool is_starting_symbol_character(char c) {
     return ascii_is_alpha(c) || c == '_';
 }
 

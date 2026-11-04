@@ -1,7 +1,13 @@
 #define BASE_IMPLEMENTATION
 #include "base/base.h"
 
-#include "base/base_platform_wingdi.c"
+#if BASE_OS == BASE_OS_WASM
+    #include "base/base_platform_wasm.c"
+#endif
+
+#if BASE_OS == BASE_OS_WINDOWS
+    #include "base/base_platform_wingdi.c"
+#endif
 
 typedef enum {
     Vm_Mode_SHORT        = 1 << 5,

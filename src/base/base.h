@@ -1031,7 +1031,7 @@ typedef struct {
     const char *apple_provision_path;
 } Build_Options;
 
-static u32 build_default_everything(Arena *scratch_arena, const char *program_name, Build_Options *build_options);
+static u32 build_default_everything(Arena *scratch_arena, const char *program_name, const Build_Options *build_options);
 
 // NOTE(felix): synced with ui_Key
 typedef enum {
@@ -3138,7 +3138,7 @@ static const char build_wasm_html_file[] = STRINGIFY(
     </script>
 );
 
-static u32 build_default_everything(Arena *scratch_arena, const char *program_name, Build_Options *options) {
+static u32 build_default_everything(Arena *scratch_arena, const char *program_name, const Build_Options *options) {
     Scratch scratch = scratch_begin(scratch_arena);
 
     u8 target_os = BASE_OS;

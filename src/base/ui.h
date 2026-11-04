@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-05-26
+// https://github.com/felix-u 2026-11-03
 // Public domain. NO WARRANTY - use at your own risk.
 
 #if !defined(UI_H)
@@ -738,7 +738,7 @@ UI_FUNCTION ui_Box *ui_slider(ui_State *ui, ui_Box *parent, ui_Flags slider_axis
     ui_va_list arguments;
     ui_va_start(arguments, format);
     {
-        char format_buffer[UI_MAX_STRING_LENGTH];
+        char format_buffer[UI_MAX_STRING_LENGTH] = {0};
 
         int written = UI_VSNPRINTF(format_buffer, sizeof format_buffer, format, arguments);
         UI_ASSERT(written < (int)(sizeof format_buffer));

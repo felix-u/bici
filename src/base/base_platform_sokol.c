@@ -210,7 +210,9 @@ static void sokol_frame(void *user_data) {
 
     sokol_populate_frame_info(&platform->base.frame);
     Scratch scratch = scratch_begin(platform->base.frame_arena);
-    platform->base.draw_commands = (Array_Draw_Command){ .arena = scratch.arena };
+    platform->base.draw_commands = 0;
+    platform->base.draw_command_count = 0;
+    platform->base.draw_command_capacity = 0;
 
     if (platform->fontstash_context != 0) fonsClearState(platform->fontstash_context);
 
@@ -224,8 +226,8 @@ static void sokol_frame(void *user_data) {
     memcpy(&platform->pass_action.colors[0].clear_value, &clear_color, sizeof clear_color);
     app_update_and_render(&platform->base);
 
-    for (u64 i = 0; i < platform->base.draw_commands.count; i += 1) {
-        Draw_Command *command = &platform->base.draw_commands.data[i];
+    for (u64 i = 0; i < platform->base.draw_command_count; i += 1) {
+        Draw_Command *command = &platform->base.draw_commands[i];
         switch (command->kind) {
             case Draw_Kind_TEXT: {
                 u32 font_color_abgr = 0;
@@ -332,7 +334,7 @@ static V2 platform_measure_text(Platform_Base *platform, String text, f32 font_s
     FONScontext *fontstash_context = ((Platform *)platform)->fontstash_context;
     fonsSetSize(fontstash_context, font_size);
 
-    f32 ascender, descender, line_height;
+    f32 ascender = 0, descender = 0, line_height = 0;
     fonsVertMetrics(fontstash_context, &ascender, &descender, &line_height);
 
     f32 bounds[4] = {0};

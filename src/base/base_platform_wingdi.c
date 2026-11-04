@@ -112,7 +112,9 @@ static void program(void) {
         }
 
         for (Scratch frame_scratch = scratch_begin(platform.base.frame_arena); !platform.base.should_quit; scratch_end(frame_scratch)) {
-            platform.base.draw_commands = (Array_Draw_Command){0};
+            platform.base.draw_commands = 0;
+            platform.base.draw_command_count = 0;
+            platform.base.draw_command_capacity = 0;
 
             win32_process_messages(&platform.base.should_quit);
             if (platform.base.should_quit) break;
@@ -147,7 +149,7 @@ static void program(void) {
 
             u32 clear = argb_from_rgba(platform.base.clear_color);
             cpu_draw_rectangle(surface, 0, 0, surface.clip_right - surface.clip_left, surface.clip_bottom - surface.clip_top, clear);
-            cpu_draw_commands(surface, &platform.font, platform.base.draw_commands.data, platform.base.draw_commands.count);
+            cpu_draw_commands(surface, &platform.font, platform.base.draw_commands, platform.base.draw_command_count);
 
             void *window_dc = GetDC(platform.window);
             ensure(window_dc != 0);

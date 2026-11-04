@@ -165,7 +165,6 @@ _Static_assert(sizeof(f64) == 8, "");
     };
 
     void    abort(void);
-    int     access(const char *path, int mode);
     int     chdir(const char *path);
     int     clock_gettime(clockid_t, struct timespec *);
     int     execvp(const char *file, char *const argv[]);
@@ -174,6 +173,7 @@ _Static_assert(sizeof(f64) == 8, "");
     FILE   *fopen(const char *path, const char *mode);
     pid_t   fork(void);
     size_t  fread(void *pointer, size_t size, size_t number_of_items, FILE *file);
+    int     fseek(FILE *file, long offset, int whence);
     size_t  fwrite(const void *pointer, size_t size, size_t number_of_items, FILE *file);
     int     lstat(const char *path, struct stat *buffer);
     int     mkdir(const char *path, mode_t mode);
@@ -198,19 +198,16 @@ _Static_assert(sizeof(f64) == 8, "");
         #error "UNIMPLEMENTED"
     #endif
 
-    #define os_abort() ExitProcess(1)
-    #define os_exit(code) ExitProcess(code)
+    #define os_abort() NtTerminateProcess((void *)-1, 1)
+    #define os_exit(code) RtlExitUserProcess((int)(code))
 
     META(link "Kernel32")
-    int   CloseHandle(void *);
     struct _SECURITY_ATTRIBUTES;
-    int   CreateDirectoryA(const char *path, struct _SECURITY_ATTRIBUTES *);
-    void *CreateFileA(const char *file_name, unsigned long desired_access, unsigned long share_mode, struct _SECURITY_ATTRIBUTES *, unsigned long creation_disposition, unsigned long flags_and_attributes, void *template_file);
-    typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
+    typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfow
         unsigned long cb;
-        char *lpReserved;
-        char *lpDesktop;
-        char *lpTitle;
+        unsigned short *lpReserved;
+        unsigned short *lpDesktop;
+        unsigned short *lpTitle;
         unsigned long dwX;
         unsigned long dwY;
         unsigned long dwXSize;
@@ -225,62 +222,93 @@ _Static_assert(sizeof(f64) == 8, "");
         void *hStdInput;
         void *hStdOutput;
         void *hStdError;
-    } STARTUPINFOA;
+    } STARTUPINFOW;
     typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information
         void *hProcess;
         void *hThread;
         unsigned long dwProcessId;
         unsigned long dwThreadId;
     } PROCESS_INFORMATION;
-    int  CreateProcessA(const char *application_name, char *command_line, struct _SECURITY_ATTRIBUTES *process_attributes, struct _SECURITY_ATTRIBUTES *thread_attributes, int should_inherit_handles, unsigned long creation_flags, void *environment, const char *current_directory, STARTUPINFOA *, PROCESS_INFORMATION *);
-    int  DeleteFileA(const char *file_name);
-    void ExitProcess(unsigned exit_code);
-    int FindClose(void *find_file_handle);
-    typedef struct {
-        unsigned long dwLowDateTime;
-        unsigned long dwHighDateTime;
-    } FILETIME;
-    #define MAX_PATH 260
-    typedef struct {
-        unsigned long dwFileAttributes;
-        FILETIME ftCreationTime;
-        FILETIME ftLastAccessTime;
-        FILETIME ftLastWriteTime;
-        unsigned long nFileSizeHigh;
-        unsigned long nFileSizeLow;
-        unsigned long dwReserved0;
-        unsigned long dwReserved1;
-        char cFileName[MAX_PATH];
-        char cAlternateFileName[14];
-        unsigned long dwFileType; // Obsolete. Do not use.
-        unsigned long dwCreatorType; // Obsolete. Do not use
-        unsigned short wFinderFlags; // Obsolete. Do not use
-    } WIN32_FIND_DATAA;
-    void           *FindFirstFileA(const char *file_name, WIN32_FIND_DATAA *);
-    int             FindNextFileA(void *find_file_handle, WIN32_FIND_DATAA *);
-    unsigned short *GetCommandLineW(void);
-    int             GetExitCodeProcess(void *process, unsigned long *exit_code);
-    unsigned long   GetFileAttributesA(const char *file_name);
-    typedef long long LARGE_INTEGER;
-    int             GetFileSizeEx(void *file, LARGE_INTEGER *file_size);
-    unsigned long   GetFinalPathNameByHandleA(void *handle, char *path, unsigned long path_size, unsigned long flags);
-    unsigned long   GetLastError(void);
-    void *          GetStdHandle(unsigned long standard_handle);
-    void            OutputDebugStringA(const char *output_string);
-    int             QueryPerformanceCounter(LARGE_INTEGER *performance_count);
-    int             QueryPerformanceFrequency(LARGE_INTEGER *frequency);
-    struct _OVERLAPPED;
-    int             ReadFile(void *file, void *buffer, unsigned long number_of_bytes_to_read, unsigned long *number_of_bytes_read, struct _OVERLAPPED *);
-    void *          VirtualAlloc(void *address, u64 byte_count, unsigned long allocation_type, unsigned long protection);
-    int             VirtualFree(void *address, u64 byte_count, unsigned long free_type);
-    unsigned long   WaitForSingleObject(void *handle, unsigned long milliseconds);
-    int             WriteFile(void *file, const void *buffer, unsigned long number_of_bytes_to_write, unsigned long *number_of_bytes_written, struct _OVERLAPPED *);
+    int  CreateProcessW(const unsigned short *application_name, unsigned short *command_line, struct _SECURITY_ATTRIBUTES *process_attributes, struct _SECURITY_ATTRIBUTES *thread_attributes, int should_inherit_handles, unsigned long creation_flags, void *environment, const unsigned short *current_directory, STARTUPINFOW *, PROCESS_INFORMATION *);
+    void OutputDebugStringW(const unsigned short *output_string);
+    int  WriteConsoleW(void *console_output, const void *buffer, unsigned long number_of_characters_to_write, unsigned long *number_of_characters_written, void *reserved);
 
-    META(link "Shell32")
-    unsigned short **CommandLineToArgvW(const unsigned short *command_line, int *number_of_arguments);
-    void            *ShellExecuteA(void *handle, const char *operation, const char *file, const char *parameters, const char *directory, int show_command_count);
+    META(link "Ntdll")
+    typedef struct {
+        unsigned short Length;
+        unsigned short MaximumLength;
+        unsigned short *Buffer;
+    } UNICODE_STRING;
+    typedef struct {
+        unsigned long Length;
+        void *RootDirectory;
+        UNICODE_STRING *ObjectName;
+        unsigned long Attributes;
+        void *SecurityDescriptor;
+        void *SecurityQualityOfService;
+    } OBJECT_ATTRIBUTES;
+    typedef struct {
+        union {
+            long Status;
+            void *Pointer;
+        };
+        unsigned long long Information;
+    } IO_STATUS_BLOCK;
+    long NtClose(void *Handle);
+    long NtCreateFile(void **FileHandle, unsigned long DesiredAccess, OBJECT_ATTRIBUTES *ObjectAttributes, IO_STATUS_BLOCK *IoStatusBlock, long long *AllocationSize, unsigned long FileAttributes, unsigned long ShareAccess, unsigned long CreateDisposition, unsigned long CreateOptions, void *EaBuffer, unsigned long EaLength);
+    long NtQueryObject(void *Handle, int ObjectInformationClass, void *ObjectInformation, unsigned long ObjectInformationLength, unsigned long *ReturnLength);
+
+    typedef struct {
+        UNICODE_STRING DosPath;
+        void *Handle;
+    } CURDIR;
+    typedef struct {
+        unsigned long  MaximumLength;
+        unsigned long  Length;
+        unsigned long  Flags;
+        unsigned long  DebugFlags;
+        void          *ConsoleHandle;
+        unsigned long  ConsoleFlags;
+        void          *StandardInput;
+        void          *StandardOutput;
+        void          *StandardError;
+        CURDIR         CurrentDirectory;
+        UNICODE_STRING DllPath;
+        UNICODE_STRING ImagePathName;
+        UNICODE_STRING CommandLine;
+    } RTL_USER_PROCESS_PARAMETERS;
+    typedef struct {
+        unsigned char  InheritedAddressSpace;
+        unsigned char  ReadImageFileExecOptions;
+        unsigned char  BeingDebugged;
+        unsigned char  BitField;
+        void          *Mutant;
+        void          *ImageBaseAddress;
+        void          *Ldr;
+        RTL_USER_PROCESS_PARAMETERS *ProcessParameters;
+    } PEB;
+    typedef struct {
+        long               ExitStatus;
+        PEB               *PebBaseAddress;
+        unsigned long long AffinityMask;
+        long               BasePriority;
+        unsigned long long UniqueProcessId;
+        unsigned long long InheritedFromUniqueProcessId;
+    } PROCESS_BASIC_INFORMATION;
+    typedef struct {
+        unsigned long DeviceType;
+        unsigned long Characteristics;
+    } FILE_FS_DEVICE_INFORMATION;
+    long          NtQueryInformationProcess(void *ProcessHandle, int ProcessInformationClass, void *ProcessInformation, unsigned long ProcessInformationLength, unsigned long *ReturnLength);
+    long          NtQueryVolumeInformationFile(void *FileHandle, IO_STATUS_BLOCK *IoStatusBlock, void *FsInformation, unsigned long Length, int FsInformationClass);
+    long          NtTerminateProcess(void *ProcessHandle, long ExitStatus);
+    long          NtWaitForSingleObject(void *Handle, unsigned char Alertable, long long *Timeout);
+    long          NtWriteFile(void *FileHandle, void *Event, void *ApcRoutine, void *ApcContext, IO_STATUS_BLOCK *IoStatusBlock, const void *Buffer, unsigned long Length, long long *ByteOffset, unsigned long *Key);
+    void          RtlExitUserProcess(long ExitStatus);
+    PEB          *RtlGetCurrentPeb(void);
+    unsigned long RtlGetLastWin32Error(void);
 #elif BASE_OS == BASE_OS_WASM
-    typedef u64 size_t;
+    typedef __SIZE_TYPE__ size_t; _Static_assert(sizeof(size_t) == 4, "Assumes wasm32");
     #define os_abort() // TODO(felix)
     #define os_exit(code) // TODO(felix)
 #endif // BASE_OS
@@ -334,6 +362,10 @@ _Static_assert(sizeof(f64) == 8, "");
 #define SMALL_SNPRINTF_NO_STD_INCLUDE
 #include "base/small_snprintf.h"
 
+#define UTF_FUNCTION static
+#define UTF_NO_SYSTEM_INCLUDE
+#include "base/utf.h"
+
 #define TIME_FUNCTION static
 #define TIME_NO_SYSTEM_INCLUDE
 #include "base/time.h"
@@ -345,9 +377,6 @@ _Static_assert(sizeof(f64) == 8, "");
 #define ARENA_NO_SYSTEM_INCLUDE
 #include "base/arena.h"
 typedef arena_Scratch Scratch;
-
-#define Array(T) struct { T *data; u64 count, capacity; }
-typedef Array(void) Array_void;
 
 #define DS_FUNCTION static
 #define ds_u32 u32
@@ -368,44 +397,13 @@ static void log_internal_with_location_v(const char *file, u64 line, const char 
     breakpoint; os_abort(); \
 } while (0)
 
-static void reserve_exactly_(Arena *arena ,Array_void *a, u64 item_size, u64 new_capacity, bool zero);
-static u64 grow_capacity(u64 current, u64 minimum);
-#define reserve(arena, a, c) reserve_exactly((arena), (a), grow_capacity((a)->capacity, (c)))
-#define reserve_exactly(arena, a, c) do { \
-    _Static_assert(sizeof *(a) == sizeof(Array_void), "parameter must point to an Array(T)"); \
-    reserve_exactly_((arena), (Array_void *)(a), sizeof *((a)->data), (c), true); \
-} while (0)
-#define reserve_unused(arena, a, c) reserve((arena), (a), (a)->count + (c))
-#define reserve_unused_exactly(arena, a, c) reserve_exactly((arena), (a), (a)->count + (c))
-#define push(arena, a, o) do { \
-    reserve_unused((arena), (a), 1); \
-    (a)->data[(a)->count++] = (o); \
-} while (0)
-#define push_assume_capacity(a, o) do { \
-    _Static_assert(sizeof *(a) == sizeof(Array_void), "parameter must point to an Array(T)"); \
-    assert((a)->count + 1 <= (a)->capacity); \
-    (a)->data[(a)->count++] = (o); \
-} while (0)
-#define push_many(arena, a, items, num) do { \
-    reserve_unused((arena), (a), (num)); \
-    for (u64 i__pm__ = 0; i__pm__ < (num); i__pm__ += 1) { \
-        (a)->data[(a)->count++] = (items)[i__pm__]; \
-    } \
-} while (0)
-#define push_many_assume_capacity(a, items, num) do { \
-    _Static_assert(sizeof *(a) == sizeof(Array_void), "parameter must point to an Array(T)"); \
-    assert((a)->count + (num) <= (a)->capacity); \
-    for (u64 i__pmac__ = 0; i__pmac__ < (num); i__pmac__ += 1) { \
-        (a)->data[(a)->count++] = (items)[i__pmac__]; \
-    } \
-} while (0)
-#define push_slice(a, b) push_many((a), (b).data, (b).count)
-#define push_slice_assume_capacity(a, b) push_many_assume_capacity((a), (b).data, (b).count)
-static void swap_remove_(Array_void *array, u64 index, u64 item_size);
-#define swap_remove(a, i) do { \
-    _Static_assert(sizeof *(a) == sizeof(Array_void), "parameter must point to an Array(T)"); \
-    swap_remove_((Array_void *)(a), (i), sizeof *(a)->data); \
-} while (0)
+static inline size_t size_t_from_u64(u64 value) {
+    assert(value <= (size_t)-1);
+    return (size_t)value;
+}
+
+#define arena_array_reserve(arena, data, count, capacity, minimum) arena_array_reserve_((arena), (data), sizeof *(data), (count), (capacity), (minimum))
+static void *arena_array_reserve_(Arena *arena, void *data, size_t item_size, u64 count, u64 *capacity, u64 minimum);
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -421,26 +419,6 @@ static inline int memcmp_(const void *a_, const void *b_, u64 byte_count) {
     return 0;
 }
 
-static inline void *memcpy_(void *destination_, const void *source_, u64 byte_count) {
-    u8 *destination = destination_;
-    const u8 *source = source_;
-    if (byte_count != 0) {
-        assert(destination != 0);
-        assert(source != 0);
-    }
-    for (u64 i = 0; i < byte_count; i += 1) destination[i] = source[i];
-    return destination;
-}
-
-static inline void *memset_(void *destination_, int byte_, u64 byte_count) {
-    assert(byte_ < 256);
-    u8 byte = (u8)byte_;
-    u8 *destination = destination_;
-    assert(destination != 0);
-    for (u64 i = 0; i < byte_count; i += 1) destination[i] = byte;
-    return destination;
-}
-
 #if !LINK_CRT && BASE_OS != BASE_OS_WASM
     #pragma function(memcmp)
     #pragma function(memcpy)
@@ -450,12 +428,46 @@ static inline void *memset_(void *destination_, int byte_, u64 byte_count) {
         return memcmp_(a, b, byte_count);
     }
 
+    // NOTE(felix): Optimising compilers turn a copy or fill loop into a call to memcpy or memset, so this loop turns into stack-overflowing recursion.
+    //              MSVC does this to memcpy and clang to memset. The volatile pointer stops the loop from being recognised for the non-intrinsic fallback case.
+    // TODO(felix): Use metaprogram inline assembly once it exists.
+    #if COMPILER_MSVC && BASE_ARCH == BASE_ARCH_X86_64
+        void __movsb(unsigned char *destination, const unsigned char *source, size_t byte_count);
+        void __stosb(unsigned char *destination, unsigned char byte, size_t byte_count);
+        #pragma intrinsic(__movsb, __stosb)
+    #endif
+
     void *memcpy(void *destination, const void *source, u64 byte_count) {
-        return memcpy_(destination, source, byte_count);
+        assert(byte_count == 0 || (destination != 0 && source != 0));
+
+        #if COMPILER_MSVC && BASE_ARCH == BASE_ARCH_X86_64
+            __movsb(destination, source, size_t_from_u64(byte_count));
+        #elif (COMPILER_CLANG || COMPILER_GCC) && BASE_ARCH == BASE_ARCH_X86_64
+            void *destination_cursor = destination;
+            __asm__ volatile("rep movsb" : "+D"(destination_cursor), "+S"(source), "+c"(byte_count) : : "memory");
+        #else
+            volatile u8 *destination_bytes = destination;
+            const u8 *source_bytes = source;
+            for (u64 i = 0; i < byte_count; i += 1) destination_bytes[i] = source_bytes[i];
+        #endif
+
+        return destination;
     }
 
     void *memset(void *destination, int byte, u64 byte_count) {
-        return memset_(destination, byte, byte_count);
+        assert(byte_count == 0 || destination != 0);
+
+        #if COMPILER_MSVC && BASE_ARCH == BASE_ARCH_X86_64
+            __stosb(destination, (u8)byte, size_t_from_u64(byte_count));
+        #elif (COMPILER_CLANG || COMPILER_GCC) && BASE_ARCH == BASE_ARCH_X86_64
+            void *destination_cursor = destination;
+            __asm__ volatile("rep stosb" : "+D"(destination_cursor), "+c"(byte_count) : "a"(byte) : "memory");
+        #else
+            volatile u8 *destination_bytes = destination;
+            for (u64 i = 0; i < byte_count; i += 1) destination_bytes[i] = (u8)byte;
+        #endif
+
+        return destination;
     }
 #endif
 
@@ -528,8 +540,8 @@ static f64 acos_(f64 x) {
 #if !LINK_CRT
     #if COMPILER_CLANG
         #if BASE_OS == BASE_OS_WASM // TODO(felix): is this the right solution?
-            // #define memcmp(a, b, c) __builtin_memcmp((a), (b), (unsigned long)(c))
-            #define memcmp(a, b, c) memcmp_wasm((a), (b), (unsigned long)(c))
+            // #define memcmp(a, b, c) __builtin_memcmp((a), (b), (size_t)(c))
+            #define memcmp(a, b, c) memcmp_wasm((a), (b), (size_t)(c))
             static int memcmp_wasm(const void *a_, const void *b_, size_t c) {
                 const unsigned char *a = a_, *b = b_;
                 for (size_t i = 0; i < c; i += 1) {
@@ -537,8 +549,8 @@ static f64 acos_(f64 x) {
                 }
                 return 0;
             }
-            #define memcpy(d, s, c) __builtin_memcpy((d), (s), (unsigned long)(c))
-            #define memset(m, b, c) __builtin_memset((m), (b), (unsigned long)(c))
+            #define memcpy(d, s, c) __builtin_memcpy((d), (s), (size_t)(c))
+            #define memset(m, b, c) __builtin_memset((m), (b), (size_t)(c))
         #else
             #define memcmp __builtin_memcmp
             #define memcpy __builtin_memcpy
@@ -693,7 +705,7 @@ static f32 frexpf_(f32 x, i32 *exponent) {
 }
 
 static f32 logf_(f32 x) {
-    i32 exponent;
+    i32 exponent = 0;
     f32 mantissa = frexpf_(x, &exponent);
     if (mantissa < 0.5f) {
         mantissa *= 2.f;
@@ -948,10 +960,15 @@ static String string_from_int_base(Arena *arena, i64 _num, u8 base);
 static String string_print_(Arena *arena, const char *fmt, va_list arguments);
 static String string_print(Arena *arena, const char *fmt, ...);
 
-typedef Array(char) String_Builder;
+typedef struct {
+    char *data;
+    u64 count, capacity;
+} String_Builder;
+static   void string_builder_push(String_Builder *builder, String string);
 static   void string_builder_null_terminate(Arena *arena, String_Builder *builder);
 static   void string_builder_print(Arena *arena, String_Builder *builder, const char* format, ...);
 static   void string_builder_print_(Arena *arena, String_Builder *builder, const char *fmt, va_list arguments);
+static   void string_builder_reserve_unused(Arena *arena, String_Builder *builder, u64 unused_count);
 static String string_builder_string(String_Builder builder);
 
 #define FS_FUNCTION static
@@ -1133,13 +1150,13 @@ typedef struct {
     };
     u64 user_data;
 } Draw_Command;
-typedef Array(Draw_Command) Array_Draw_Command;
 
 typedef struct {
     App_Frame_Info frame;
     Arena *persistent_arena;
     Arena *frame_arena;
-    Array_Draw_Command draw_commands;
+    Draw_Command *draw_commands;
+    u64 draw_command_count, draw_command_capacity;
 
     bool should_quit;
     const char *window_name;
@@ -1209,7 +1226,6 @@ static inline bool assert_expression(bool value) {
 #endif
 
 raddbg_entry_point(program)
-raddbg_type_view(Array_?, $.slice())
 raddbg_type_view(String, view:text($.data, size=count))
 
 static void program(void);
@@ -1233,38 +1249,73 @@ static void program(void);
     }
 #endif
 
+#if BASE_OS == BASE_OS_WINDOWS
+    static bool os_windows_is_argument_separator(char c) {
+        return c == ' ' || c == '\t';
+    }
+#endif
+
 static const char **os_get_arguments(Arena *arena, u64 *out_count) {
     const char **arguments = 0;
 
     #if BASE_OS == BASE_OS_WINDOWS
     {
-        int argument_count = 0;
-        u16 **arguments_utf16 = CommandLineToArgvW(GetCommandLineW(), &argument_count);
-        if (arguments_utf16 == 0) {
-            log_error("unable to get command line arguments");
-            *out_count = 0;
-            return 0;
+        UNICODE_STRING command_line_utf16 = RtlGetCurrentPeb()->ProcessParameters->CommandLine;
+        u64 unit_count = command_line_utf16.Length / sizeof(u16);
+        u64 count = utf8_from_utf16(0, 0, command_line_utf16.Buffer, unit_count).destination_units_written;
+
+        char *command_line = arena_make(arena, count + 1, char);
+        utf8_from_utf16(command_line, count, command_line_utf16.Buffer, unit_count);
+
+        // NOTE(felix): Follows the splitting rules of the Microsoft C runtime since 2008.
+        u64 read = 0;
+        u64 written = 0;
+        u64 argument_count = 0;
+        bool program_name_is_quoted = count > 0 && command_line[0] == '"';
+        read += program_name_is_quoted;
+        while (read < count && (program_name_is_quoted ? command_line[read] != '"' : !os_windows_is_argument_separator(command_line[read]))) {
+            command_line[written++] = command_line[read++];
         }
 
-        arguments = arena_make(arena, (u64)argument_count + 1, const char *);
+        read += program_name_is_quoted && read < count;
+        while (read < count && os_windows_is_argument_separator(command_line[read])) read += 1;
+        command_line[written++] = 0;
+        argument_count += 1;
 
-        for (u64 i = 0; i < (u64)argument_count; i += 1) {
-            u16 *argument_utf16 = arguments_utf16[i];
+        while (read < count) {
+            bool in_quotes = false;
+            while (read < count && (in_quotes || !os_windows_is_argument_separator(command_line[read]))) {
+                u64 backslash_count = 0;
+                while (read < count && command_line[read] == '\\') {
+                    backslash_count += 1;
+                    read += 1;
+                }
 
-            u64 length = 1;
-            while (argument_utf16[length] != 0) length += 1;
+                bool quote_follows = read < count && command_line[read] == '"';
+                u64 literal_backslash_count = quote_follows ? backslash_count / 2 : backslash_count;
+                for (u64 i = 0; i < literal_backslash_count; i += 1) command_line[written++] = '\\';
 
-            // TODO(felix): convert to UTF-8, not ascii
-            char *argument = arena_make(arena, length + 1, char);
-            for (u64 j = 0; j < length; j += 1) {
-                u16 wide_character = argument_utf16[j];
-                assert(wide_character < 128);
-                argument[j] = (char)wide_character;
+                if (quote_follows) {
+                    bool is_escaped_quote = backslash_count % 2 == 1;
+                    bool is_doubled_quote = !is_escaped_quote && in_quotes && read + 1 < count && command_line[read + 1] == '"';
+                    if (is_escaped_quote || is_doubled_quote) command_line[written++] = '"';
+                    else in_quotes = !in_quotes;
+                    read += 1 + is_doubled_quote;
+                } else if (backslash_count == 0) command_line[written++] = command_line[read++];
             }
 
-            arguments[i] = argument;
+            while (read < count && os_windows_is_argument_separator(command_line[read])) read += 1;
+            command_line[written++] = 0;
+            argument_count += 1;
         }
-        *out_count = (u64)argument_count;
+
+        arguments = arena_make(arena, argument_count + 1, const char *);
+        const char *argument = command_line;
+        for (u64 i = 0; i < argument_count; i += 1) {
+            arguments[i] = argument;
+            argument += cstring_length(argument) + 1;
+        }
+        *out_count = argument_count;
     }
     #elif BASE_OS & BASE_OS_ANY_POSIX
     {
@@ -1309,62 +1360,50 @@ static inline bool ascii_is_whitespace(char c) { return c == ' ' || c == '\n' ||
 #define ARENA_MEMSET memset
 #define ARENA_ASAN_POISON(address, byte_count)   asan_poison_memory_region((address), (byte_count))
 #define ARENA_ASAN_UNPOISON(address, byte_count) asan_unpoison_memory_region((address), (byte_count))
+#define ARENA_ASAN BUILD_ASAN
 #if BUILD_DEBUG
     #define ARENA_POISON_BYTE POISON_BYTE
 #endif
 #include "base/arena.h"
 
+static void *base_allocate_from_arena_wrapper(void *context, void *pointer, size_t old_size, size_t new_size) {
+    Arena *arena = context;
+    void *result = 0;
+    if (new_size != 0) {
+        result = arena_make_(arena, new_size, 1, true);
+        if (pointer != 0) memcpy(result, pointer, MIN(old_size, new_size));
+    }
+    return result;
+}
+
 #define DS_IMPLEMENTATION
+#define DS_ALLOCATE(context, pointer, old_size, new_size) base_allocate_from_arena_wrapper((context), (pointer), (old_size), (new_size))
 #include "base/data_structures.h"
 
-static void reserve_exactly_(Arena *arena, Array_void *a, u64 item_size, u64 new_capacity, bool zero) {
-    if (a->capacity >= new_capacity) return;
+static void *arena_array_reserve_(Arena *arena, void *data, size_t item_size, u64 count, u64 *capacity, u64 minimum) {
+    void *result = data;
+    if (*capacity < minimum) {
+        assert(item_size > 0);
+        assert(count <= *capacity);
 
-    assert(item_size > 0);
-    assert(new_capacity <= UINT64_MAX / item_size);
-    u64 byte_count = new_capacity * item_size;
+        if (data != 0) {
+            u64 arena_end = (u64)arena->memory + arena->offset;
+            u64 data_end = (u64)data + *capacity * item_size;
+            bool is_array_on_this_arena = (u64)arena->memory <= (u64)data && data_end <= arena_end;
+            assert(is_array_on_this_arena);
+        }
 
-    if (a->data != 0) {
-        u64 arena_end = (u64)arena->memory + arena->offset;
-        u64 data_end = (u64)a->data + a->capacity * item_size;
-        bool is_array_on_this_arena = (u64)arena->memory <= (u64)a->data && data_end <= arena_end;
-        assert(is_array_on_this_arena);
+        u64 new_capacity = ds_array_grow_capacity(*capacity, minimum);
+        result = ds_array_resize(arena, 0, item_size, 0, new_capacity);
+        if (result == 0) panic("unable to reserve %llu items of %llu bytes", new_capacity, (u64)item_size);
+
+        size_t used_size = size_t_from_u64(count) * item_size;
+        if (data != 0) memcpy(result, data, used_size);
+        *capacity = new_capacity;
     }
-
-    void *raw = arena_make_(arena, byte_count, 1, false);
-    memcpy(raw, a->data, a->count * item_size);
-
-    u8 byte = 0;
-    if (BUILD_DEBUG && !zero) byte = POISON_BYTE;
-    if (zero || BUILD_DEBUG) {
-        u64 growth_bytes = item_size * (new_capacity - a->capacity);
-        void *unused_new_memory = (u8 *)raw + item_size * a->capacity;
-        memset(unused_new_memory, byte, growth_bytes);
-    }
-
-    a->data = raw;
-    a->capacity = new_capacity;
+    return result;
 }
 
-static void swap_remove_(Array_void *array, u64 index, u64 item_size) {
-    assert(index < array->count);
-
-    char *memory = array->data;
-    void *destination = &memory[item_size * index];
-    void *source = &memory[item_size * (array->count - 1)];
-    memcpy(destination, source, item_size);
-
-    if (BUILD_DEBUG) memset(source, POISON_BYTE, item_size);
-    array->count -= 1;
-}
-
-static u64 grow_capacity(u64 current, u64 minimum) {
-    if (current >= minimum) return current;
-    if (minimum >= 0x7fffffffffffffff) return minimum;
-    current += !current;
-    while (current < minimum) current *= 2;
-    return current;
-}
 
 static bool intersect_point_in_rectangle(V2 point, V4 rectangle) {
     bool result = true;
@@ -1399,7 +1438,7 @@ static V4 rgba_float_from_hex(u32 hex) {
 }
 
 static u32 rgba_hex_from_float(V4 rgba) {
-    u32 c[4];
+    u32 c[4] = {0};
     for (u64 i = 0; i < 4; i += 1) c[i] = (u32)(v(rgba)[i] * 255.f + 0.5f);
     u32 result = (c[0] << 24) | (c[1] << 16) | (c[2] << 8) | c[3];
     return result;
@@ -1536,7 +1575,7 @@ static inline V3 v3_unproject(V3 pos, M4 view_projection) {
     Quat q = v4v(pos, 1.f);
     Quat q_trans = m4_mul_v4(view_projection_inv, q);
 
-    V3 q_trans_xyz;
+    V3 q_trans_xyz = {0};
     memcpy(&q_trans_xyz, &q_trans, sizeof q_trans_xyz);
 
     return v3_scale(q_trans_xyz, 1.f / q_trans.w);
@@ -1618,7 +1657,7 @@ static inline V3 quat_rotate_v3(Quat q, V3 v) {
     Quat q_conjugate = (Quat){ .x = -q.x, .y = -q.y, .z = -q.z, .w = q.w };
     Quat result_as_quat = quat_mul_quat(quat_mul_quat(q, qv), q_conjugate);
 
-    V3 result;
+    V3 result = {0};
     memcpy(&result, &result_as_quat, sizeof result);
     return result;
 }
@@ -2109,6 +2148,9 @@ static i64 int_from_string_base(String s, u64 base) {
 #define STR_ASSERT assert
 #include "base/str.h"
 
+#define UTF_IMPLEMENTATION
+#include "base/utf.h"
+
 #define SMALL_SNPRINTF_IMPLEMENTATION
 #define SMALL_SNPRINTF_ASSERT assert
 #define SMALL_SNPRINTF_UNKNOWN_FORMAT_HANDLER small_snprintf_unknown_format_handler
@@ -2149,7 +2191,7 @@ static u64 cstring_copy(char *buffer, const char *cstring) {
 }
 
 static const char *cstring_from_string(Arena *arena, String string) {
-    char *cstring = arena_make(arena, string.count + 1, char);
+    char *cstring = arena_make(arena, size_t_from_u64(string.count + 1), char);
     for (u64 i = 0; i < string.count; i += 1) cstring[i] = (char)string.data[i];
     cstring[string.count] = '\0';
     return cstring;
@@ -2157,7 +2199,7 @@ static const char *cstring_from_string(Arena *arena, String string) {
 
 static const char *cstring_print(Arena *arena, const char *format, ...) {
     String_Builder builder = {0};
-    reserve(arena, &builder, cstring_length(format));
+    string_builder_reserve_unused(arena, &builder, cstring_length(format));
 
     va_list arguments;
     va_start(arguments, format);
@@ -2178,7 +2220,7 @@ static String string_from_int_base(Arena *arena, i64 _num, u8 base) {
         count += 1;
     } while (num > 0);
 
-    char *string = arena_make(arena, count, char);
+    char *string = arena_make(arena, size_t_from_u64(count), char);
 
     i64 first_digit_index = 0;
     if (num < 0) {
@@ -2217,9 +2259,19 @@ static void string_builder_print(Arena *arena, String_Builder *builder, const ch
     va_end(arguments);
 }
 
+static void string_builder_reserve_unused(Arena *arena, String_Builder *builder, u64 unused_count) {
+    builder->data = arena_array_reserve(arena, builder->data, builder->count, &builder->capacity, builder->count + unused_count);
+}
+
+static void string_builder_push(String_Builder *builder, String string) {
+    assert(builder->count + string.count <= builder->capacity);
+    memcpy(&builder->data[builder->count], string.data, string.count);
+    builder->count += string.count;
+}
+
 static void string_builder_print_(Arena *arena, String_Builder *builder, const char *fmt_c, va_list arguments) {
     u64 size_guess = cstring_length(fmt_c) * 8;
-    reserve_unused(arena, builder, size_guess);
+    string_builder_reserve_unused(arena, builder, size_guess);
 
     char *buffer = &builder->data[builder->count];
     u64 buffer_size = builder->capacity - builder->count;
@@ -2227,12 +2279,12 @@ static void string_builder_print_(Arena *arena, String_Builder *builder, const c
 
     va_list arguments_1;
     va_copy(arguments_1, arguments);
-    int bytes_printed = small_vsnprintf(buffer, buffer_size, fmt_c, arguments_1);
+    int bytes_printed = small_vsnprintf(buffer, size_t_from_u64(buffer_size), fmt_c, arguments_1);
     va_end(arguments_1);
 
     if ((u64)bytes_printed >= buffer_size) {
         u64 needed_unused = (u64)bytes_printed + 1; // for null terminator
-        reserve_unused(arena, builder, needed_unused);
+        string_builder_reserve_unused(arena, builder, needed_unused);
 
         buffer = &builder->data[builder->count];
         buffer_size = builder->capacity - builder->count;
@@ -2242,7 +2294,7 @@ static void string_builder_print_(Arena *arena, String_Builder *builder, const c
 
         va_list arguments_2;
         va_copy(arguments_2, arguments);
-        bytes_printed = small_vsnprintf(buffer, buffer_size, fmt_c, arguments_2);
+        bytes_printed = small_vsnprintf(buffer, size_t_from_u64(buffer_size), fmt_c, arguments_2);
         va_end(arguments_2);
 
         assert((u64)bytes_printed < buffer_size);
@@ -2258,7 +2310,7 @@ static String string_builder_string(String_Builder builder) {
 
 static inline void string_builder_null_terminate(Arena *arena, String_Builder *builder) {
     // Avoid push(0) because we don't want to increase the string length
-    reserve_unused_exactly(arena, builder, 1);
+    string_builder_reserve_unused(arena, builder, 1);
     builder->data[builder->count] = 0;
 }
 
@@ -2310,11 +2362,12 @@ static inline void string_builder_null_terminate(Arena *arena, String_Builder *b
         panic("unimplemented for WASM");
         return 0;
     }
-    static void fs_absolute_path(const char *path, char *buffer, unsigned long long buffer_size) {
+    static _Bool fs_absolute_path(const char *path, char *buffer, unsigned long long buffer_size) {
         (void)path;
         (void)buffer;
         (void)buffer_size;
         panic("unimplemented for WASM");
+        return 0;
     }
 #else
     #define FS_IMPLEMENTATION
@@ -2327,7 +2380,7 @@ static String os_read_entire_file(Arena *arena, const char *path, bool *ok) {
     String result = {0};
     fs_File file = fs_file_open_and_get_size(path, fs_File_Flag_READ, &result.count);
 
-    char *data = arena_make(arena, result.count + 1, char);
+    char *data = arena_make(arena, size_t_from_u64(result.count + 1), char);
     result.count = fs_read_entire_file(file, data, result.count);
     data[result.count] = 0;
     *ok = result.count > 0;
@@ -2391,6 +2444,16 @@ static void log_internal_with_location_v(const char *file, u64 line, const char 
     #endif
 }
 
+#if BASE_OS == BASE_OS_WINDOWS
+    static u16 *os_windows_utf16_from_utf8(Arena *arena, const char *utf8, u64 count) {
+        u64 unit_count = utf16_from_utf8(0, 0, utf8, count).destination_units_written;
+        u16 *utf16 = arena_make(arena, unit_count + 1, u16);
+        utf16_from_utf8(utf16, unit_count, utf8, count);
+        utf16[unit_count] = 0;
+        return utf16;
+    }
+#endif
+
 static u32 os_process_run(Arena *scratch_arena, const char **arguments, const char *directory, Os_Process_Flags flags) {
     Scratch scratch = scratch_begin(scratch_arena);
     u32 exit_code = 1;
@@ -2408,55 +2471,89 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
 
     #if BASE_OS == BASE_OS_WINDOWS
     {
-        const char *application_name = 0;
+        const u16 *application_name = 0;
 
-        u64 chars = 0, arg_count = 0;
-        for (const char **a = arguments; *a != 0; a += 1, arg_count += 1) chars += cstring_length(*a);
-        u64 spaces = arg_count - 1;
-        chars += spaces;
-        chars += 1; // null terminator
+        u64 capacity = 0;
+        for (const char **a = arguments; *a != 0; a += 1) {
+            u64 escaped_length_at_most = 2 * cstring_length(*a);
+            u64 enclosing_quote_count = 2;
+            u64 separator_count = 1;
+            capacity += escaped_length_at_most + enclosing_quote_count + separator_count;
+        }
 
-        char *command_line = arena_make(scratch.arena, chars, char);
+        char *command_line = arena_make(scratch.arena, capacity, char);
         u64 command_length = 0;
 
         for (const char **a = arguments; *a != 0; a += 1) {
+            const char *argument = *a;
             if (a > arguments) command_line[command_length++] = ' ';
-            command_length += cstring_copy(command_line + command_length, *a);
+
+            bool needs_quotes = argument[0] == 0;
+            for (const char *c = argument; *c != 0; c += 1) needs_quotes |= *c == ' ' || *c == '\t' || *c == '\n' || *c == '\v' || *c == '"';
+
+            if (!needs_quotes) command_length += cstring_copy(command_line + command_length, argument);
+            else {
+                command_line[command_length++] = '"';
+                const char *c = argument;
+                bool at_end = false;
+                while (!at_end) {
+                    u64 backslash_count = 0;
+                    while (*c == '\\') {
+                        backslash_count += 1;
+                        c += 1;
+                    }
+
+                    at_end = *c == 0;
+                    bool quote_follows = *c == '"';
+                    u64 written_backslashes = (at_end || quote_follows) ? 2 * backslash_count + quote_follows : backslash_count;
+                    for (u64 i = 0; i < written_backslashes; i += 1) command_line[command_length++] = '\\';
+
+                    if (!at_end) {
+                        command_line[command_length++] = *c;
+                        c += 1;
+                    }
+                }
+                command_line[command_length++] = '"';
+            }
         }
+
+        u16 *command_line_utf16 = os_windows_utf16_from_utf8(scratch.arena, command_line, command_length);
+        u16 *directory_utf16 = directory == 0 ? 0 : os_windows_utf16_from_utf8(scratch.arena, directory, cstring_length(directory));
 
         struct _SECURITY_ATTRIBUTES *process_attributes = 0;
         struct _SECURITY_ATTRIBUTES *thread_attributes = 0;
         int inherit_handles = false;
         u32 creation_flags = 0;
         void *environment = 0;
-        STARTUPINFOA startup_info = {0};
+        STARTUPINFOW startup_info = { .cb = sizeof startup_info };
         PROCESS_INFORMATION process_info = {0};
 
-        int ok = CreateProcessA(
+        int ok = CreateProcessW(
             application_name,
-            command_line,
+            command_line_utf16,
             process_attributes,
             thread_attributes,
             inherit_handles,
             creation_flags,
             environment,
-            directory,
+            directory_utf16,
             &startup_info,
             &process_info
         );
 
         if (!ok) {
-            log_error("unable to start process '%s'; CreateProcessA() returned %u", arguments[0], GetLastError());
+            log_error("unable to start process '%s'; CreateProcessW() failed with error %u", arguments[0], RtlGetLastWin32Error());
         } else {
-            unsigned long infinite = (unsigned long)-1;
-            WaitForSingleObject(process_info.hProcess, infinite);
+            int wait_status = NtWaitForSingleObject(process_info.hProcess, false, 0);
 
-            unsigned long code = 1;
-            GetExitCodeProcess(process_info.hProcess, &code);
-            exit_code = (u32)code;
+            PROCESS_BASIC_INFORMATION information = {0};
+            enum { ProcessBasicInformation = 0 };
+            int query_status = wait_status >= 0 ? NtQueryInformationProcess(process_info.hProcess, ProcessBasicInformation, &information, sizeof information, 0) : wait_status;
+            if (query_status >= 0) exit_code = (u32)information.ExitStatus;
+            else log_error("unable to get the exit code of '%s' (status 0x%x)", arguments[0], (u32)query_status);
 
-            CloseHandle(process_info.hProcess);
-            CloseHandle(process_info.hThread);
+            NtClose(process_info.hProcess);
+            NtClose(process_info.hThread);
         }
     }
     #elif BASE_OS & BASE_OS_ANY_POSIX
@@ -2526,30 +2623,57 @@ static void os_write_console(const char *bytes, u64 count) {
         }
         #else
         {
+            void *output_handle = RtlGetCurrentPeb()->ProcessParameters->StandardOutput;
+            void *invalid_handle_value = (void *)(long long)-1;
+            if (output_handle == 0 || output_handle == invalid_handle_value) { breakpoint; os_abort(); }
+
+            IO_STATUS_BLOCK device_status_block = {0};
+            FILE_FS_DEVICE_INFORMATION device = {0};
+            enum { FileFsDeviceInformation = 4, FILE_DEVICE_CONSOLE = 0x50 };
+            int device_status = NtQueryVolumeInformationFile(output_handle, &device_status_block, &device, sizeof device, FileFsDeviceInformation);
+            bool is_console = device_status >= 0 && device.DeviceType == FILE_DEVICE_CONSOLE;
+
             if (count > UINT32_MAX) { breakpoint; os_abort(); }
 
-            // https://learn.microsoft.com/en-us/windows/console/getstdhandle
-            unsigned long std_output_handle = (unsigned long)-11;
-            // unsigned long std_input_handle = (unsigned long)-10;
-            // unsigned long std_error_handle = (unsigned long)-12;
+            if (is_console) {
+                // TODO(felix): Make this arena thread-safe once base supports multiple threads.
+                static Arena console_arena = {0};
+                Scratch scratch = scratch_begin(&console_arena);
+                {
+                    u64 unit_count = utf16_from_utf8(0, 0, bytes, count).destination_units_written;
+                    u16 *units = arena_make(scratch.arena, size_t_from_u64(unit_count), u16);
+                    utf16_from_utf8(units, unit_count, bytes, count);
 
-            void *console_handle = GetStdHandle(std_output_handle);
+                    unsigned long console_units_written = 0;
+                    int ok = WriteConsoleW(output_handle, units, (unsigned)unit_count, &console_units_written, 0);
+                    if (!ok || console_units_written != unit_count) { breakpoint; os_abort(); }
+                }
+                scratch_end(scratch);
+            } else {
+                IO_STATUS_BLOCK status_block = {0};
+                int status = NtWriteFile(output_handle, 0, 0, 0, &status_block, bytes, (unsigned)count, 0, 0);
 
-            void *invalid_handle_value = (void *)(long long)-1;
-            if (console_handle == invalid_handle_value) { breakpoint; os_abort(); }
-
-            unsigned long num_chars_written = 0;
-            int ok = WriteFile(console_handle, bytes, (u32)count, &num_chars_written, 0);
-            if (!ok) { breakpoint; os_abort(); }
-            if ((u64)num_chars_written != count) { breakpoint; os_abort(); }
+                enum { STATUS_PENDING = 0x103 };
+                if (status == STATUS_PENDING) {
+                    status = NtWaitForSingleObject(output_handle, false, 0);
+                    if (status >= 0) status = status_block.Status;
+                }
+                if (status < 0 || status_block.Information != count) { breakpoint; os_abort(); }
+            }
         }
         #endif
     }
     #elif BASE_OS & BASE_OS_ANY_POSIX
     {
         int stdout_handle = 1;
-        i64 bytes_written = write(stdout_handle, bytes, count);
-        (void)bytes_written;
+        for (u64 total_written = 0; total_written < count;) {
+            i64 bytes_written = write(stdout_handle, bytes + total_written, count - total_written);
+
+            enum { os_write_console__EINTR = 4 };
+            bool interrupted = bytes_written < 0 && errno == os_write_console__EINTR;
+            if (bytes_written <= 0 && !interrupted) { breakpoint; os_abort(); }
+            if (bytes_written > 0) total_written += (u64)bytes_written;
+        }
     }
     #elif BASE_OS == BASE_OS_WASM
     {
@@ -2574,12 +2698,12 @@ static void print_(const char *format, va_list arguments) {
     Scratch scratch = scratch_begin(&print_arena);
 
     String_Builder output = {0};
-    reserve(scratch.arena, &output, cstring_length(format));
+    string_builder_reserve_unused(scratch.arena, &output, cstring_length(format));
     string_builder_print_(scratch.arena, &output, format, arguments);
     string_builder_null_terminate(scratch.arena, &output);
 
     #if (BASE_OS == BASE_OS_WINDOWS) && BUILD_DEBUG
-        OutputDebugStringA(output.data);
+        OutputDebugStringW(os_windows_utf16_from_utf8(scratch.arena, (const char *)output.data, output.count));
     #endif
 
     os_write_console(output.data, output.count);
@@ -2599,8 +2723,8 @@ static const char *base_clex_define(void *user_data, const char *symbol, const c
     bool should_get = definition == 0;
 
     const char *symbol_end = clex_identifier_end(symbol);
-    u64 hash = ds_hash_fnv1a(symbol, (size_t)(symbol_end - symbol));
-    u32 index = (u32)hash;
+    u32 hash = ds_hash_fnv1a(symbol, (size_t)(symbol_end - symbol));
+    u32 index = hash;
     const char *name = 0;
     if (should_get) {
         do {
@@ -2797,10 +2921,39 @@ static const char *build_binary_extension[BASE_OS_COUNT] = {
     [BASE_OS_WASM]          = "wasm",
 };
 
-typedef Array(const char *) Array_cstring;
-static void build_push_arguments(Arena *arena, Array_cstring *strings, const char **arguments) {
-    if (arguments == 0) return;
-    for (const char **a = arguments; *a != 0; a += 1) push(arena, strings, *a);
+#define BUILD_ARGUMENTS_MAX 256
+typedef struct {
+    const char *items[BUILD_ARGUMENTS_MAX];
+    u32 count;
+} Build_Arguments;
+
+static void build_push_argument(Build_Arguments *arguments, const char *argument) {
+    assert(arguments->count + 1 < BUILD_ARGUMENTS_MAX);
+    arguments->items[arguments->count] = argument;
+    arguments->count += 1;
+}
+
+static void build_push_arguments(Build_Arguments *arguments, const char **list) {
+    if (list == 0) return;
+    for (const char **a = list; *a != 0; a += 1) build_push_argument(arguments, *a);
+}
+
+typedef struct {
+    const char *code_path, *object_path;
+    const char **extra_flags;
+    bool no_extra_errors;
+} Build_Object;
+
+#define BUILD_OBJECTS_MAX 64
+typedef struct {
+    Build_Object items[BUILD_OBJECTS_MAX];
+    u32 count;
+} Build_Objects;
+
+static void build_objects_push(Build_Objects *objects, Build_Object object) {
+    assert(objects->count < BUILD_OBJECTS_MAX);
+    objects->items[objects->count] = object;
+    objects->count += 1;
 }
 
 static bool build_expect_include(Arena *arena, clex_Lexer *lexer, String *file) {
@@ -3005,16 +3158,11 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
     };
     Build_Compiler compiler = build_default_compiler[target_os];
 
-    typedef struct {
-        const char *code_path, *object_path;
-        const char **extra_flags;
-        bool no_extra_errors;
-    } Build_Object;
-    Array(Build_Object) objects = {0};
+    Build_Objects objects = {0};
 
-    Array(const char *) compiler_extra_flags = {0};
-    Array(const char *) linker_extra_flags = {0};
-    Array(const char *) link_libraries = {0};
+    Build_Arguments compiler_extra_flags = {0};
+    Build_Arguments linker_extra_flags = {0};
+    Build_Arguments link_libraries = {0};
 
     const char *object_extension = build_object_extension[target_os];
 
@@ -3327,11 +3475,11 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 const char *length_name = array_length_name.data;
                 u32 length_name_length = (u32)array_length_name.count;
 
-                u64 byte_count;
+                u64 byte_count = 0;
                 u8 *to_write = object_bundle(array_name, array_name_length, length_name, length_name_length, 0, (u32)input.count, 0, &byte_count, flags);
                 assert(to_write == 0 && byte_count > 0);
 
-                u8 *bytes = arena_make(scratch.arena, byte_count, u8);
+                u8 *bytes = arena_make(scratch.arena, size_t_from_u64(byte_count), u8);
                 to_write = object_bundle(array_name, array_name_length, length_name, length_name_length, 0, (u32)input.count, bytes, &byte_count, flags);
                 if (to_write == 0) {
                     log_error("failure generating object file to embed '%S'", input_file);
@@ -3351,8 +3499,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     continue;
                 }
 
-                Build_Object object = { .object_path = output_name };
-                push(scratch.arena, &objects, object);
+                build_objects_push(&objects, (Build_Object){ .object_path = output_name });
             } else {
                 input = os_read_entire_file(scratch.arena, input_path, &ok);
                 if (!ok) {
@@ -3380,17 +3527,17 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 u64 max_digits = sizeof(u64) * 8;
                 bytes_total += length_qualifiers.count + array_length_name.count + length_assignment.count + max_digits + length_closing.count;
 
-                reserve_unused(scratch.arena, &metaprogram_code, bytes_total);
-                push_slice_assume_capacity(&metaprogram_code, qualifiers);
-                push_slice_assume_capacity(&metaprogram_code, variable_name);
-                push_slice_assume_capacity(&metaprogram_code, assignment);
+                string_builder_reserve_unused(scratch.arena, &metaprogram_code, bytes_total);
+                string_builder_push(&metaprogram_code, qualifiers);
+                string_builder_push(&metaprogram_code, variable_name);
+                string_builder_push(&metaprogram_code, assignment);
 
                 u64 column_mask = chars_per_row - 1;
                 const char *chars = "0123456789abcdef";
                 char byte_string[] = "0x!!,";
                 for (u64 i = 0; i < input.count; i += 1) {
                     u64 column = i & column_mask;
-                    if (column == 0) push_slice_assume_capacity(&metaprogram_code, indent);
+                    if (column == 0) string_builder_push(&metaprogram_code, indent);
 
                     u8 byte = (u8)input.data[i];
 
@@ -3398,15 +3545,15 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     // string_builder_print(&metaprogram_code, "0x%c%c,", chars[byte >> 4], chars[byte & 0x0f]);
                     byte_string[2] = chars[byte >> 4];
                     byte_string[3] = chars[byte & 0x0f];
-                    push_many_assume_capacity(&metaprogram_code, byte_string, sizeof byte_string - 1);
+                    string_builder_push(&metaprogram_code, (String){ .data = byte_string, .count = sizeof byte_string - 1 });
                 }
-                push_slice_assume_capacity(&metaprogram_code, closing);
+                string_builder_push(&metaprogram_code, closing);
 
-                push_slice_assume_capacity(&metaprogram_code, length_qualifiers);
-                push_slice_assume_capacity(&metaprogram_code, array_length_name);
-                push_slice_assume_capacity(&metaprogram_code, length_assignment);
+                string_builder_push(&metaprogram_code, length_qualifiers);
+                string_builder_push(&metaprogram_code, array_length_name);
+                string_builder_push(&metaprogram_code, length_assignment);
                 string_builder_print(scratch.arena, &metaprogram_code, "%llu", input.count);
-                push_slice_assume_capacity(&metaprogram_code, length_closing);
+                string_builder_push(&metaprogram_code, length_closing);
             }
         } else if (string_equals(token_data, S("link_libc"))) {
             static bool specified_already = false;
@@ -3461,9 +3608,10 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             if (target_os & BASE_OS_ANY_APPLE) {
                 if (string_equals(library, S("Kernel32"))) link_this = false;
                 else if (string_equals(library, S("Shell32"))) link_this = false;
+                else if (string_equals(library, S("Ntdll"))) link_this = false;
             }
 
-            if (link_this) push(scratch.arena, &link_libraries, cstring_from_string(scratch.arena, library));
+            if (link_this) build_push_argument(&link_libraries, cstring_from_string(scratch.arena, library));
         } else if (string_equals(token_data, S("compile_flag"))) {
             if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_flag \"...\")`")) {
                 parse_ok = false;
@@ -3476,7 +3624,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 continue;
             }
 
-            push(scratch.arena, &compiler_extra_flags, cstring_from_string(scratch.arena, flag));
+            build_push_argument(&compiler_extra_flags, cstring_from_string(scratch.arena, flag));
         } else if (string_equals(token_data, S("link_flag"))) {
             if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link_flag \"...\")`")) {
                 parse_ok = false;
@@ -3489,7 +3637,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 continue;
             }
 
-            push(scratch.arena, &linker_extra_flags, cstring_from_string(scratch.arena, flag));
+            build_push_argument(&linker_extra_flags, cstring_from_string(scratch.arena, flag));
         } else if (string_equals(token_data, S("compile_and_link_flag"))) {
             if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_and_link_flag \"...\")`")) {
                 parse_ok = false;
@@ -3503,8 +3651,8 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             }
 
             const char *as_cstring = cstring_from_string(scratch.arena, flag);
-            push(scratch.arena, &linker_extra_flags, as_cstring);
-            push(scratch.arena, &compiler_extra_flags, as_cstring);
+            build_push_argument(&linker_extra_flags, as_cstring);
+            build_push_argument(&compiler_extra_flags, as_cstring);
         } else {
             log_error("unsupported metaprogram directive '%S'", token_data);
             parse_ok = false;
@@ -3540,8 +3688,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         }
     }
 
-    Build_Object main_object = { .code_path = c_file_path };
-    push(scratch.arena, &objects, main_object);
+    build_objects_push(&objects, (Build_Object){ .code_path = c_file_path });
 
     bool link_crt = false;
     if (meta_link_crt_override) {
@@ -3581,7 +3728,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
     bool compile_ok = metaprogram_output_ok;
     for (u64 i = 0; compile_ok && i < objects.count; i += 1) {
-        Build_Object *object = &objects.data[i];
+        Build_Object *object = &objects.items[i];
 
         bool should_compile = object->code_path != 0;
 
@@ -3595,12 +3742,11 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 object->object_path = cstring_print(scratch.arena, "%S.%s", basename_no_path, object_extension);
             }
 
-            Array_cstring compile = {0};
+            Build_Arguments compile = {0};
 
-            build_push_arguments(scratch.arena, &compile, build_compiler_initial_command[compiler]);
+            build_push_arguments(&compile, build_compiler_initial_command[compiler]);
 
-            push(scratch.arena, &compiler_extra_flags, 0);
-            build_push_arguments(scratch.arena, &compile, compiler_extra_flags.data);
+            build_push_arguments(&compile, compiler_extra_flags.items);
 
             // TODO(felix): should be handled by reading META() annotations
             if (target_os == BASE_OS_WASM) {
@@ -3611,20 +3757,20 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     0,
                 };
 
-                build_push_arguments(scratch.arena, &compile, clang_wasm_flags);
+                build_push_arguments(&compile, clang_wasm_flags);
             }
 
-            build_push_arguments(scratch.arena, &compile, include_paths);
-            if (link_crt) push(scratch.arena, &compile, "-DLINK_CRT=1");
+            build_push_arguments(&compile, include_paths);
+            if (link_crt) build_push_argument(&compile, "-DLINK_CRT=1");
 
-            if (!object->no_extra_errors) build_push_arguments(scratch.arena, &compile, build_compiler_extra_errors[compiler]);
-            build_push_arguments(scratch.arena, &compile, build_compiler_disabled_errors[compiler]);
+            if (!object->no_extra_errors) build_push_arguments(&compile, build_compiler_extra_errors[compiler]);
+            build_push_arguments(&compile, build_compiler_disabled_errors[compiler]);
 
-            build_push_arguments(scratch.arena, &compile, build_compiler_mode_flags[build_mode][compiler]);
-            if (build_mode == Build_Mode_DEBUG) push(scratch.arena, &compile, "-DBUILD_DEBUG=1");
-            if (use_asan) push(scratch.arena, &compile, "-fsanitize=address");
+            build_push_arguments(&compile, build_compiler_mode_flags[build_mode][compiler]);
+            if (build_mode == Build_Mode_DEBUG) build_push_argument(&compile, "-DBUILD_DEBUG=1");
+            if (use_asan) build_push_argument(&compile, "-fsanitize=address");
 
-            build_push_arguments(scratch.arena, &compile, object->extra_flags);
+            build_push_arguments(&compile, object->extra_flags);
 
             bool delete_pdb_first_because_msvc_incremental_is_broken = (target_os == BASE_OS_WINDOWS && compiler == Build_Compiler_MSVC);
             if (delete_pdb_first_because_msvc_incremental_is_broken) {
@@ -3639,60 +3785,59 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 }
             }
 
-            push(scratch.arena, &compile, object->code_path);
+            build_push_argument(&compile, object->code_path);
 
             const char *output = cstring_print(scratch.arena, "%s%s", build_compiler_out[compiler], object->object_path);
-            push(scratch.arena, &compile, output);
+            build_push_argument(&compile, output);
 
-            push(scratch.arena, &compile, 0);
-            exit_code = os_process_run(scratch.arena, compile.data, build_folder, process_flags);
+            exit_code = os_process_run(scratch.arena, compile.items, build_folder, process_flags);
             compile_ok = exit_code == 0;
         }
     }
 
     bool link_attempted = false;
     if (compile_ok) {
-        Array_cstring link = {0};
+        Build_Arguments link = {0};
 
-        build_push_arguments(scratch.arena, &link, build_linker_initial_command[linker][target_os]);
+        build_push_arguments(&link, build_linker_initial_command[linker][target_os]);
 
         if (target_os == BASE_OS_WINDOWS) {
             if (build_mode == Build_Mode_DEBUG) {
                 if (linker == Build_Linker_MSVC) {
-                    push(scratch.arena, &link, "-debug");
-                    push(scratch.arena, &link, "-subsystem:console");
-                    if (link_crt) push(scratch.arena, &link, "libucrtd.lib");
+                    build_push_argument(&link, "-debug");
+                    build_push_argument(&link, "-subsystem:console");
+                    if (link_crt) build_push_argument(&link, "libucrtd.lib");
                 } else {
-                    push(scratch.arena, &link, "-g");
+                    build_push_argument(&link, "-g");
                 }
             } else {
                 if (linker == Build_Linker_MSVC) {
-                    push(scratch.arena, &link, "-opt:ref");
-                    push(scratch.arena, &link, "-opt:icf");
-                    push(scratch.arena, &link, "-subsystem:console");
+                    build_push_argument(&link, "-opt:ref");
+                    build_push_argument(&link, "-opt:icf");
+                    build_push_argument(&link, "-subsystem:console");
                     // TODO(felix): subsystem:windows and entry:main don't work currently (silent crash). I'm pretty sure this has to do with the entrypoint being set incorrectly. I'm also not sure about the WINDOWS_SUBSYSTEM_[...] #defines in base_context.h
-                    // push(&link, "-subsystem:windows");
+                    // build_push_argument(&link, "-subsystem:windows");
                     if (link_crt) {
-                        // push(&link, "-entry:main");
-                        push(scratch.arena, &link, "libucrt.lib");
+                        // build_push_argument(&link, "-entry:main");
+                        build_push_argument(&link, "libucrt.lib");
                     }
                 }
             }
 
             // TODO(felix): handle in metaprogram
             if (!link_crt) switch (compiler) {
-                case Build_Compiler_MSVC: push(scratch.arena, &link, "-entry:entrypoint"); break;
+                case Build_Compiler_MSVC: build_push_argument(&link, "-entry:entrypoint"); break;
                 case Build_Compiler_CLANG: {
-                    push(scratch.arena, &link, "-Wl,-entry:entrypoint");
-                    push(scratch.arena, &link, "-Wl,-subsystem:windows");
+                    build_push_argument(&link, "-Wl,-entry:entrypoint");
+                    build_push_argument(&link, "-Wl,-subsystem:windows");
                 } break;
                 default: unreachable;
             }
         }
 
-        if (linker == Build_Linker_CLANG && use_asan) push(scratch.arena, &link, "-fsanitize=address");
+        if (linker == Build_Linker_CLANG && use_asan) build_push_argument(&link, "-fsanitize=address");
 
-        for (u64 i = 0; i < objects.count; i += 1) push(scratch.arena, &link, objects.data[i].object_path);
+        for (u64 i = 0; i < objects.count; i += 1) build_push_argument(&link, objects.items[i].object_path);
 
         const char *link_prefix = "";
         const char *link_suffix = "";
@@ -3702,13 +3847,12 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             default: unreachable;
         }
         for (u64 i = 0; i < link_libraries.count; i += 1) {
-            const char *library = link_libraries.data[i];
+            const char *library = link_libraries.items[i];
             const char *to_push = cstring_print(scratch.arena, "%s%s%s", link_prefix, library, link_suffix);
-            push(scratch.arena, &link, to_push);
+            build_push_argument(&link, to_push);
         }
 
-        push(scratch.arena, &linker_extra_flags, 0);
-        build_push_arguments(scratch.arena, &link, linker_extra_flags.data);
+        build_push_arguments(&link, linker_extra_flags.items);
 
         const char *syntax = target_os == BASE_OS_WINDOWS && (linker == Build_Linker_MSVC) ? "-out:" : "-o";
         const char *extension = build_binary_extension[target_os];
@@ -3725,11 +3869,10 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             output = cstring_print(scratch.arena, "%s%s.app%c%s", syntax, output_name, path_separator, output_name);
         }
         else output = cstring_print(scratch.arena, "%s%s.%s", syntax, output_name, extension);
-        push(scratch.arena, &link, output);
+        build_push_argument(&link, output);
 
-        push(scratch.arena, &link, 0);
         if (app_folder_ok) {
-            exit_code = os_process_run(scratch.arena, link.data, build_folder, process_flags);
+            exit_code = os_process_run(scratch.arena, link.items, build_folder, process_flags);
             link_attempted = true;
         } else exit_code = 1;
 
@@ -3817,7 +3960,7 @@ static void app_frame_info_reset_end_of_frame(App_Frame_Info *frame) {
 }
 
 static void draw(Platform *platform, Draw_Command command) {
-    push(platform->frame_arena, &platform->draw_commands, command);
+    draw_many(platform, &command, 1);
 }
 
 static V2 draw_command_bounds(Draw_Command command) {
@@ -3835,7 +3978,10 @@ static V2 draw_command_bounds(Draw_Command command) {
 }
 
 static void draw_many(Platform *platform, Draw_Command *commands, u64 count) {
-    push_many(platform->frame_arena, &platform->draw_commands, commands, count);
+    u64 new_count = platform->draw_command_count + count;
+    platform->draw_commands = arena_array_reserve(platform->frame_arena, platform->draw_commands, platform->draw_command_count, &platform->draw_command_capacity, new_count);
+    memcpy(&platform->draw_commands[platform->draw_command_count], commands, size_t_from_u64(count) * sizeof *commands);
+    platform->draw_command_count = new_count;
 }
 
 #define UI_ASSERT assert

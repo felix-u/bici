@@ -156,7 +156,7 @@ void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_
 
     cpu_draw_Surface *surface = &platform__.surface;
     if (surface->pixels == 0) {
-        u32 *pixels = arena_make(platform__.base.persistent_arena, (u64)(max_virtual_width * max_virtual_height), u32);
+        u32 *pixels = arena_make(platform__.base.persistent_arena, size_t_from_u64((u64)(max_virtual_width * max_virtual_height)), u32);
         *surface = cpu_draw_surface(pixels, max_virtual_width, (int)roundf(window_width), (int)roundf(window_height));
     }
 
@@ -175,12 +175,14 @@ void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_
         v(frame->mouse_position)[i] = real_mouse_position[i] * (v(frame->window_size)[i] / real_window_size[i]);
     }
 
-    platform__.base.draw_commands = (Array_Draw_Command){0};
+    platform__.base.draw_commands = 0;
+    platform__.base.draw_command_count = 0;
+    platform__.base.draw_command_capacity = 0;
     app_update_and_render(&platform__.base);
 
     u32 clear = abgr_from_rgba(platform__.base.clear_color);
     cpu_draw_rectangle(*surface, 0, 0, surface->clip_right, surface->clip_bottom, clear);
-    cpu_draw_commands(*surface, &platform__.font, platform__.base.draw_commands.data, platform__.base.draw_commands.count);
+    cpu_draw_commands(*surface, &platform__.font, platform__.base.draw_commands, platform__.base.draw_command_count);
 
     app_frame_info_reset_end_of_frame(frame);
     scratch_end(scratch);

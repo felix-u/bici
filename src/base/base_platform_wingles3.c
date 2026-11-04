@@ -178,7 +178,7 @@ static void program(void) {
     WGLSWAPINTERVALEXTPROC *wglSwapIntervalEXT = 0;
 
     {
-        void *dummy = CreateWindowExA(0, "STATIC", "dummy", WS_OVERLAPPED, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0, 0);
+        void *dummy = CreateWindowExW(0, u"STATIC", u"dummy", WS_OVERLAPPED, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0, 0);
         ensure(dummy != 0);
 
         void *device_context = GetDC(dummy);
@@ -457,7 +457,9 @@ static void program(void) {
     }
 
     for (Scratch frame_scratch = scratch_begin(platform.base.frame_arena); !platform.base.should_quit; scratch_end(frame_scratch)) {
-        platform.base.draw_commands = (Array_Draw_Command){0};
+        platform.base.draw_commands = 0;
+        platform.base.draw_command_count = 0;
+        platform.base.draw_command_capacity = 0;
 
         win32_process_messages(&platform.base.should_quit);
         if (platform.base.should_quit) break;
@@ -486,8 +488,8 @@ static void program(void) {
             glUniform2f(window_size_uniform, frame->window_size.x, frame->window_size.y);
 
             u64 quad_count = 0;
-            for (u64 i = 0; i < platform.base.draw_commands.count; i += 1) {
-                Draw_Command *c = &platform.base.draw_commands.data[i];
+            for (u64 i = 0; i < platform.base.draw_command_count; i += 1) {
+                Draw_Command *c = &platform.base.draw_commands[i];
 
                 bool has_clip = !!memcmp(&c->clip, &(V4){0}, sizeof c->clip);
                 if (has_clip) {

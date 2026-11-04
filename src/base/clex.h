@@ -28,6 +28,7 @@ typedef enum {
     clex_Token_INTEGER,
     clex_Token_FLOAT,
     clex_Token_STRING,
+    clex_Token_CHARACTER,
 
     clex_Token__ASCII_BEGIN = ' ' - 1,
     clex_Token_NOT                  = '!',
@@ -86,6 +87,9 @@ typedef enum {
     clex_Token_RIGHT_SHIFT_ASSIGN = '>' + clex_Token__ASSIGNMENT_DOUBLE_OPERATOR,
     clex_Token__ASSIGNMENT_DOUBLE_OPERATOR_END,
 
+    clex_Token_ARROW,
+    clex_Token_ELLIPSIS,
+
     clex_Token_END_OK,
 } clex_Token_Kind;
 
@@ -101,6 +105,11 @@ enum {
     clex_Token_Flag_BASE_8  = 1 << 6,
     clex_Token_Flag_BASE_10 = 1 << 7,
     clex_Token_Flag_BASE_16 = 1 << 8,
+
+    clex_Token_Flag_PREFIX_UTF8  = 1 <<  9,
+    clex_Token_Flag_PREFIX_UTF16 = 1 << 10,
+    clex_Token_Flag_PREFIX_UTF32 = 1 << 11,
+    clex_Token_Flag_PREFIX_WIDE  = 1 << 12,
 };
 
 typedef struct {
@@ -167,7 +176,7 @@ CLEX_FUNCTION int clex_get_current_location(const clex_Lexer *l, int *column, co
     for (const char *c = cursor.start; c < cursor.c; c += 1) {
         if (*c == '\n') {
             line += 1;
-            *column = 0;
+            *column = 1;
         } else *column += 1;
     }
 
@@ -234,13 +243,6 @@ static void clex__skip_to_newline(clex_Cursor *c) {
     while (*c->c != 0 && !clex__is_newline(c->c)) c->c += 1;
 }
 
-static void clex__skip_whitespace_except_newline(clex_Cursor *c) {
-    for (;; c->c += 1) {
-        char ch = *c->c;
-        if (ch != '\t' && ch != '\r' && ch != ' ') break;
-    }
-}
-
 static void clex__skip_whitespace(clex_Cursor *c) {
     for (;; c->c += 1) {
         char ch = *c->c;
@@ -253,7 +255,8 @@ static _Bool clex__string_equals(const char *start, const char *end, const char 
         unsigned long long i = (unsigned long long)(c - start);
         if (*c != compare[i]) return 0;
     }
-    return 1;
+    _Bool compare_has_same_length = compare[end - start] == 0;
+    return compare_has_same_length;
 }
 
 static _Bool clex__skip_escape_sequence(clex_Cursor *c) {
@@ -265,16 +268,20 @@ static _Bool clex__skip_escape_sequence(clex_Cursor *c) {
             ok = 1;
             c->c += 1;
         } break;
-        case '0': {
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
             ok = 1;
-            c->c += 1;
-
-            if ('0' <= *c->c && *c->c <= '7') {
-                c->c += 1;
-                if ('0' <= *c->c && *c->c <= '7') c->c += 1;
-            }
+            enum { OCTAL_DIGIT_COUNT_MAX = 3 };
+            for (int i = 0; i < OCTAL_DIGIT_COUNT_MAX && '0' <= *c->c && *c->c <= '7'; i += 1) c->c += 1;
         } break;
-        case 'x': CLEX_ASSERT(0 && "TODO(felix): hex digit escape sequence");
+        case 'x': {
+            c->c += 1;
+            const char *digits = c->c;
+            for (_Bool is_hex_digit = 1; is_hex_digit; c->c += is_hex_digit) {
+                char lowercase = *c->c | 0x20;
+                is_hex_digit = clex__is_digit(*c->c) || ('a' <= lowercase && lowercase <= 'f');
+            }
+            ok = c->c > digits;
+        } break;
         default: break;
     }
 
@@ -301,6 +308,20 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             return 0;
         }
     }
+
+    const char *quote_after_prefix = c->c + 1 + (c->c[0] == 'u' && c->c[1] == '8');
+    _Bool is_quote_after_prefix = *quote_after_prefix == '"' || *quote_after_prefix == '\'';
+    _Bool utf8_prefix = is_quote_after_prefix && c->c[0] == 'u' && c->c[1] == '8';
+    _Bool utf16_prefix = is_quote_after_prefix && c->c[0] == 'u' && !utf8_prefix;
+    _Bool utf32_prefix = is_quote_after_prefix && c->c[0] == 'U';
+    _Bool wide_prefix = is_quote_after_prefix && c->c[0] == 'L';
+
+    clex_Token_Flags prefix_flags = 0;
+    prefix_flags |= utf8_prefix  * clex_Token_Flag_PREFIX_UTF8;
+    prefix_flags |= utf16_prefix * clex_Token_Flag_PREFIX_UTF16;
+    prefix_flags |= utf32_prefix * clex_Token_Flag_PREFIX_UTF32;
+    prefix_flags |= wide_prefix  * clex_Token_Flag_PREFIX_WIDE;
+    c->c += 2 * utf8_prefix + (utf16_prefix || utf32_prefix || wide_prefix);
 
     switch (*c->c) {
         case '#': {
@@ -371,14 +392,28 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                 l->token.kind = clex_Token_PRAGMA;
             } else if (clex__string_equals(directive, directive_end, "undef")) {
                 l->token.kind = clex_Token_UNDEF;
-            } else CLEX_ASSERT(0 && "TODO(felix)");
+            } else goto error;
 
             return 1;
         } break;
-        case '(': case ')': case ',': case '.': case ':': case ';': case'[': case ']': case '{': case '}': case '?': {
+        case '(': case ')': case ',': case ':': case ';': case'[': case ']': case '{': case '}': case '?': {
             l->token = (clex_Token){
                 .kind = (clex_Token_Kind)(*c->c),
                 .data = { .start = c->c, .end = ++c->c },
+            };
+            return 1;
+        } break;
+        case '.': {
+            _Bool starts_fraction = clex__is_digit(c->c[1]);
+            if (starts_fraction) break;
+
+            _Bool is_ellipsis = c->c[1] == '.' && c->c[2] == '.';
+            const char *dot = c->c;
+            c->c += 1 + 2 * is_ellipsis;
+
+            l->token = (clex_Token){
+                .kind = is_ellipsis ? clex_Token_ELLIPSIS : clex_Token_DOT,
+                .data = { .start = dot, .end = c->c },
             };
             return 1;
         } break;
@@ -415,6 +450,16 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
 
             const char *operator = c->c;
 
+            _Bool is_arrow = *c->c == '-' && c->c[1] == '>';
+            if (is_arrow) {
+                c->c += 2;
+                l->token = (clex_Token){
+                    .kind = clex_Token_ARROW,
+                    .data = { .start = operator, .end = c->c },
+                };
+                return 1;
+            }
+
             _Bool doubled = c->c[1] == *c->c;
             if (doubled) switch (*operator) {
                 case '+': case '-': case '<': case '>': case '=': case '&': case '|': break;
@@ -446,8 +491,6 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             return 1;
         } break;
         case '\'': {
-            // TODO(felix): handle encoding prefix somewhere, probably in the identifier parsing logic
-
             if (c->c[1] == 0 || c->c[2] == 0) goto error;
 
             c->c += 1;
@@ -460,17 +503,16 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             }
 
             if (*character_end != '\'') goto error;
-            c->c += 2; // after closing quote
+            c->c = character_end + 1;
 
             l->token = (clex_Token){
-                .kind = clex_Token_INTEGER,
+                .kind = clex_Token_CHARACTER,
                 .data = { .start = character, .end = character_end },
-                // TODO(felix): flag for character literal
+                .flags = prefix_flags,
             };
             return 1;
         } break;
         case '"': {
-            // TODO(felix): handle encoding prefix somewhere, probably in the identifier parsing logic
             c->c += 1;
             if (*c->c == 0) goto error;
 
@@ -492,7 +534,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             l->token = (clex_Token){
                 .kind = clex_Token_STRING,
                 .data = { .start = string, .end = string_end },
-                // TODO(felix): prefix
+                .flags = prefix_flags,
             };
             return 1;
         } break;
@@ -579,7 +621,8 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
     //      character-constant:
     //          encoding-prefix[opt] ' c-char-sequence '
 
-    if (clex__is_digit(*c->c)) {
+    _Bool starts_number = clex__is_digit(*c->c) || (*c->c == '.' && clex__is_digit(c->c[1]));
+    if (starts_number) {
         const char *number = c->c;
 
         unsigned base = 10;
@@ -603,13 +646,28 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             value += !(is_decimal_digit || is_hex_letter) * base;
         }
 
-        _Bool is_prefix_without_digits = c->c == digits && base != 8;
+        // NOTE(felix): 0 is a complete octal constant, and a decimal like .5 can have no digits before the decimal point.
+        _Bool is_prefix_without_digits = c->c == digits && (base == 2 || base == 16);
         _Bool is_digit_invalid_for_base = clex__is_digit(*c->c);
         if (is_prefix_without_digits || is_digit_invalid_for_base) goto error;
 
-        _Bool floating = base == 10 && *c->c == '.';
-        c->c += floating;
-        if (floating) while (clex__is_digit(*c->c)) c->c += 1;
+        _Bool has_fraction = base == 10 && *c->c == '.';
+        if (has_fraction) {
+            c->c += 1;
+            while (clex__is_digit(*c->c)) c->c += 1;
+        }
+
+        _Bool has_exponent = base == 10 && (*c->c | 0x20) == 'e';
+        if (has_exponent) {
+            const char *exponent_digits = c->c + 1;
+            exponent_digits += *exponent_digits == '+' || *exponent_digits == '-';
+            if (!clex__is_digit(*exponent_digits)) goto error;
+
+            c->c = exponent_digits;
+            while (clex__is_digit(*c->c)) c->c += 1;
+        }
+
+        _Bool floating = has_fraction || has_exponent;
         const char *number_end = c->c;
 
         for (;;) {
@@ -651,8 +709,6 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
         };
         return 1;
     }
-
-    CLEX_ASSERT(0 && "TODO(felix)");
 
     error:
     l->token = (clex_Token){0};

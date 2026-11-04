@@ -249,7 +249,7 @@ static void platform__draw_text(Draw_Command *c, V2 *only_measure, id encoder) {
     Vertex base = { .mode = 1.f };
     memcpy(&base.fill_color, &fill, sizeof base.fill_color);
 
-    Vertex verts[6];
+    Vertex verts[6] = {0};
     f32 l = c->position.x, t = c->position.y;
     f32 w = (f32)bitmap_width, h = (f32)bitmap_height;
     #define V(idx, px, py, u, vv) do { \
@@ -523,8 +523,9 @@ static void platform__tick(id self, SEL command, id link) {
     (void)link;
 
     scratch_end(platform__.frame_scratch);
-    Array_Draw_Command *draw_commands = &platform__.base.draw_commands;
-    *draw_commands = (Array_Draw_Command){0};
+    platform__.base.draw_commands = 0;
+    platform__.base.draw_command_count = 0;
+    platform__.base.draw_command_capacity = 0;
 
     App_Frame_Info *frame = &platform__.base.frame;
 
@@ -550,8 +551,8 @@ static void platform__tick(id self, SEL command, id link) {
     {
         // TODO(felix): This whole thing feels hacky. Do we really need to count all the rectangles before-hand?
         u64 rectangle_count = 0;
-        for (u64 i = 0; i < draw_commands->count; i += 1) {
-            Draw_Command *c = &draw_commands->data[i];
+        for (u64 i = 0; i < platform__.base.draw_command_count; i += 1) {
+            Draw_Command *c = &platform__.base.draw_commands[i];
             rectangle_count += (u64)(c->kind == Draw_Kind_RECTANGLE);
         }
 
@@ -559,8 +560,8 @@ static void platform__tick(id self, SEL command, id link) {
         Vertex *rectangle_vertices = arena_make(platform__.base.frame_arena, rectangle_vertex_count, Vertex);
 
         u64 vertex_index = 0;
-        for (u64 i = 0; i < draw_commands->count; i += 1) {
-            Draw_Command *c = &draw_commands->data[i];
+        for (u64 i = 0; i < platform__.base.draw_command_count; i += 1) {
+            Draw_Command *c = &platform__.base.draw_commands[i];
             if (c->kind != Draw_Kind_RECTANGLE) continue;
 
             // TODO(felix): Support clipping.
@@ -621,7 +622,7 @@ static void platform__tick(id self, SEL command, id link) {
         ((void(*)(id, SEL, id))(void *)objc_msgSend)(color_attachment_0, sel_registerName("setTexture:"), drawable_tex);
         ((void(*)(id, SEL, unsigned long))(void *)objc_msgSend)(color_attachment_0, sel_registerName("setLoadAction:"), MTLLoadActionClear);
         ((void(*)(id, SEL, unsigned long))(void *)objc_msgSend)(color_attachment_0, sel_registerName("setStoreAction:"), MTLStoreActionStore);
-        CGFloat clear_rgba[4];
+        CGFloat clear_rgba[4] = {0};
         rgba_double_from_hex(platform__.base.clear_color, clear_rgba);
         MTLClearColor clear = { clear_rgba[0], clear_rgba[1], clear_rgba[2], clear_rgba[3] };
         ((void(*)(id, SEL, MTLClearColor))(void *)objc_msgSend)(color_attachment_0, sel_registerName("setClearColor:"), clear);
@@ -651,8 +652,8 @@ static void platform__tick(id self, SEL command, id link) {
 
         u64 batch_start = 0;
         u64 batch_count = 0;
-        for (u64 i = 0; i < draw_commands->count; i++) {
-            Draw_Command *c = &draw_commands->data[i];
+        for (u64 i = 0; i < platform__.base.draw_command_count; i++) {
+            Draw_Command *c = &platform__.base.draw_commands[i];
             switch (c->kind) {
                 case Draw_Kind_NIL: break;
                 case Draw_Kind_RECTANGLE: {

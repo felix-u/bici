@@ -566,22 +566,20 @@ typedef struct {
     u16 value;
     u8 base;
 } Token;
-typedef Array(Token) Array_Token;
 
 typedef struct {
     File_Id file_id;
     i32 index;
 } Token_Id;
 
+typedef u32 Label_Id;
+#define MAX_LABELS 1024
+
 typedef struct {
     Token_Id token_id;
     u16 address;
-    // TODO(felix)
-    int children;
-    // Map_Label children;
+    Label_Id parent_id;
 } Label;
-typedef u32 Label_Id;
-#define MAX_LABELS 1024
 
 typedef struct {
     Token_Id token_id;
@@ -590,14 +588,12 @@ typedef struct {
     bool is_patch;
     Label_Id parent_id;
 } Label_Reference;
-typedef Array(Label_Reference) Array_Label_Reference;
 
 typedef struct {
     u16 address;
     Token_Id token_id;
     bool is_relative;
 } Scoped_Reference;
-typedef Array(Scoped_Reference) Array_Scoped_Reference;
 
 typedef struct {
     bool is_active;
@@ -607,17 +603,34 @@ typedef struct {
 typedef struct {
     String name;
     String bytes;
-    Array_Token tokens;
+    Token *tokens;
+    u64 token_count, token_capacity;
 } Input_File;
+
+#define FILE_SLOT_EXPONENT 9
+#define LABEL_SLOT_EXPONENT 11
+_Static_assert((1 << FILE_SLOT_EXPONENT) >= 2 * MAX_FILES, "file slots must be at most half full");
+_Static_assert((1 << LABEL_SLOT_EXPONENT) >= 2 * MAX_LABELS, "label slots must be at most half full");
+
+#define OPCODE_SLOT_EXPONENT 8
+#define OPCODE_SLOT_MASK ((1u << OPCODE_SLOT_EXPONENT) - 1)
+_Static_assert((1 << OPCODE_SLOT_EXPONENT) >= VM_OPCODE_MAX_VALUE_PLUS_ONE, "every opcode needs its own slot");
+
+#define SCOPED_REFERENCES_MAX 256
 
 typedef struct {
     Input_File files[MAX_FILES];
     int files_count;
+    ds_Hash_Slot file_slots[1 << FILE_SLOT_EXPONENT];
     Label labels[MAX_LABELS];
     int labels_count;
+    ds_Hash_Slot label_slots[1 << LABEL_SLOT_EXPONENT];
+    Label_Id global_label_id;
     File_Id file_id;
-    Array_Label_Reference label_references;
-    Array_Scoped_Reference scoped_references;
+    Label_Reference *label_references;
+    u64 label_reference_count, label_reference_capacity;
+    Scoped_Reference scoped_references[SCOPED_REFERENCES_MAX];
+    u32 scoped_reference_count;
     Insertion_Mode insertion_mode;
 } Assembler_Context;
 
@@ -628,23 +641,18 @@ static Token_Id token_id_shift(Token_Id token_id, i32 shift) {
 }
 
 static Input_File *token_get_file(Assembler_Context *assembler, Token_Id token_id) {
-    File_Id file_id = token_id.file_id;
-    panic("TODO(felix)");
-    Input_File *file = 0;
-    (void)assembler;
-    (void)file_id;
-    // Input_File *file = &assembler->files.values.data[file_id];
+    Input_File *file = &assembler->files[token_id.file_id];
     return file;
 }
 
 static Token *token_get(Assembler_Context *assembler, Token_Id token_id) {
     Input_File file = *token_get_file(assembler, token_id);
     i32 index = token_id.index;
-    if (index < 0 || (u64)index >= file.tokens.count) {
+    if (index < 0 || (u64)index >= file.token_count) {
         static Token nil_token = {0};
         return &nil_token;
     }
-    Token *token = &file.tokens.data[index];
+    Token *token = &file.tokens[index];
     return token;
 }
 
@@ -656,6 +664,57 @@ static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
     return token_string;
 }
 
+static ds_Hash_Slot *assembler_get_file_slot(Assembler_Context *assembler, String name) {
+    u32 hash = ds_hash_fnv1a(name.data, name.count);
+    ds_Hash_Slot *slot = 0;
+    for (u32 probe_index = hash; slot == 0;) {
+        probe_index = ds_hash_step_index(hash, FILE_SLOT_EXPONENT, probe_index);
+        ds_Hash_Slot *candidate = &assembler->file_slots[probe_index];
+        bool is_empty = candidate->index == 0;
+        bool is_same_key = !is_empty && candidate->hash == hash && string_equals(assembler->files[candidate->index].name, name);
+        if (is_empty) candidate->hash = hash;
+        if (is_empty || is_same_key) slot = candidate;
+    }
+    return slot;
+}
+
+static ds_Hash_Slot *assembler_get_label_slot(Assembler_Context *assembler, Label_Id parent_id, String name) {
+    u32 parent_hash = ds_hash_fnv1a(&parent_id, sizeof parent_id);
+    u32 hash = ds_hash_fnv1a_update(parent_hash, name.data, name.count);
+    ds_Hash_Slot *slot = 0;
+    for (u32 probe_index = hash; slot == 0;) {
+        probe_index = ds_hash_step_index(hash, LABEL_SLOT_EXPONENT, probe_index);
+        ds_Hash_Slot *candidate = &assembler->label_slots[probe_index];
+        Label *label = &assembler->labels[candidate->index];
+        bool is_empty = candidate->index == 0;
+        bool is_same_key = !is_empty && candidate->hash == hash && label->parent_id == parent_id && string_equals(token_lexeme(assembler, label->token_id), name);
+        if (is_empty) candidate->hash = hash;
+        if (is_empty || is_same_key) slot = candidate;
+    }
+    return slot;
+}
+
+static void file_push_token(Input_File *file, Token token) {
+    assert(file->token_count < file->token_capacity);
+    file->tokens[file->token_count] = token;
+    file->token_count += 1;
+}
+
+static void assembler_push_label_reference(Assembler_Context *assembler, Label_Reference reference) {
+    assert(assembler->label_reference_count < assembler->label_reference_capacity);
+    assembler->label_references[assembler->label_reference_count] = reference;
+    assembler->label_reference_count += 1;
+}
+
+static void assembler_push_scoped_reference(Assembler_Context *assembler, Scoped_Reference reference) {
+    if (assembler->scoped_reference_count == SCOPED_REFERENCES_MAX) {
+        log_error("more than %d unresolved '{' and '[$' references", SCOPED_REFERENCES_MAX);
+        os_exit(1);
+    }
+    assembler->scoped_references[assembler->scoped_reference_count] = reference;
+    assembler->scoped_reference_count += 1;
+}
+
 typedef struct {
     Token token;
     u32 start_index;
@@ -664,8 +723,6 @@ typedef struct {
 } Parse_Error_Arguments;
 static void parse_error(Assembler_Context *assembler, Parse_Error_Arguments arguments) {
     File_Id file_id = assembler->file_id;
-    (void)file_id;
-    panic("TODO(felix)");
     if (arguments.file_id != 0) file_id = arguments.file_id;
 
     u32 start_index = arguments.start_index;
@@ -677,12 +734,8 @@ static void parse_error(Assembler_Context *assembler, Parse_Error_Arguments argu
         length = arguments.token.length;
     } else if (length == 0) length = 1;
 
-    String text = {0};
-    panic("TODO(felix)");
-    // String text = assembler->files.values.data[file_id].bytes;
-    String file_name = {0};
-    panic("TODO(felix)");
-    // String file_name = assembler->files.values.data[file_id].name;
+    String text = assembler->files[file_id].bytes;
+    String file_name = assembler->files[file_id].name;
     String lexeme = string_range(text, start_index, start_index + length);
 
     u64 row = 1, column = 1;
@@ -706,7 +759,21 @@ typedef struct {
     Token_Id token_id;
     u32 cursor;
 } File_Cursor;
-typedef Array(File_Cursor) Array_File_Cursor;
+
+#define FILE_STACK_MAX 256
+typedef struct {
+    File_Cursor cursors[FILE_STACK_MAX];
+    u32 count;
+} File_Stack;
+
+static void file_stack_push(File_Stack *stack, File_Cursor cursor) {
+    if (stack->count == FILE_STACK_MAX) {
+        log_error("includes nested deeper than %d", FILE_STACK_MAX - 1);
+        os_exit(1);
+    }
+    stack->cursors[stack->count] = cursor;
+    stack->count += 1;
+}
 
 static void app_start(Platform *platform) {
     Arena arena = {0};
@@ -764,40 +831,39 @@ static void app_start(Platform *platform) {
     bool should_compile = command == Command_COMPILE || command == Command_SCRIPT;
     if (!should_compile) rom = (u8 *)input_bytes.data;
     else {
-        const char *opcode_from_name[VM_OPCODE_MAX_VALUE_PLUS_ONE * 16] = {0};
+        ds_Hash_Slot opcode_slots[1 << OPCODE_SLOT_EXPONENT] = {0};
         for (u8 opcode = 0; opcode < VM_OPCODE_MAX_VALUE_PLUS_ONE; opcode += 1) {
-            const char *name = vm_opcode_name[opcode];
-            u64 hash = ds_hash_fnv1a(name, cstring_length(name));
-
-            assert(is_power_of_2(sizeof opcode_from_name / sizeof *opcode_from_name));
-            u64 index = hash & ((sizeof opcode_from_name / sizeof *opcode_from_name) - 1);
-
-            const char **name_in_map = &opcode_from_name[index];
-            assert(*name_in_map == 0);
-            *name_in_map = vm_opcode_name[opcode];
+            String name = string_from_cstring(vm_opcode_name[opcode]);
+            u32 hash = ds_hash_fnv1a(name.data, name.count);
+            ds_Hash_Slot *slot = &opcode_slots[hash & OPCODE_SLOT_MASK];
+            assert(slot->index == 0);
+            *slot = (ds_Hash_Slot){ .hash = hash, .index = (u32)opcode + 1 };
         }
 
         Assembler_Context assembler = {0};
+        assembler.files_count = 1;
+        assembler.labels_count = 1;
 
-        // Input_File main_file = { .bytes = input_bytes, .name = input_filepath };
-        File_Id main_file_id = 0;
-        panic("TODO(felix)");
-        // File_Id main_file_id = (File_Id)map_put(&assembler.files, input_filepath, &main_file).index;
+        String main_file_name = string_from_cstring(input_filepath);
+        File_Id main_file_id = (File_Id)assembler.files_count;
+        assembler.files_count += 1;
+        assembler.files[main_file_id] = (Input_File){ .bytes = input_bytes, .name = main_file_name };
+        assembler_get_file_slot(&assembler, main_file_name)->index = main_file_id;
 
-        Array_File_Cursor file_stack = {0};
-        push(&arena, &file_stack, (File_Cursor){ .token_id.file_id = main_file_id });
+        File_Stack file_stack = {0};
+        file_stack_push(&file_stack, (File_Cursor){ .token_id.file_id = main_file_id });
 
         while (file_stack.count > 0) {
-            // File_Cursor file_cursor = pop(file_stack);
-            File_Cursor file_cursor = {0};
-            panic("TODO(felix)");
+            file_stack.count -= 1;
+            File_Cursor file_cursor = file_stack.cursors[file_stack.count];
             assembler.file_id = file_cursor.token_id.file_id;
 
-            // Input_File *file = &assembler.files.values.data[assembler.file_id];
-            Input_File *file = 0;
-            panic("TODO(felix)");
+            Input_File *file = &assembler.files[assembler.file_id];
 
             String asm = file->bytes;
+
+            u64 token_minimum = file->token_count + (asm.count - file_cursor.cursor);
+            file->tokens = arena_array_reserve(&arena, file->tokens, file->token_count, &file->token_capacity, token_minimum);
 
             for (u32 cursor = file_cursor.cursor; cursor < asm.count;) {
                 while (cursor < asm.count && ascii_is_whitespace(asm.data[cursor])) cursor += 1;
@@ -919,11 +985,14 @@ static void app_start(Platform *platform) {
                     .value = value,
                     .base = base,
                 };
-                push(&arena, &file->tokens, token);
+                file_push_token(file, token);
             }
 
+            u64 label_reference_minimum = assembler.label_reference_count + (file->token_count - (u64)file_cursor.token_id.index);
+            assembler.label_references = arena_array_reserve(&arena, assembler.label_references, assembler.label_reference_count, &assembler.label_reference_capacity, label_reference_minimum);
+
             bool parsing_relative_label = false;
-            for (Token_Id file_token_id = file_cursor.token_id; (u64)file_token_id.index < file->tokens.count; file_token_id.index += 1) {
+            for (Token_Id file_token_id = file_cursor.token_id; (u64)file_token_id.index < file->token_count; file_token_id.index += 1) {
                 Token token = *token_get(&assembler, file_token_id);
                 String token_string = token_lexeme(&assembler, file_token_id);
 
@@ -944,18 +1013,17 @@ static void app_start(Platform *platform) {
                 switch (token.kind) {
                     case '{': {
                         Scoped_Reference reference = { .address = rom_count };
-                        push(&arena, &assembler.scoped_references, reference);
+                        assembler_push_scoped_reference(&assembler, reference);
                         rom_count += 2;
                     } break;
                     case '}': {
-                        if (assembler.scoped_references.count == 0) {
+                        if (assembler.scoped_reference_count == 0) {
                             log_error("'}' has no matching '{'");
                             parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                         }
 
-                        // Scoped_Reference reference = pop(assembler.scoped_references);
-                        Scoped_Reference reference = {0};
-                        panic("TODO(felix)");
+                        assembler.scoped_reference_count -= 1;
+                        Scoped_Reference reference = assembler.scoped_references[assembler.scoped_reference_count];
                         if (reference.is_relative) {
                             log_error("expected to resolve absolute reference (from '{') but found unresolved relative reference");
                             parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
@@ -974,7 +1042,7 @@ static void app_start(Platform *platform) {
                         if (compile_byte_count_to_closing_bracket) {
                             assembler.insertion_mode.has_relative_reference = true;
                             Scoped_Reference reference = { .address = rom_count, .is_relative = true };
-                            push(&arena, &assembler.scoped_references, reference);
+                            assembler_push_scoped_reference(&assembler, reference);
                             rom_count += 1;
                             file_token_id = token_id_shift(file_token_id, 1);
                         }
@@ -986,9 +1054,12 @@ static void app_start(Platform *platform) {
                         }
 
                         if (assembler.insertion_mode.has_relative_reference) {
-                            // Scoped_Reference reference = pop(assembler.scoped_references);
-                            Scoped_Reference reference = {0};
-                            panic("TODO(felix)");
+                            if (assembler.scoped_reference_count == 0) {
+                                log_error("']' has no matching '[$' reference to resolve");
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
+                            }
+                            assembler.scoped_reference_count -= 1;
+                            Scoped_Reference reference = assembler.scoped_references[assembler.scoped_reference_count];
                             if (!reference.is_relative) {
                                 log_error("expected to resolve relative reference (from '[$') but found unresolved absolute reference; is there an unmatched '{'?");
                                 parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
@@ -1023,54 +1094,51 @@ static void app_start(Platform *platform) {
 
                         bool is_label = next.kind == ':';
                         if (is_label) {
-                            // bool is_redefinition = map_get(&assembler.labels, token_string).pointer != 0;
-                            bool is_redefinition = true;
-                            panic("TODO(felix)");
+                            ds_Hash_Slot *global_slot = assembler_get_label_slot(&assembler, 0, token_string);
+                            bool is_redefinition = global_slot->index != 0;
                             if (is_redefinition) {
                                 log_error("redefinition of label '%S'", token_string);
                                 parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                             }
 
-                            // Label new_label = { .token_id = file_token_id, .address = rom_count };
-                            // map_make(&arena, &new_label.children, 256);
-                            panic("TODO(felix)");
-
-                            // Map_Label *labels = 0;
-                            int *labels = 0;
-                            (void)labels;
-                            panic("TODO(felix)");
+                            Label new_label = { .token_id = file_token_id, .address = rom_count };
+                            ds_Hash_Slot *slot = global_slot;
                             if (parsing_relative_label) {
-                                // Label *parent = slice_get_last(assembler.labels.values);
-                                panic("TODO(felix)");
-                                // Map_Label *parent_labels = &parent->children;
-                                int *parent_labels = 0;
-                                panic("TODO(felix)");
-                                labels = parent_labels;
+                                if (assembler.global_label_id == 0) {
+                                    log_error("relative label '%S' has no preceding global label", token_string);
+                                    parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
+                                }
 
-                                // bool is_redefinition = map_get(parent_labels, token_string).index != 0;
-                                is_redefinition = true;
-                                panic("TODO(felix)");
+                                new_label.parent_id = assembler.global_label_id;
+                                slot = assembler_get_label_slot(&assembler, new_label.parent_id, token_string);
+                                is_redefinition = slot->index != 0;
                                 if (is_redefinition) {
                                     log_error("redefinition of label '%S'", token_string);
                                     parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
                                 }
 
                                 parsing_relative_label = false;
-                            } else {
-                                // labels = &assembler.labels;
-                                panic("TODO(felix)");
                             }
 
-                            // map_put(labels, token_string, &new_label);
-                            panic("TODO(felix)");
+                            if (assembler.labels_count == MAX_LABELS) {
+                                log_error("more than %d labels", MAX_LABELS - 1);
+                                parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
+                            }
+                            Label_Id new_label_id = (Label_Id)assembler.labels_count;
+                            assembler.labels_count += 1;
+                            assembler.labels[new_label_id] = new_label;
+                            slot->index = new_label_id;
+                            if (new_label.parent_id == 0) assembler.global_label_id = new_label_id;
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             break;
                         }
 
-                        // u8 *instruction_match = map_get(&opcode_from_name_map, token_string).pointer;
-                        u8 *instruction_match = 0;
-                        panic("TODO(felix)");
+                        u32 opcode_hash = ds_hash_fnv1a(token_string.data, token_string.count);
+                        ds_Hash_Slot opcode = opcode_slots[opcode_hash & OPCODE_SLOT_MASK];
+                        bool is_instruction = opcode.index != 0 && opcode.hash == opcode_hash && string_equals(string_from_cstring(vm_opcode_name[opcode.index - 1]), token_string);
+                        u8 matched_instruction = (u8)(opcode.index - 1);
+                        u8 *instruction_match = is_instruction ? &matched_instruction : 0;
 
                         if (instruction_match != 0) {
                             u8 instruction = *instruction_match;
@@ -1112,10 +1180,9 @@ static void app_start(Platform *platform) {
                                         .token_id = token_id_shift(file_token_id, 1),
                                         .destination_address = rom_count,
                                         .width = width,
-                                        // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
-                                        // TODO(felix)
+                                        .parent_id = assembler.global_label_id,
                                     };
-                                    push(&arena, &assembler.label_references, reference);
+                                    assembler_push_label_reference(&assembler, reference);
                                     rom_count += reference.width;
                                 } else {
                                     assert(next.kind == Token_Kind_NUMBER);
@@ -1171,8 +1238,7 @@ static void app_start(Platform *platform) {
                             Label_Reference reference = {
                                 .is_patch = true,
                                 .destination_label_token_id = file_token_id,
-                                // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
-                                // TODO(felix)
+                                .parent_id = assembler.global_label_id,
                             };
 
                             next = *token_get(&assembler, token_id_shift(file_token_id, 1));
@@ -1190,7 +1256,7 @@ static void app_start(Platform *platform) {
 
                             file_token_id = token_id_shift(file_token_id, 1);
                             reference.token_id = file_token_id;
-                            push(&arena, &assembler.label_references, reference);
+                            assembler_push_label_reference(&assembler, reference);
                         } else if (string_equals(token_string, S("include"))) {
                             if (next.kind != Token_Kind_STRING) {
                                 log_error("expected string following directive 'include'");
@@ -1207,16 +1273,23 @@ static void app_start(Platform *platform) {
                             String include_bytes = os_read_entire_file(&arena, cstring_from_string(&arena, include_filepath), &read_ok);
                             if (!read_ok || include_bytes.count > 0x10000) os_exit(1);
 
-                            // Input_File new_file = { .bytes = include_bytes, .name = include_filepath };
-                            // File_Id new_file_id = (File_Id)map_put(&assembler.files, include_filepath, &new_file).index;
-                            File_Id new_file_id = {0};
-                            panic("TODO(felix)");
+                            ds_Hash_Slot *included_file_slot = assembler_get_file_slot(&assembler, include_filepath);
+                            if (included_file_slot->index == 0) {
+                                if (assembler.files_count == MAX_FILES) {
+                                    log_error("more than %d files", MAX_FILES - 1);
+                                    parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
+                                }
+                                included_file_slot->index = (u32)assembler.files_count;
+                                assembler.files_count += 1;
+                            }
+                            File_Id new_file_id = (File_Id)included_file_slot->index;
+                            assembler.files[new_file_id] = (Input_File){ .bytes = include_bytes, .name = include_filepath };
 
                             File_Cursor current = { .cursor = (u32)asm.count, .token_id = token_id_shift(file_token_id, 2) };
-                            push(&arena, &file_stack, current);
+                            file_stack_push(&file_stack, current);
 
                             File_Cursor next_file = { .cursor = 0, .token_id = { .file_id = new_file_id } };
-                            push(&arena, &file_stack, next_file);
+                            file_stack_push(&file_stack, next_file);
                             goto switch_file;
                         }
 
@@ -1224,10 +1297,9 @@ static void app_start(Platform *platform) {
                             .token_id = file_token_id,
                             .destination_address = rom_count,
                             .width = 2,
-                            // .parent_id = (Label_Id)(assembler.labels.values.count - 1),
-                            // TODO(felix)
+                            .parent_id = assembler.global_label_id,
                         };
-                        push(&arena, &assembler.label_references, reference);
+                        assembler_push_label_reference(&assembler, reference);
                         rom_count += reference.width;
                     } break;
                     case Token_Kind_NUMBER: {
@@ -1272,8 +1344,8 @@ static void app_start(Platform *platform) {
                 }
             }
 
-            if (assembler.scoped_references.count != 0) {
-                Scoped_Reference reference = assembler.scoped_references.data[0];
+            if (assembler.scoped_reference_count != 0) {
+                Scoped_Reference reference = assembler.scoped_references[0];
                 Token token = *token_get(&assembler, reference.token_id);
                 log_error("anonymous reference ('{') without matching '}'");
                 parse_error(&assembler, (Parse_Error_Arguments){ .token = token });
@@ -1282,8 +1354,8 @@ static void app_start(Platform *platform) {
             switch_file:;
         }
 
-        for (u64 reference_index = 0; reference_index < assembler.label_references.count; reference_index += 1) {
-            Label_Reference *reference = &assembler.label_references.data[reference_index];
+        for (u64 reference_index = 0; reference_index < assembler.label_reference_count; reference_index += 1) {
+            Label_Reference *reference = &assembler.label_references[reference_index];
             Label *source_label = 0, *destination_label = 0;
             Label **to_match[] = { &source_label, &destination_label };
             Token_Id match_against[] = { reference->token_id, reference->destination_label_token_id };
@@ -1305,15 +1377,15 @@ static void app_start(Platform *platform) {
                 }
                 assert(token.kind == Token_Kind_SYMBOL);
 
-                // Label parent = assembler.labels.values.data[reference->parent_id];
-                panic("TODO(felix)");
-                // Label *find = map_get(&parent.children, reference_string).pointer;
                 Label *find = 0;
-                panic("TODO(felix)");
+                if (reference->parent_id != 0) {
+                    Label_Id relative_label_id = assembler_get_label_slot(&assembler, reference->parent_id, reference_string)->index;
+                    if (relative_label_id != 0) find = &assembler.labels[relative_label_id];
+                }
 
                 if (find == 0) {
-                    // find = map_get(&assembler.labels, reference_string).pointer;
-                    panic("TODO(felix)");
+                    Label_Id global_label_id = assembler_get_label_slot(&assembler, 0, reference_string)->index;
+                    if (global_label_id != 0) find = &assembler.labels[global_label_id];
                 }
 
                 if (find != 0) {

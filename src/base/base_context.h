@@ -1,33 +1,79 @@
 // Based on information from https://sourceforge.net/p/predef/wiki/Home/
 
-#ifndef BASE_CONTEXT_CUSTOM
+#if !defined(BASE_CONTEXT_H)
+#define BASE_CONTEXT_H
 
-
-#if defined(__EMSCRIPTEN__)
-    #define OS_EMSCRIPTEN 1
-#elif defined(__linux__) || defined(__gnu_linux__)
-    #define OS_LINUX 1
-#elif defined(__APPLE__) && defined(__MACH__)
-    #define OS_MACOS 1
-#elif defined(_WIN32)
-    #define OS_WINDOWS 1
+#if __STDC_VERSION__ >= 202311L
+    #define BASE_C_VERSION 2023
+#elif __STDC_VERSION__ >= 201112L
+    #define BASE_C_VERSION 2011
+#elif __STDC_VERSION__ >= 199901L
+    #define BASE_C_VERSION 1999
+#elif defined(__STDC__)
+    #define BASE_C_VERSION 1989
 #else
-    #error unsupported OS
+    #define BASE_C_VERSION 0
+#endif
+
+#define BASE_OS_WINDOWS       (1 << 0)
+#define BASE_OS_MACOS         (1 << 1)
+#define BASE_OS_IOS_DEVICE    (1 << 2)
+#define BASE_OS_IOS_SIMULATOR (1 << 3)
+#define BASE_OS_LINUX         (1 << 4)
+#define BASE_OS_WASM          (1 << 5)
+#define BASE_OS_COUNT         (1 << 6)
+
+#define BASE_OS_ANY_IOS (BASE_OS_IOS_DEVICE | BASE_OS_IOS_SIMULATOR)
+#define BASE_OS_ANY_APPLE (BASE_OS_MACOS | BASE_OS_ANY_IOS)
+#define BASE_OS_ANY_POSIX (BASE_OS_ANY_APPLE | BASE_OS_LINUX)
+
+#if defined(BASE_OS)
+    //
+#elif defined(__wasm__) || defined(__wasm32__)
+    #define BASE_OS BASE_OS_WASM
+#elif defined(__linux__) || defined(__gnu_linux__)
+    #define BASE_OS BASE_OS_LINUX
+#elif defined(__APPLE__) && defined(__MACH__)
+    #if defined(__has_builtin) && __has_builtin(__is_target_os) && __is_target_os(ios)
+        // TODO(felix): Work out what's going on with this.
+        #if __has_builtin(__is_target_environment) && __is_target_environment(simulator)
+            #define BASE_OS BASE_OS_IOS_SIMULATOR
+        #else
+            #define BASE_OS BASE_OS_IOS_DEVICE
+        #endif
+    #else
+        #define BASE_OS BASE_OS_MACOS
+    #endif
+#elif defined(_WIN32)
+    #define BASE_OS BASE_OS_WINDOWS
+#else
+    #error "could not context-crack OS; define BASE_OS manually before including this file"
 #endif // OS_...
 
-#ifndef OS_EMSCRIPTEN
-    #define OS_EMSCRIPTEN 0
-#endif
-#ifndef OS_LINUX
-    #define OS_LINUX 0
-#endif
-#ifndef OS_MACOS
-    #define OS_MACOS 0
-#endif
-#ifndef OS_WINDOWS
-    #define OS_WINDOWS 0
-#endif
+#define BASE_ARCH_X86_64 (1 << 0)
+#define BASE_ARCH_ARM64  (1 << 1)
+#define BASE_ARCH_WASM32 (1 << 2)
+#define BASE_ARCH_COUNT  (1 << 3)
 
+#if defined(BASE_ARCH)
+    //
+#elif defined(__wasm32__)
+    #define BASE_ARCH BASE_ARCH_WASM32
+#elif defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+    #define BASE_ARCH BASE_ARCH_ARM64
+#elif defined(__x86_64__) || defined(_M_X64)
+    #define BASE_ARCH BASE_ARCH_X86_64
+#else
+    #error "UNIMPLEMENTED. Define BASE_ARCH manually."
+#endif // ARCH_...
+
+#if BASE_ARCH == BASE_ARCH_X86_64 || BASE_ARCH == BASE_ARCH_ARM64
+    #define BASE_ARCH_BITS 64
+#elif BASE_ARCH == BASE_ARCH_WASM32
+    #define BASE_ARCH_BITS 32
+#else
+    #error "UNREACHABLE"
+#endif
 
 #if defined(__clang__)
     #define COMPILER_CLANG 1
@@ -49,7 +95,6 @@
     #define COMPILER_MSVC 0
 #endif
 
-
 #if COMPILER_CLANG
     #if __has_feature(address_sanitizer)
         #define BUILD_ASAN 1
@@ -67,26 +112,22 @@
     #define BUILD_DEBUG 0
 #endif
 
-
-#if OS_WINDOWS
+#if BASE_OS == BASE_OS_WINDOWS
     #if !defined(WINDOWS_SUBSYSTEM_WINDOWS) && !defined(WINDOWS_SUBSYSTEM_CONSOLE)
         #define WINDOWS_SUBSYSTEM_WINDOWS 0
         #define WINDOWS_SUBSYSTEM_CONSOLE 1
     #elif !defined(WINDOWS_SUBSYSTEM_WINDOWS)
-        static_assert(WINDOWS_SUBSYSTEM_CONSOLE == 1, "");
         #define WINDOWS_SUBSYSTEM_WINDOWS 0
     #elif !defined(WINDOWS_SUBSYSTEM_CONSOLE)
-        static_assert(WINDOWS_SUBSYSTEM_WINDOWS == 1, "");
         #define WINDOWS_SUBSYSTEM_CONSOLE 0
     #else
-        static_assert(!WINDOWS_SUBSYSTEM_WINDOWS || !WINDOWS_SUBSYSTEM_CONSOLE);
+        #error "unreachable"
     #endif
 #endif
 
-
-#if !defined(BASE_GRAPHICS)
-    #define BASE_GRAPHICS 1
+#if !defined(PLATFORM_NONE)
+    #define PLATFORM_NONE 0
 #endif
 
 
-#endif // !BASE_CONTEXT_CUSTOM
+#endif // BASE_CONTEXT_H

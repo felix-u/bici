@@ -41,6 +41,9 @@ struct Platform_Implementation {
     Platform base;
 
     u32 *pixels;
+    i32 pixel_stride;
+    bool keep_pixels_between_frames;
+
     f32 real_over_virtual_window_scale;
     V2 real_window_size;
     V2 real_mouse_position;
@@ -105,6 +108,10 @@ static void program(void) {
             enum { dib_rgb_colors = 0 };
             platform.bitmap = CreateDIBSection(platform.memory_dc, (BITMAPINFO *)&bitmap_info_header, dib_rgb_colors, (void **)&platform.pixels, 0, 0);
             ensure(platform.bitmap != 0);
+            platform.pixel_stride = max_virtual_width;
+
+            u32 clear = pixel_from_rgba(platform.base.clear_color);
+            for (i64 i = 0; i < (i64)max_virtual_width * max_virtual_height; i += 1) platform.pixels[i] = clear;
 
             SelectObject(platform.memory_dc, platform.bitmap);
 
@@ -147,8 +154,10 @@ static void program(void) {
 
             cpu_draw_Surface surface = cpu_draw_surface(platform.pixels, max_virtual_width, virtual_width, virtual_height);
 
-            u32 clear = argb_from_rgba(platform.base.clear_color);
-            cpu_draw_rectangle(surface, 0, 0, surface.clip_right - surface.clip_left, surface.clip_bottom - surface.clip_top, clear);
+            if (!platform.keep_pixels_between_frames) {
+                u32 clear = pixel_from_rgba(platform.base.clear_color);
+                cpu_draw_rectangle(surface, 0, 0, surface.clip_right - surface.clip_left, surface.clip_bottom - surface.clip_top, clear);
+            }
             cpu_draw_commands(surface, &platform.font, platform.base.draw_commands, platform.base.draw_command_count);
 
             void *window_dc = GetDC(platform.window);

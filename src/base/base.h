@@ -1158,6 +1158,7 @@ typedef struct {
     Draw_Command *draw_commands;
     u64 draw_command_count, draw_command_capacity;
 
+    bool hide_cursor;
     bool should_quit;
     const char *window_name;
     u32 clear_color;
@@ -1941,13 +1942,18 @@ static u32 abgr_from_rgba(u32 rgba) {
     return (a << 24) | (b << 16) | (g << 8) | r;
 }
 
-static void cpu_draw_commands(cpu_draw_Surface surface, const cpu_draw_Font *font, Draw_Command *commands, u64 count) {
-    u32 (*color)(u32) = 0;
+static u32 pixel_from_rgba(u32 rgba) {
+    u32 pixel = 0;
     switch (BASE_OS) {
-        case BASE_OS_WINDOWS: color = argb_from_rgba; break;
-        case BASE_OS_WASM: color = abgr_from_rgba; break;
+        case BASE_OS_WINDOWS: pixel = argb_from_rgba(rgba); break;
+        case BASE_OS_WASM: pixel = abgr_from_rgba(rgba); break;
         default: unreachable;
     }
+    return pixel;
+}
+
+static void cpu_draw_commands(cpu_draw_Surface surface, const cpu_draw_Font *font, Draw_Command *commands, u64 count) {
+    u32 (*color)(u32) = pixel_from_rgba;
 
     cpu_draw_Surface unclipped_surface = surface;
 

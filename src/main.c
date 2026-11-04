@@ -3,9 +3,6 @@
 
 #include "base/base_platform_wingdi.c"
 
-#define Vm_Screen_INITIAL_WIDTH 640
-#define Vm_Screen_INITIAL_HEIGHT 360
-
 typedef enum {
     Vm_Mode_SHORT        = 1 << 5,
     Vm_Mode_RETURN_STACK = 1 << 6,
@@ -174,15 +171,15 @@ static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO(felix): ensure correct
 
-static inline u32 rgb_from_colour(Vm *vm, u8 colour_index) {
+static inline u32 pixel_from_colour(Vm *vm, u8 colour_index) {
     assert(colour_index < 4);
     Vm_System_Action colour_offset = Vm_System_COLOUR_0 + colour_index * 2;
     u16 colour = get16(&vm->memory[Vm_Device_SYSTEM | (Vm_Device)colour_offset]);
     u32 r = ((u32)colour & 0x0f00) >> 8;
     u32 g = ((u32)colour & 0x00f0) >> 4;
     u32 b = ((u32)colour & 0x000f) >> 0;
-    u32 rgb = (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;
-    return rgb;
+    u32 rgba = (r << 28) | (r << 24) | (g << 20) | (g << 16) | (b << 12) | (b << 8) | 0xff;
+    return pixel_from_rgba(rgba);
 }
 
 static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
@@ -295,10 +292,15 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                             u8 *y_address = &vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_Y];
                             u16 x = get16(x_address);
                             u16 y = get16(y_address);
+                            u16 screen_width = (u16)platform->frame.window_size.x;
+                            u16 screen_height = (u16)platform->frame.window_size.y;
+                            Platform_Implementation *implementation = (Platform_Implementation *)platform;
+                            u32 *pixels = implementation->pixels;
+                            i32 stride = implementation->pixel_stride;
                             switch (action) {
                                 case Vm_Screen_PIXEL: {
-                                    if (x >= Vm_Screen_INITIAL_WIDTH) break;
-                                    if (y >= Vm_Screen_INITIAL_HEIGHT) break;
+                                    if (x >= screen_width) break;
+                                    if (y >= screen_height) break;
 
                                     u8 fill_x = argument & 0x80;
                                     u8 fill_y = argument & 0x40;
@@ -306,44 +308,32 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                     u8 colour = argument & 0x0f;
                                     if (colour > 3) panic("[write:screen/pixel] colour #%02x is invalid; there are only 4 palette colours", colour);
 
-                                    u32 rgb = rgb_from_colour(vm, colour);
+                                    u32 pixel = pixel_from_colour(vm, colour);
 
-                                    u16 width = fill_x ? (Vm_Screen_INITIAL_WIDTH - x) : 1;
-                                    u16 height = fill_y ? (Vm_Screen_INITIAL_HEIGHT - y) : 1;
-
-                                    if (fill_x && fill_y) {
-                                        panic("TODO(felix)");
-                                        (void)width;
-                                        (void)height;
-                                        (void)rgb;
-                                        // gfx_draw_rectangle(&vm->gfx, x, y, width, height, rgb);
-                                    } else if (fill_x) {
-                                        panic("TODO(felix)");
-                                        // gfx_draw_line(&vm->gfx, (V2){ .x = (f32)x, .y = (f32)y }, (V2){ .x = (f32)Vm_Screen_INITIAL_WIDTH, .y = (f32)y }, 1.f, rgb);
-                                    } else if (fill_y) {
-                                        unreachable;
-                                    } else {
-                                        panic("TODO(felix)");
-                                        // gfx_set_pixel(&vm->gfx, x, y, rgb);
+                                    if (fill_y && !fill_x) unreachable;
+                                    u16 right = fill_x ? screen_width : x + 1;
+                                    u16 bottom = fill_y ? screen_height : y + 1;
+                                    for (u16 row = y; row < bottom; row += 1) {
+                                        for (u16 column = x; column < right; column += 1) pixels[row * stride + column] = pixel;
                                     }
                                 } break;
                                 case Vm_Screen_SPRITE: {
-                                    if (x >= Vm_Screen_INITIAL_WIDTH) break;
-                                    if (y >= Vm_Screen_INITIAL_HEIGHT) break;
+                                    if (x >= screen_width) break;
+                                    if (y >= screen_height) break;
 
                                     u8 two_bits_per_pixel = argument & 0x80;
                                     u8 use_background_layer = argument & 0x40;
                                     u8 flip_y = argument & 0x20;
                                     u8 flip_x = argument & 0x10;
-                                    u32 colours[] = { rgb_from_colour(vm, argument & 0x03), rgb_from_colour(vm, (argument & 0x0c) >> 2) };
+                                    u32 colours[] = { pixel_from_colour(vm, argument & 0x03), pixel_from_colour(vm, (argument & 0x0c) >> 2) };
 
                                     // TODO(felix)
                                     assert(!two_bits_per_pixel);
                                     assert(!flip_y);
                                     assert(!flip_x);
 
-                                    u16 column_count = MIN(8, Vm_Screen_INITIAL_WIDTH - x);
-                                    u16 row_count = MIN(8, Vm_Screen_INITIAL_HEIGHT - y);
+                                    u16 column_count = MIN(8, screen_width - x);
+                                    u16 row_count = MIN(8, screen_height - y);
 
                                     u8 *sprite = &vm->memory[get16(&vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_DATA])];
                                     for (u16 row = 0; row < row_count; row += 1, sprite += 1) {
@@ -352,9 +342,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                             u8 colour = (*sprite & (1 << shift)) >> shift;
                                             if (!use_background_layer && colour == 0) continue;
 
-                                            panic("TODO(felix)");
-                                            (void)colours;
-                                            // gfx_set_pixel(&vm->gfx, x + column, y + row, colours[colour]);
+                                            pixels[(y + row) * stride + x + column] = colours[colour];
                                         }
                                     }
 
@@ -420,23 +408,16 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                     u16 to_push = get16(&vm->memory[Vm_Device_AND_ACTION]);
                     switch (device) {
                         case Vm_Device_SCREEN: switch (action) {
-                            case Vm_Screen_WIDTH: to_push = Vm_Screen_INITIAL_WIDTH; break;
-                            case Vm_Screen_HEIGHT: to_push = Vm_Screen_INITIAL_HEIGHT; break;
+                            case Vm_Screen_WIDTH: to_push = (u16)platform->frame.window_size.x; break;
+                            case Vm_Screen_HEIGHT: to_push = (u16)platform->frame.window_size.y; break;
                             default: panic("[read.2] invalid action #%02x for screen device", action);
                         } break;
                         case Vm_Device_MOUSE: {
-                            panic("TODO(felix)");
-                            // V2 virtual_over_real = v2_div(platform->frame.virtual_window_size, platform->frame.real_window_size);
-                            // V2 virtual_mouse_position = v2_mul(platform->frame.real_mouse_position, virtual_over_real);
+                            V2 mouse_position = platform->frame.mouse_position;
+                            V2 window_size = platform->frame.window_size;
                             switch (action) {
-                                case Vm_Mouse_X: {
-                                    panic("TODO(felix)");
-                                    // to_push = (u16)virtual_mouse_position.x;
-                                } break;
-                                case Vm_Mouse_Y: {
-                                    panic("TODO(felix)");
-                                    // to_push = (u16)virtual_mouse_position.y;
-                                } break;
+                                case Vm_Mouse_X: to_push = (u16)CLAMP(mouse_position.x, 0.f, MAX(window_size.x - 1.f, 0.f)); break;
+                                case Vm_Mouse_Y: to_push = (u16)CLAMP(mouse_position.y, 0.f, MAX(window_size.y - 1.f, 0.f)); break;
                                 default: panic("[read.2] invalid action #%02x for mouse device", action);
                             }
                         } break;
@@ -1422,15 +1403,17 @@ static void app_start(Platform *platform) {
         }
     }
 
+    u64 rom_size = should_compile ? rom_count : input_bytes.count;
+
     bool should_run = command == Command_SCRIPT || command == Command_RUN;
     if (!should_run) {
         platform->should_quit = true;
     } else {
-        if (rom_count == 0) os_exit(1);
+        if (rom_size == 0) os_exit(1);
 
         Vm *vm = &global_vm;
         vm->arena = &arena;
-        memcpy(vm->memory, rom, rom_count);
+        memcpy(vm->memory, rom, rom_size);
 
         bool print_memory = false;
         if (print_memory) {
@@ -1438,7 +1421,7 @@ static void app_start(Platform *platform) {
             String_Builder builder = {0};
             {
                 string_builder_print(scratch.arena, &builder, "MEMORY ===\n");
-                for (u16 token_id = 0x100; token_id < rom_count; token_id += 1) {
+                for (u32 token_id = 0x100; token_id < rom_size; token_id += 1) {
                     u8 byte = vm->memory[token_id];
 
                     const char *mode_string = "";
@@ -1461,15 +1444,11 @@ static void app_start(Platform *platform) {
             scratch_end(scratch);
         }
 
-        panic("TODO(felix)");
-        // Gfx_Render_Context *gfx = &vm.gfx;
-        // *gfx = gfx_window_create(&arena, "bici", Vm_Screen_INITIAL_WIDTH, Vm_Screen_INITIAL_HEIGHT);
-        // ShowCursor(false);
-        // gfx->font = gfx_font_default_3x5;
-
+        platform->window_name = "bici";
+        ((Platform_Implementation *)platform)->keep_pixels_between_frames = true;
+        platform->hide_cursor = true;
         // TODO(felix): program should control this
-        panic("TODO(felix)");
-        // gfx_clear(gfx, 0);
+        platform->clear_color = 0x000000ff;
 
         u16 vm_on_system_start_pc = vm_load16(vm, Vm_Device_SYSTEM + Vm_System_START);
         vm_run_to_break(platform, vm, vm_on_system_start_pc);
@@ -1485,9 +1464,11 @@ static void app_update_and_render(Platform *platform) {
     u16 vm_on_system_quit_pc = vm_load16(vm, Vm_Device_SYSTEM | (Vm_Device)Vm_System_QUIT);
     vm_run_to_break(platform, vm, vm_on_system_quit_pc);
 
-    print("working stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("%llx ", vm->stacks[0].memory[token_id]);
-    print("}\nreturn  stack (bottom->top): { ");
-    for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[1].memory[token_id]);
-    print("}\n");
+    if (platform->should_quit) {
+        print("working stack (bottom->top): { ");
+        for (u8 token_id = 0; token_id < vm->stacks[0].data; token_id += 1) print("%llx ", vm->stacks[0].memory[token_id]);
+        print("}\nreturn  stack (bottom->top): { ");
+        for (u8 token_id = 0; token_id < vm->stacks[1].data; token_id += 1) print("%llx ", vm->stacks[1].memory[token_id]);
+        print("}\n");
+    }
 }

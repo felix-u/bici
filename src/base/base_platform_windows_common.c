@@ -76,6 +76,7 @@ void *         LoadCursorW(void *instance_handle, const unsigned short *cursor_n
 int            PeekMessageW(MSG *, void *window_handle, unsigned message_filter_min, unsigned message_filter_max, unsigned remove_message);
 void           PostQuitMessage(int exit_code);
 unsigned short RegisterClassW(const WNDCLASSW *);
+void *         SetCursor(void *cursor_handle);
 int            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
 int            ShowWindow(void *window_handle, int show_command);
 int            TranslateMessage(const MSG *);
@@ -89,7 +90,6 @@ static void *win32_create_window(const char *window_name, WNDPROC window_procedu
     const u16 *class_name = window_name_utf16;
     WNDCLASSW window_class = {
         .lpfnWndProc = window_procedure,
-        .hCursor = LoadCursorW(0, IDC_ARROW),
         .lpszClassName = class_name,
     };
     {
@@ -129,6 +129,7 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
         WM_DESTROY       = 0x0002,
         WM_SIZE          = 0x0005,
         WM_CLOSE         = 0x0010,
+        WM_SETCURSOR     = 0x0020,
         WM_GETMINMAXINFO = 0x0024,
         WM_DISPLAYCHANGE = 0x007E,
         WM_KEYDOWN       = 0x0100,
@@ -219,6 +220,11 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
         case WM_RBUTTONUP: {
             App_Mouse_Button button = App_Mouse_RIGHT;
             frame->mouse_down[button] = false;
+        } break;
+        case WM_SETCURSOR: {
+            enum { HTCLIENT = 1 };
+            bool is_client_area = WIN32__LOWORD(l) == HTCLIENT;
+            if (is_client_area) SetCursor(platform->hide_cursor ? 0 : LoadCursorW(0, IDC_ARROW));
         } break;
         case WM_SIZE: {
             window_size[0] = (f32)WIN32__LOWORD(l);

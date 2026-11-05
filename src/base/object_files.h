@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-05-25
+// https://github.com/felix-u 2026-11-04
 // Public domain. NO WARRANTY - use at your own risk
 
 
@@ -13,10 +13,14 @@
     #define OBJECT_FUNCTION
 #endif
 
-#if __STDC_VERSION__ >= 201112L
-    #define OBJECT_STATIC_ASSERT(expression, message) _Static_assert(expression, message)
-#else
-    #define OBJECT_STATIC_ASSERT(expression, message)
+#if !defined(OBJECT_STATIC_ASSERT)
+    #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+        #define OBJECT_STATIC_ASSERT(expression, message) _Static_assert(expression, message)
+    #else
+        #define OBJECT__GLUE(a, b) a##b
+        #define OBJECT__GLUE_GLUE(a, b) OBJECT__GLUE(a, b)
+        #define OBJECT_STATIC_ASSERT(expression, message) typedef char OBJECT__GLUE_GLUE(object__static_assert_line_, __LINE__)[(expression) ? 1 : -1]
+    #endif
 #endif
 
 typedef enum {

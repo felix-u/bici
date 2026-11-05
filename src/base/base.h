@@ -471,6 +471,33 @@ static inline int memcmp_(const void *a_, const void *b_, u64 byte_count) {
     }
 #endif
 
+#if BASE_OS == BASE_OS_WASM
+    // NOTE(felix): We build without compiler-rt, which defines the 128-bit multiply that ubsan needs for wasm32 signed 64-bit multiply overflow checks.
+    __extension__ typedef __int128 i128;
+    __extension__ typedef unsigned __int128 u128;
+
+    i128 __multi3(i128 a, i128 b) {
+        u64 a_low = (u64)a;
+        u64 a_high = (u64)((u128)a >> 64);
+        u64 b_low = (u64)b;
+        u64 b_high = (u64)((u128)b >> 64);
+
+        u64 half_mask = 0xffffffff;
+        u64 low_times_low = (a_low & half_mask) * (b_low & half_mask);
+        u64 high_times_low = (a_low >> 32) * (b_low & half_mask);
+        u64 low_times_high = (a_low & half_mask) * (b_low >> 32);
+        u64 high_times_high = (a_low >> 32) * (b_low >> 32);
+
+        u64 middle = (low_times_low >> 32) + (high_times_low & half_mask) + (low_times_high & half_mask);
+        u64 result_low = (low_times_low & half_mask) | (middle << 32);
+        u64 result_high = high_times_high + (high_times_low >> 32) + (low_times_high >> 32) + (middle >> 32);
+        result_high += a_high * b_low + a_low * b_high;
+
+        u128 result = ((u128)result_high << 64) | result_low;
+        return (i128)result;
+    }
+#endif
+
 static inline f32 ceilf_(f32 x) {
     assert((f32)INT64_MIN <= x && x <= (f32)INT64_MAX);
     i64 as_i64 = (i64)x;
@@ -1917,6 +1944,7 @@ static cpu_draw_Font cpu_draw_font_from_bdf(const void *bdf, u64 bdf_size) {
 }
 
 static V2 cpu_draw_platform_measure_text(const cpu_draw_Font *font, String text, f32 font_size) {
+    assert(font->height > 0);
     // TODO(felix)
     assert(font->height == (int)roundf(font_size));
 
@@ -1974,6 +2002,7 @@ static void cpu_draw_commands(cpu_draw_Surface surface, const cpu_draw_Font *fon
 
         switch (c->kind) {
             case Draw_Kind_TEXT: {
+                assert(font->height > 0);
                 String s = c->text.string;
                 int left = (int)(c->position.x + 0.5f);
                 int top = (int)(c->position.y + 0.5f);
@@ -3066,6 +3095,9 @@ static const char build_wasm_html_file[] = STRINGIFY(
                 js_performance_now: () => {
                     return performance.now();
                 },
+                js_set_cursor_hidden: hidden => {
+                    canvas.style.cursor = hidden ? "none" : "";
+                },
                 os_write_console_js: (pointer, count) => {
                     const bytes = new Uint8Array(wasm.instance.exports.memory.buffer, pointer, count);
                     const string = new TextDecoder().decode(bytes);
@@ -3611,6 +3643,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
             // TODO(felix): Remove this hack once parser correctly handles #if branches.
             bool link_this = true;
+            if (target_os == BASE_OS_WASM) link_this = false;
             if (target_os & BASE_OS_ANY_APPLE) {
                 if (string_equals(library, S("Kernel32"))) link_this = false;
                 else if (string_equals(library, S("Shell32"))) link_this = false;

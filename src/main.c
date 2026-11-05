@@ -3,8 +3,13 @@
 
 #if BASE_OS == BASE_OS_WASM
     #include "base/base_platform_wasm.c"
+
+    // TODO(felix): Remove once metaprogram supports proper embed on wasm?
+    META(generate_here)
+    #include "src/meta.generated.c"
 #endif
 
+// TODO(felix): Change to #else when C lexer properly handles preprocessor.
 #if BASE_OS == BASE_OS_WINDOWS
     #include "base/base_platform_wingdi.c"
 #endif
@@ -652,7 +657,7 @@ static String token_lexeme(Assembler_Context *assembler, Token_Id token_id) {
 }
 
 static ds_Hash_Slot *assembler_get_file_slot(Assembler_Context *assembler, String name) {
-    u32 hash = ds_hash_fnv1a(name.data, name.count);
+    u32 hash = ds_hash_fnv1a(name.data, size_t_from_u64(name.count));
     ds_Hash_Slot *slot = 0;
     for (u32 probe_index = hash; slot == 0;) {
         probe_index = ds_hash_step_index(hash, FILE_SLOT_EXPONENT, probe_index);
@@ -667,7 +672,7 @@ static ds_Hash_Slot *assembler_get_file_slot(Assembler_Context *assembler, Strin
 
 static ds_Hash_Slot *assembler_get_label_slot(Assembler_Context *assembler, Label_Id parent_id, String name) {
     u32 parent_hash = ds_hash_fnv1a(&parent_id, sizeof parent_id);
-    u32 hash = ds_hash_fnv1a_update(parent_hash, name.data, name.count);
+    u32 hash = ds_hash_fnv1a_update(parent_hash, name.data, size_t_from_u64(name.count));
     ds_Hash_Slot *slot = 0;
     for (u32 probe_index = hash; slot == 0;) {
         probe_index = ds_hash_step_index(hash, LABEL_SLOT_EXPONENT, probe_index);
@@ -767,11 +772,6 @@ static void app_start(Platform *platform) {
     u64 arguments_count = 0;
     const char **arguments = os_get_arguments(&arena, &arguments_count);
 
-    if (arguments_count < 3) {
-        log_error("%s", USAGE_HELP_TEXT);
-        os_exit(1);
-    }
-
     typedef enum {
         Command_COMPILE,
         Command_RUN,
@@ -779,36 +779,63 @@ static void app_start(Platform *platform) {
 
         Command_COUNT,
     } Command;
-    const char *command_string = arguments[1];
-
     Command command = 0;
-    if (cstring_equals(command_string, "compile")) {
-        if (arguments_count != 4) {
-            log_error("usage: bici compile <file.asm> <file.rom>");
-            os_exit(1);
-        }
-        command = Command_COMPILE;
-    } else if (cstring_equals(command_string, "run")) {
-        if (arguments_count != 3) {
-            log_error("usage: bici run <file.rom>");
-            os_exit(1);
-        }
-        command = Command_RUN;
-    } else if (cstring_equals(command_string, "script")) {
-        if (arguments_count != 3) {
-            log_error("usage: bici script <file.asm>");
-            os_exit(1);
-        }
-        command = Command_SCRIPT;
-    } else {
-        log_error("no such command '%s'\n%s", command_string, USAGE_HELP_TEXT);
-        os_exit(1);
-    }
+    const char *input_filepath = 0;
+    String input_bytes = {0};
 
-    const char *input_filepath = arguments[2];
-    bool read_ok = false;
-    String input_bytes = os_read_entire_file(&arena, input_filepath, &read_ok);
-    assert(read_ok);
+    #if BASE_OS == BASE_OS_WASM
+    {
+        // TODO(felix): Let the web build load any ROM, instead of the one embedded at build time.
+        META(embed "mouse.rom")
+        extern const char embedded_rom[];
+        extern const u64 embedded_rom_count;
+
+        command = Command_RUN;
+        input_filepath = "mouse.rom";
+        input_bytes = (String){ .data = embedded_rom, .count = embedded_rom_count };
+    }
+    #endif
+
+    // TODO(felix): Change to #else when C lexer properly handles preprocessor.
+    #if BASE_OS != BASE_OS_WASM
+    {
+        if (arguments_count < 3) {
+            log_error("%s", USAGE_HELP_TEXT);
+            os_exit(1);
+        }
+
+        const char *command_string = arguments[1];
+
+        if (cstring_equals(command_string, "compile")) {
+            if (arguments_count != 4) {
+                log_error("usage: bici compile <file.asm> <file.rom>");
+                os_exit(1);
+            }
+            command = Command_COMPILE;
+        } else if (cstring_equals(command_string, "run")) {
+            if (arguments_count != 3) {
+                log_error("usage: bici run <file.rom>");
+                os_exit(1);
+            }
+            command = Command_RUN;
+        } else if (cstring_equals(command_string, "script")) {
+            if (arguments_count != 3) {
+                log_error("usage: bici script <file.asm>");
+                os_exit(1);
+            }
+            command = Command_SCRIPT;
+        } else {
+            log_error("no such command '%s'\n%s", command_string, USAGE_HELP_TEXT);
+            os_exit(1);
+        }
+
+        input_filepath = arguments[2];
+        bool read_ok = false;
+        input_bytes = os_read_entire_file(&arena, input_filepath, &read_ok);
+        assert(read_ok);
+    }
+    #endif
+
     assert(input_bytes.count <= 0x10000);
 
     u8 rom_bytes[0x10000] = {0};
@@ -821,7 +848,7 @@ static void app_start(Platform *platform) {
         ds_Hash_Slot opcode_slots[1 << OPCODE_SLOT_EXPONENT] = {0};
         for (u8 opcode = 0; opcode < VM_OPCODE_MAX_VALUE_PLUS_ONE; opcode += 1) {
             String name = string_from_cstring(vm_opcode_name[opcode]);
-            u32 hash = ds_hash_fnv1a(name.data, name.count);
+            u32 hash = ds_hash_fnv1a(name.data, size_t_from_u64(name.count));
             ds_Hash_Slot *slot = &opcode_slots[hash & OPCODE_SLOT_MASK];
             assert(slot->index == 0);
             *slot = (ds_Hash_Slot){ .hash = hash, .index = (u32)opcode + 1 };
@@ -1121,7 +1148,7 @@ static void app_start(Platform *platform) {
                             break;
                         }
 
-                        u32 opcode_hash = ds_hash_fnv1a(token_string.data, token_string.count);
+                        u32 opcode_hash = ds_hash_fnv1a(token_string.data, size_t_from_u64(token_string.count));
                         ds_Hash_Slot opcode = opcode_slots[opcode_hash & OPCODE_SLOT_MASK];
                         bool is_instruction = opcode.index != 0 && opcode.hash == opcode_hash && string_equals(string_from_cstring(vm_opcode_name[opcode.index - 1]), token_string);
                         u8 matched_instruction = (u8)(opcode.index - 1);
@@ -1256,9 +1283,9 @@ static void app_start(Platform *platform) {
                                 parse_error(&assembler, (Parse_Error_Arguments){ .token = next });
                             }
 
-                            read_ok = false;
-                            String include_bytes = os_read_entire_file(&arena, cstring_from_string(&arena, include_filepath), &read_ok);
-                            if (!read_ok || include_bytes.count > 0x10000) os_exit(1);
+                            bool include_read_ok = false;
+                            String include_bytes = os_read_entire_file(&arena, cstring_from_string(&arena, include_filepath), &include_read_ok);
+                            if (!include_read_ok || include_bytes.count > 0x10000) os_exit(1);
 
                             ds_Hash_Slot *included_file_slot = assembler_get_file_slot(&assembler, include_filepath);
                             if (included_file_slot->index == 0) {

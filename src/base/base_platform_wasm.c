@@ -3,6 +3,10 @@
 struct Platform_Implementation {
     Platform base;
 
+    u32 *pixels;
+    i32 pixel_stride;
+    bool keep_pixels_between_frames;
+
     f32 real_over_virtual_window_scale;
     cpu_draw_Surface surface;
     cpu_draw_Font font;
@@ -128,8 +132,6 @@ void platform__start(void) {
 
     app_start(base);
 
-    platform__.font = cpu_draw_font_from_bdf(platform__font_bytes, platform__font_size);
-
     base->frame.dpi_scale = 1.f;
     if (platform__.real_over_virtual_window_scale == 0.f) platform__.real_over_virtual_window_scale = 3.f;
 }
@@ -156,8 +158,14 @@ void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_
 
     cpu_draw_Surface *surface = &platform__.surface;
     if (surface->pixels == 0) {
-        u32 *pixels = arena_make(platform__.base.persistent_arena, size_t_from_u64((u64)(max_virtual_width * max_virtual_height)), u32);
+        u64 pixel_count = (u64)max_virtual_width * (u64)max_virtual_height;
+        u32 *pixels = arena_make(platform__.base.persistent_arena, size_t_from_u64(pixel_count), u32);
         *surface = cpu_draw_surface(pixels, max_virtual_width, (int)roundf(window_width), (int)roundf(window_height));
+        platform__.pixels = pixels;
+        platform__.pixel_stride = max_virtual_width;
+
+        u32 clear = pixel_from_rgba(platform__.base.clear_color);
+        for (u64 i = 0; i < pixel_count; i += 1) pixels[i] = clear;
     }
 
     f32 actual_real_over_virtual_window_scale = platform__.real_over_virtual_window_scale;
@@ -180,8 +188,13 @@ void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_
     platform__.base.draw_command_capacity = 0;
     app_update_and_render(&platform__.base);
 
-    u32 clear = abgr_from_rgba(platform__.base.clear_color);
-    cpu_draw_rectangle(*surface, 0, 0, surface->clip_right, surface->clip_bottom, clear);
+    void js_set_cursor_hidden(bool hidden);
+    js_set_cursor_hidden(platform__.base.hide_cursor);
+
+    if (!platform__.keep_pixels_between_frames) {
+        u32 clear = pixel_from_rgba(platform__.base.clear_color);
+        cpu_draw_rectangle(*surface, 0, 0, surface->clip_right, surface->clip_bottom, clear);
+    }
     cpu_draw_commands(*surface, &platform__.font, platform__.base.draw_commands, platform__.base.draw_command_count);
 
     app_frame_info_reset_end_of_frame(frame);

@@ -69,9 +69,9 @@ static App_Key app_key_from_js(const char *bytes, u32 count) {
 static App_Mouse_Button app_mouse_button_from_js(JS_Mouse_Button js_button) {
     App_Mouse_Button button = 0;
     switch (js_button) {
-        case JS_Mouse_Button_LEFT: button = App_Mouse_LEFT; break;
-        case JS_Mouse_Button_MIDDLE: button = App_Mouse_MIDDLE; break;
-        case JS_Mouse_Button_RIGHT: button = App_Mouse_RIGHT; break;
+        case JS_Mouse_Button_LEFT: button = App_Mouse_Button_LEFT; break;
+        case JS_Mouse_Button_MIDDLE: button = App_Mouse_Button_MIDDLE; break;
+        case JS_Mouse_Button_RIGHT: button = App_Mouse_Button_RIGHT; break;
         default: {
             static bool once = false;
             if (!once) {
@@ -83,15 +83,19 @@ static App_Mouse_Button app_mouse_button_from_js(JS_Mouse_Button js_button) {
     return button;
 }
 
+// TODO(felix): Replace these with a bespoke META(export) directive? Once the metaprogram has semantic parsing.
+META(link_flag "-Wl,--export=platform__get_draw_surface_pointer")
 cpu_draw_Surface *platform__get_draw_surface_pointer(void) {
     return &platform__.surface;
 }
 
+META(link_flag "-Wl,--export=platform__get_temp_js_string_buffer")
 char *platform__get_temp_js_string_buffer(void) {
     static char platform__js_string_buffer[64];
     return platform__js_string_buffer;
 }
 
+META(link_flag "-Wl,--export=platform__on_key_down")
 void platform__on_key_down(const char *bytes, u32 count) {
     App_Frame_Info *frame = &platform__.base.frame;
     App_Key key = app_key_from_js(bytes, count);
@@ -99,11 +103,13 @@ void platform__on_key_down(const char *bytes, u32 count) {
     frame->key_down[key] = true;
 }
 
+META(link_flag "-Wl,--export=platform__on_key_up")
 void platform__on_key_up(const char *bytes, u32 count) {
     App_Key key = app_key_from_js(bytes, count);
     platform__.base.frame.key_down[key] = false;
 }
 
+META(link_flag "-Wl,--export=platform__on_mouse_down")
 void platform__on_mouse_down(JS_Mouse_Button js_button) {
     App_Frame_Info *frame = &platform__.base.frame;
     App_Mouse_Button button = app_mouse_button_from_js(js_button);
@@ -111,16 +117,19 @@ void platform__on_mouse_down(JS_Mouse_Button js_button) {
     frame->mouse_down[button] = true;
 }
 
+META(link_flag "-Wl,--export=platform__on_mouse_up")
 void platform__on_mouse_up(JS_Mouse_Button js_button) {
     App_Mouse_Button button = app_mouse_button_from_js(js_button);
     platform__.base.frame.mouse_down[button] = false;
 }
 
+META(link_flag "-Wl,--export=platform__on_scroll")
 void platform__on_scroll(f32 x, f32 y) {
     (void)x; // for now
     platform__.base.frame.scroll = y / -120.f;
 }
 
+META(link_flag "-Wl,--export=platform__start")
 void platform__start(void) {
     Platform *base = &platform__.base;
 
@@ -136,6 +145,7 @@ void platform__start(void) {
     if (platform__.real_over_virtual_window_scale == 0.f) platform__.real_over_virtual_window_scale = 3.f;
 }
 
+META(link_flag "-Wl,--export=platform__update_and_render")
 void platform__update_and_render(f32 window_width, f32 window_height, f32 mouse_x, f32 mouse_y) {
     Scratch scratch = scratch_begin(platform__.base.frame_arena);
     App_Frame_Info *frame = &platform__.base.frame;

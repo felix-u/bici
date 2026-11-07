@@ -413,9 +413,9 @@ static void program(void) {
     static stbtt_packedchar atlas_chars[ATLAS_FONT_SIZES_COUNT][ATLAS_CHAR_COUNT];
     {
         META(embed "src/base/third_party/Inter/Inter-Regular.ttf")
-        extern const char ttf_bytes[];
-        extern const u64 ttf_bytes_count;
-        unsigned const char *ttf = (unsigned const char *)ttf_bytes;
+        String ttf_file = base_embedded_files_get(S("src/base/third_party/Inter/Inter-Regular.ttf"));
+        ensure(ttf_file.count > 0);
+        unsigned const char *ttf = (unsigned const char *)ttf_file.data;
 
         stbtt_pack_range ranges[ATLAS_FONT_SIZES_COUNT] = {0};
         for (int i = 0; i < ATLAS_FONT_SIZES_COUNT; i += 1) {

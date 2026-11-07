@@ -3,14 +3,8 @@
 
 #if BASE_OS == BASE_OS_WASM
     #include "base/base_platform_wasm.c"
-
-    // TODO(felix): Remove once metaprogram supports proper embed on wasm?
-    META(generate_here)
-    #include "src/meta.generated.c"
-#endif
-
-// TODO(felix): Change to #else when C lexer properly handles preprocessor.
-#if BASE_OS == BASE_OS_WINDOWS
+#elif BASE_OS == BASE_OS_WINDOWS
+    META(subsystem = console)
     #include "base/base_platform_wingdi.c"
 #endif
 
@@ -267,12 +261,12 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                     switch (device) {
                         case Vm_Device_MOUSE: switch (action) {
                             case Vm_Mouse_LEFT_BUTTON: {
-                                if (platform->frame.mouse_clicked[App_Mouse_LEFT]) to_push |= 0xf0;
-                                if (platform->frame.mouse_down[App_Mouse_LEFT])    to_push |= 0x0f;
+                                if (platform->frame.mouse_clicked[App_Mouse_Button_LEFT]) to_push |= 0xf0;
+                                if (platform->frame.mouse_down[App_Mouse_Button_LEFT])    to_push |= 0x0f;
                             } break;
                             case Vm_Mouse_RIGHT_BUTTON: {
-                                if (platform->frame.mouse_clicked[App_Mouse_RIGHT]) to_push |= 0xf0;
-                                if (platform->frame.mouse_down[App_Mouse_RIGHT])    to_push |= 0x0f;
+                                if (platform->frame.mouse_clicked[App_Mouse_Button_RIGHT]) to_push |= 0xf0;
+                                if (platform->frame.mouse_down[App_Mouse_Button_RIGHT])    to_push |= 0x0f;
                             } break;
                             default: panic("[read.1] invalid action #%02x for mouse device", action);
                         } break;
@@ -480,13 +474,19 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                 String file_name = { .data = (const char *)&vm->memory[string_address + 1], .count = string_length };
 
                                 bool read_ok = false;
-                                String bytes = os_read_entire_file(vm->arena, cstring_from_string(vm->arena, file_name), &read_ok);
-                                ensure(read_ok);
+                                #if BASE_OS == BASE_OS_WASM
+                                    String bytes = base_embedded_files_get(file_name);
+                                    read_ok = bytes.data != 0;
+                                #else
+                                    String bytes = os_read_entire_file(vm->arena, cstring_from_string(vm->arena, file_name), &read_ok);
+                                #endif
+                                if (!read_ok) log_error("file '%S' not found", file_name);
 
-                                vm->file_bytes = (u8 *)bytes.data;
+                                vm->file_bytes = read_ok ? (u8 *)bytes.data : 0;
+                                u64 file_length = read_ok ? bytes.count : 0;
 
-                                assert(bytes.count <= 0xffff);
-                                set16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH], (u16)bytes.count);
+                                assert(file_length <= 0xffff);
+                                set16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH], (u16)file_length);
                             } break;
                             case Vm_File_LENGTH: {
                                 assert(argument <= get16(&vm->memory[Vm_Device_FILE | (Vm_Device)Vm_File_LENGTH]));
@@ -785,19 +785,19 @@ static void app_start(Platform *platform) {
 
     #if BASE_OS == BASE_OS_WASM
     {
-        // TODO(felix): Let the web build load any ROM, instead of the one embedded at build time.
+        // TODO(felix): Let the web build load any ROM, instead of only the ones embedded at build time.
+        META(embed "os.rom")
+        META(embed "hello.rom")
+        META(embed "keyboard.rom")
         META(embed "mouse.rom")
-        extern const char embedded_rom[];
-        extern const u64 embedded_rom_count;
+        META(embed "screen.rom")
 
         command = Command_RUN;
-        input_filepath = "mouse.rom";
-        input_bytes = (String){ .data = embedded_rom, .count = embedded_rom_count };
+        input_filepath = "os.rom";
+        input_bytes = base_embedded_files_get(string_from_cstring(input_filepath));
+        ensure(input_bytes.count > 0);
     }
-    #endif
-
-    // TODO(felix): Change to #else when C lexer properly handles preprocessor.
-    #if BASE_OS != BASE_OS_WASM
+    #else
     {
         if (arguments_count < 3) {
             log_error("%s", USAGE_HELP_TEXT);
@@ -832,11 +832,11 @@ static void app_start(Platform *platform) {
         input_filepath = arguments[2];
         bool read_ok = false;
         input_bytes = os_read_entire_file(&arena, input_filepath, &read_ok);
-        assert(read_ok);
+        ensure(read_ok);
     }
     #endif
 
-    assert(input_bytes.count <= 0x10000);
+    ensure(input_bytes.count <= 0x10000);
 
     u8 rom_bytes[0x10000] = {0};
     u8 *rom = rom_bytes;

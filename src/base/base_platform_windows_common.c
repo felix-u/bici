@@ -196,12 +196,12 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
             frame->key_down[key] = false;
         } break;
         case WM_LBUTTONDOWN: {
-            App_Mouse_Button button = App_Mouse_LEFT;
+            App_Mouse_Button button = App_Mouse_Button_LEFT;
             frame->mouse_clicked[button] = !frame->mouse_down[button];
             frame->mouse_down[button] = true;
         } break;
         case WM_LBUTTONUP: {
-            App_Mouse_Button button = App_Mouse_LEFT;
+            App_Mouse_Button button = App_Mouse_Button_LEFT;
             frame->mouse_down[button] = false;
         } break;
         case WM_MOUSEMOVE: {
@@ -213,12 +213,12 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
             frame->scroll += (f32)delta / 120.f;
         } break;
         case WM_RBUTTONDOWN: {
-            App_Mouse_Button button = App_Mouse_RIGHT;
+            App_Mouse_Button button = App_Mouse_Button_RIGHT;
             frame->mouse_clicked[button] = !frame->mouse_down[button];
             frame->mouse_down[button] = true;
         } break;
         case WM_RBUTTONUP: {
-            App_Mouse_Button button = App_Mouse_RIGHT;
+            App_Mouse_Button button = App_Mouse_Button_RIGHT;
             frame->mouse_down[button] = false;
         } break;
         case WM_SETCURSOR: {

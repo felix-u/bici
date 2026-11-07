@@ -179,6 +179,10 @@ _Static_assert(sizeof(f64) == 8, "");
     int     mkdir(const char *path, mode_t mode);
     int     pthread_create(pthread_t *, const pthread_attr_t *, void *(*start_routine)(void *), void *argument);
     char   *realpath(const char *file_name, char *resolved_name); //  __DARWIN_EXTSN(realpath); // NOTE(felix): `__DARWIN_EXTSN` needed to silence "error: cannot apply asm label to function after its first use"
+    int     close(int descriptor);
+    int     dup2(int descriptor, int new_descriptor);
+    int     pipe(int descriptors[2]);
+    ssize_t read(int descriptor, void *buffer, size_t number_of_bytes);
     int     remove(const char *path);
     int     stat(const char *path, struct stat *buf);
     void    rewind(FILE *file);
@@ -202,7 +206,18 @@ _Static_assert(sizeof(f64) == 8, "");
     #define os_exit(code) RtlExitUserProcess((int)(code))
 
     META(link "Kernel32")
-    struct _SECURITY_ATTRIBUTES;
+
+    #if LINK_CRT
+        void *memcpy(void *destination, const void *source, size_t number_of_bytes);
+        void *memset(void *destination, int byte, size_t length);
+        int   memcmp(const void *s1, const void *s2, size_t number_of_bytes);
+    #endif
+
+    struct _SECURITY_ATTRIBUTES { // https://learn.microsoft.com/en-us/windows/win32/api/wtypesbase/ns-wtypesbase-security_attributes
+        unsigned long nLength;
+        void *lpSecurityDescriptor;
+        int bInheritHandle;
+    };
     typedef struct { // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfow
         unsigned long cb;
         unsigned short *lpReserved;
@@ -229,9 +244,14 @@ _Static_assert(sizeof(f64) == 8, "");
         unsigned long dwProcessId;
         unsigned long dwThreadId;
     } PROCESS_INFORMATION;
+    int  CreatePipe(void **read_pipe, void **write_pipe, struct _SECURITY_ATTRIBUTES *pipe_attributes, unsigned long size);
     int  CreateProcessW(const unsigned short *application_name, unsigned short *command_line, struct _SECURITY_ATTRIBUTES *process_attributes, struct _SECURITY_ATTRIBUTES *thread_attributes, int should_inherit_handles, unsigned long creation_flags, void *environment, const unsigned short *current_directory, STARTUPINFOW *, PROCESS_INFORMATION *);
+    int  SetHandleInformation(void *object, unsigned long mask, unsigned long flags);
     void OutputDebugStringW(const unsigned short *output_string);
     int  WriteConsoleW(void *console_output, const void *buffer, unsigned long number_of_characters_to_write, unsigned long *number_of_characters_written, void *reserved);
+
+    META(link "User32")
+    int MessageBoxW(void *window, const unsigned short *text, const unsigned short *caption, unsigned type);
 
     META(link "Ntdll")
     typedef struct {
@@ -301,6 +321,7 @@ _Static_assert(sizeof(f64) == 8, "");
     } FILE_FS_DEVICE_INFORMATION;
     long          NtQueryInformationProcess(void *ProcessHandle, int ProcessInformationClass, void *ProcessInformation, unsigned long ProcessInformationLength, unsigned long *ReturnLength);
     long          NtQueryVolumeInformationFile(void *FileHandle, IO_STATUS_BLOCK *IoStatusBlock, void *FsInformation, unsigned long Length, int FsInformationClass);
+    long          NtReadFile(void *FileHandle, void *Event, void *ApcRoutine, void *ApcContext, IO_STATUS_BLOCK *, void *Buffer, unsigned long Length, long long *ByteOffset, unsigned long *Key);
     long          NtTerminateProcess(void *ProcessHandle, long ExitStatus);
     long          NtWaitForSingleObject(void *Handle, unsigned char Alertable, long long *Timeout);
     long          NtWriteFile(void *FileHandle, void *Event, void *ApcRoutine, void *ApcContext, IO_STATUS_BLOCK *IoStatusBlock, const void *Buffer, unsigned long Length, long long *ByteOffset, unsigned long *Key);
@@ -390,10 +411,12 @@ typedef arena_Scratch Scratch;
 #define log_internal_v(format, arguments) log_internal_with_location_v(__FILE__, __LINE__, __func__, format, arguments)
 static void log_internal_with_location(const char *file, u64 line, const char *func, const char *format, ...);
 static void log_internal_with_location_v(const char *file, u64 line, const char *func, const char *format, va_list arguments);
+static void os_show_fatal_error(const char *file, u64 line, const char *function, const char *format, ...);
 
 #define panic(...) panic_(__FILE__, __LINE__, __func__, __VA_ARGS__)
 #define panic_(file, line, function, ...) do { \
     log_internal_with_location((file), (line), (function), "panic: " __VA_ARGS__); \
+    os_show_fatal_error((file), (line), (function), "panic: " __VA_ARGS__); \
     breakpoint; os_abort(); \
 } while (0)
 
@@ -1004,13 +1027,26 @@ static String string_builder_string(String_Builder builder);
 static String os_read_entire_file(Arena *arena, const char *path, bool *ok);
 static   bool os_write_entire_file(const char *path, const void *data, u64 count);
 
+typedef struct {
+    u64 name_offset;
+    u64 data_offset;
+    u64 data_size;
+} Embedded_File_Entry;
+static String base_embedded_files_get(String name);
+
 typedef enum {
     Os_Process_Flag_PRINT_COMMAND_BEFORE_RUNNING = 1 << 0,
     Os_Process_Flag_PRINT_EXECUTION_TIME = 1 << 1,
     Os_Process_Flag_PRINT_EXIT_CODE = 1 << 2,
+    Os_Process_Flag_CAPTURE_OUTPUT = 1 << 3,
 } Os_Process_Flags;
 
-static  u32  os_process_run(Arena *scratch_arena, const char **arguments, const char *directory, Os_Process_Flags);
+typedef struct {
+    u32 exit_code;
+    String output;
+} Os_Process_Result;
+
+static Os_Process_Result os_process_run(Arena *arena, const char **arguments, const char *directory, Os_Process_Flags flags);
 static void  os_write_console(const char *bytes, u64 count);
 
 static void print(const char *format, ...);
@@ -1018,15 +1054,50 @@ static void print_(const char *format, va_list arguments);
 
 #define CLEX_FUNCTION static
 #include "base/clex.h"
-#define BASE_CLEX_DEFINE_EXPONENT 10
-#define BASE_CLEX_DEFINE_CAPACITY (1 << BASE_CLEX_DEFINE_EXPONENT)
+// TODO(felix): Make this growable.
+#define BUILD_MACROS_EXPONENT 12
+#define BUILD_MACROS_CAPACITY (1 << BUILD_MACROS_EXPONENT)
+
+typedef u8 Build_Macro_State;
+enum {
+    Build_Macro_State_UNDEFINED = 0,
+    Build_Macro_State_DEFINED,
+    Build_Macro_State_DEFINED_VALUE_UNKNOWN,
+    Build_Macro_State_UNKNOWN,
+};
+
+typedef u32 Build_Unknown_Reason_Id;
+
 typedef struct {
-    const char *names[BASE_CLEX_DEFINE_CAPACITY];
-    const char *definitions[BASE_CLEX_DEFINE_CAPACITY];
+    const char *description;
+    Build_Unknown_Reason_Id cause;
+} Build_Unknown_Reason;
+
+typedef struct {
+    Build_Unknown_Reason *items;
+    u64 count;
+    u64 capacity;
+} Build_Unknown_Reasons;
+
+typedef struct {
+    Build_Macro_State state;
+    String definition;
+    Build_Unknown_Reason_Id unknown_reason;
+} Build_Macro;
+
+typedef struct {
+    String name;
+    Build_Macro macro;
+    bool is_defined_by_source;
+} Build_Macro_Slot;
+
+typedef struct {
+    Build_Macro_Slot slots[BUILD_MACROS_CAPACITY];
     u32 used;
-} Base_Clex_Define;
-static const char *base_clex_define(void *user_data, const char *symbol, const char *definition);
-static bool base_clex_symbols_match(const char *a, const char *b);
+    bool collect_unknown_reasons;
+    Build_Unknown_Reasons reasons;
+} Build_Macros;
+
 static String base_string_from_clex_data(clex_Data data);
 
 #define OBJECT_FUNCTION static
@@ -1085,10 +1156,10 @@ typedef enum {
 
 // NOTE(felix): synced with ui_Mouse_Button
 typedef enum {
-    App_Mouse_LEFT,
-    App_Mouse_MIDDLE,
-    App_Mouse_RIGHT,
-    App_Mouse_MAX_VALUE,
+    App_Mouse_Button_LEFT,
+    App_Mouse_Button_MIDDLE,
+    App_Mouse_Button_RIGHT,
+    App_Mouse_Button_MAX_VALUE,
 } App_Mouse_Button;
 
 typedef struct {
@@ -1097,8 +1168,8 @@ typedef struct {
     f32 seconds_since_last_frame;
     V2 mouse_position;
     f32 scroll;
-    bool mouse_clicked[App_Mouse_MAX_VALUE];
-    bool mouse_down[App_Mouse_MAX_VALUE];
+    bool mouse_clicked[App_Mouse_Button_MAX_VALUE];
+    bool mouse_down[App_Mouse_Button_MAX_VALUE];
     bool key_down[App_Key_MAX_VALUE];
     bool key_pressed[App_Key_MAX_VALUE];
     f32 safe_area_inset_left;
@@ -1372,6 +1443,8 @@ static inline bool ascii_is_hexadecimal(char c) { return ('0' <= c && c <= '9') 
 static inline bool ascii_is_whitespace(char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
 
 #if BUILD_ASAN
+    void __asan_poison_memory_region(void const volatile *address, size_t byte_count);
+    void __asan_unpoison_memory_region(void const volatile *address, size_t byte_count);
     #define asan_poison_memory_region(address, byte_count)   __asan_poison_memory_region((address), (byte_count))
     #define asan_unpoison_memory_region(address, byte_count) __asan_unpoison_memory_region((address), (byte_count))
 #else
@@ -2410,18 +2483,40 @@ static inline void string_builder_null_terminate(Arena *arena, String_Builder *b
     #include "base/filesystem.h"
 #endif
 
-static String os_read_entire_file(Arena *arena, const char *path, bool *ok) {
-    *ok = false;
-    String result = {0};
-    fs_File file = fs_file_open_and_get_size(path, fs_File_Flag_READ, &result.count);
+extern const char embedded_files[];
 
-    char *data = arena_make(arena, size_t_from_u64(result.count + 1), char);
-    result.count = fs_read_entire_file(file, data, result.count);
-    data[result.count] = 0;
-    *ok = result.count > 0;
+static String base_embedded_files_get(String name) {
+    String result = {0};
+
+    u64 file_count;
+    memcpy(&file_count, embedded_files, sizeof file_count);
+
+    for (u64 i = 0; i < file_count && result.data == 0; i += 1) {
+        Embedded_File_Entry entry;
+        memcpy(&entry, embedded_files + sizeof file_count + i * sizeof entry, sizeof entry);
+
+        String entry_name = string_from_cstring(embedded_files + entry.name_offset);
+        if (string_equals(entry_name, name)) result = (String){ .data = embedded_files + entry.data_offset, .count = entry.data_size };
+    }
+
+    return result;
+}
+
+static String os_read_entire_file(Arena *arena, const char *path, bool *ok) {
+    String result = {0};
+    u64 size = 0;
+    fs_File file = fs_file_open_and_get_size(path, fs_File_Flag_READ, &size);
+    bool read_ok = file.handle != 0;
+
+    if (read_ok && size > 0) {
+        char *data = arena_make(arena, size_t_from_u64(size + 1), char);
+        read_ok = fs_read_entire_file(file, data, size) == size;
+        data[size] = 0;
+        if (read_ok) result = (String){ .data = data, .count = size };
+    }
 
     fs_close(file);
-    result.data = data;
+    *ok = read_ok;
     return result;
 }
 
@@ -2479,19 +2574,23 @@ static void log_internal_with_location_v(const char *file, u64 line, const char 
     #endif
 }
 
-#if BASE_OS == BASE_OS_WINDOWS
-    static u16 *os_windows_utf16_from_utf8(Arena *arena, const char *utf8, u64 count) {
-        u64 unit_count = utf16_from_utf8(0, 0, utf8, count).destination_units_written;
-        u16 *utf16 = arena_make(arena, unit_count + 1, u16);
-        utf16_from_utf8(utf16, unit_count, utf8, count);
-        utf16[unit_count] = 0;
-        return utf16;
-    }
-#endif
+static u16 *os_utf16_from_utf8(Arena *arena, const char *utf8, u64 count) {
+    size_t source_count = size_t_from_u64(count);
+    size_t unit_count = utf16_from_utf8(0, 0, utf8, source_count).destination_units_written;
+    u16 *utf16 = arena_make(arena, unit_count + 1, u16);
+    utf16_from_utf8(utf16, unit_count, utf8, source_count);
+    utf16[unit_count] = 0;
+    return utf16;
+}
 
-static u32 os_process_run(Arena *scratch_arena, const char **arguments, const char *directory, Os_Process_Flags flags) {
-    Scratch scratch = scratch_begin(scratch_arena);
+static Os_Process_Result os_process_run(Arena *arena, const char **arguments, const char *directory, Os_Process_Flags flags) {
     u32 exit_code = 1;
+
+    bool capture_output = !!(flags & Os_Process_Flag_CAPTURE_OUTPUT);
+    u64 output_capacity = 0;
+    char *output_data = 0;
+    u64 output_count = 0;
+    u64 output_read_size = 4096;
 
     if (flags & Os_Process_Flag_PRINT_COMMAND_BEFORE_RUNNING) {
         if (directory != 0) print("[./%s] ", directory);
@@ -2506,6 +2605,7 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
 
     #if BASE_OS == BASE_OS_WINDOWS
     {
+        Scratch scratch = scratch_begin(arena);
         const u16 *application_name = 0;
 
         u64 capacity = 0;
@@ -2552,18 +2652,38 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
             }
         }
 
-        u16 *command_line_utf16 = os_windows_utf16_from_utf8(scratch.arena, command_line, command_length);
-        u16 *directory_utf16 = directory == 0 ? 0 : os_windows_utf16_from_utf8(scratch.arena, directory, cstring_length(directory));
+        u16 *command_line_utf16 = os_utf16_from_utf8(scratch.arena, command_line, command_length);
+        u16 *directory_utf16 = directory == 0 ? 0 : os_utf16_from_utf8(scratch.arena, directory, cstring_length(directory));
+
+        void *output_read_pipe = 0;
+        void *output_write_pipe = 0;
+        bool pipe_ok = true;
+        if (capture_output) {
+            enum { HANDLE_FLAG_INHERIT = 0x1 };
+            struct _SECURITY_ATTRIBUTES pipe_attributes = { .nLength = sizeof pipe_attributes, .bInheritHandle = true };
+            pipe_ok = CreatePipe(&output_read_pipe, &output_write_pipe, &pipe_attributes, 0);
+            pipe_ok = pipe_ok && SetHandleInformation(output_read_pipe, HANDLE_FLAG_INHERIT, 0);
+            if (!pipe_ok) log_error("unable to create an output pipe for '%s' (error %u)", arguments[0], RtlGetLastWin32Error());
+        }
 
         struct _SECURITY_ATTRIBUTES *process_attributes = 0;
         struct _SECURITY_ATTRIBUTES *thread_attributes = 0;
-        int inherit_handles = false;
+        int inherit_handles = capture_output;
         u32 creation_flags = 0;
         void *environment = 0;
         STARTUPINFOW startup_info = { .cb = sizeof startup_info };
         PROCESS_INFORMATION process_info = {0};
 
-        int ok = CreateProcessW(
+        if (capture_output) {
+            enum { STARTF_USESTDHANDLES = 0x100 };
+            RTL_USER_PROCESS_PARAMETERS *parameters = RtlGetCurrentPeb()->ProcessParameters;
+            startup_info.dwFlags = STARTF_USESTDHANDLES;
+            startup_info.hStdInput = parameters->StandardInput;
+            startup_info.hStdOutput = output_write_pipe;
+            startup_info.hStdError = parameters->StandardError;
+        }
+
+        int ok = pipe_ok && CreateProcessW(
             application_name,
             command_line_utf16,
             process_attributes,
@@ -2575,10 +2695,21 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
             &startup_info,
             &process_info
         );
+        scratch_end(scratch);
+        if (output_write_pipe != 0) NtClose(output_write_pipe);
 
-        if (!ok) {
+        if (pipe_ok && !ok) {
             log_error("unable to start process '%s'; CreateProcessW() failed with error %u", arguments[0], RtlGetLastWin32Error());
-        } else {
+        } else if (ok) {
+            for (bool reading = capture_output; reading;) {
+                output_data = arena_array_reserve(arena, output_data, output_count, &output_capacity, output_count + output_read_size);
+                IO_STATUS_BLOCK status_block = {0};
+                unsigned long unused_capacity = (unsigned long)MIN(output_capacity - output_count, UINT32_MAX);
+                long read_status = NtReadFile(output_read_pipe, 0, 0, 0, &status_block, output_data + output_count, unused_capacity, 0, 0);
+                reading = read_status >= 0 && status_block.Information > 0;
+                if (reading) output_count += status_block.Information;
+            }
+
             int wait_status = NtWaitForSingleObject(process_info.hProcess, false, 0);
 
             PROCESS_BASIC_INFORMATION information = {0};
@@ -2590,13 +2721,25 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
             NtClose(process_info.hProcess);
             NtClose(process_info.hThread);
         }
+        if (output_read_pipe != 0) NtClose(output_read_pipe);
     }
     #elif BASE_OS & BASE_OS_ANY_POSIX
     {
-        pid_t pid = fork();
-        if (pid < 0) {
+        int output_pipe[2] = { -1, -1 };
+        enum { PIPE_READ_END = 0, PIPE_WRITE_END = 1, STANDARD_OUTPUT = 1 };
+        bool pipe_ok = !capture_output || pipe(output_pipe) == 0;
+        if (!pipe_ok) log_error("unable to create an output pipe for '%s' (errno=%d)", arguments[0], errno);
+
+        pid_t pid = pipe_ok ? fork() : -1;
+        if (pipe_ok && pid < 0) {
             log_error("unable to fork() to start process '%s' (errno=%d)", arguments[0], errno);
         } else if (pid == 0) { // child
+            if (capture_output) {
+                dup2(output_pipe[PIPE_WRITE_END], STANDARD_OUTPUT);
+                close(output_pipe[PIPE_READ_END]);
+                close(output_pipe[PIPE_WRITE_END]);
+            }
+
             bool directory_ok = directory == 0;
             if (directory != 0) {
                 int result = chdir(directory);
@@ -2610,7 +2753,16 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
             }
 
             os_exit(1);
-        } else { // parent
+        } else if (pid > 0) { // parent
+            if (capture_output) close(output_pipe[PIPE_WRITE_END]);
+            for (bool reading = capture_output; reading;) {
+                output_data = arena_array_reserve(arena, output_data, output_count, &output_capacity, output_count + output_read_size);
+                ssize_t read_count = read(output_pipe[PIPE_READ_END], output_data + output_count, output_capacity - output_count);
+                reading = read_count > 0;
+                if (reading) output_count += (u64)read_count;
+            }
+            if (capture_output) close(output_pipe[PIPE_READ_END]);
+
             int status = 0;
             pid_t result = waitpid(pid, &status, 0);
             bool wait_ok = result != -1;
@@ -2624,6 +2776,10 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
     }
     #else
     {
+        (void)arena;
+        (void)capture_output;
+        (void)output_capacity;
+        (void)output_read_size;
         panic("unimplemented");
     }
     #endif
@@ -2642,8 +2798,8 @@ static u32 os_process_run(Arena *scratch_arena, const char **arguments, const ch
         print("\n");
     }
 
-    scratch_end(scratch);
-    return exit_code;
+    Os_Process_Result result = { .exit_code = exit_code, .output = { .data = output_data, .count = output_count } };
+    return result;
 }
 
 static void os_write_console(const char *bytes, u64 count) {
@@ -2651,10 +2807,13 @@ static void os_write_console(const char *bytes, u64 count) {
     // NOTE(felix): can't use assert in this function because panic() will call os_write_console, so we'll end up with a recursively failing assert and stack overflow. Instead, use `if (!condition) { breakpoint; abort(); }`
     #if BASE_OS == BASE_OS_WINDOWS
     {
-        #if WINDOWS_SUBSYSTEM_WINDOWS
+        #if WINDOWS_SUBSYSTEM == WINDOWS_SUBSYSTEM_WINDOWS
         {
-            (void)bytes;
-            (void)count;
+            // TODO(felix): Make this arena thread-safe once base supports multiple threads.
+            static Arena debug_output_arena = {0};
+            Scratch scratch = scratch_begin(&debug_output_arena);
+            OutputDebugStringW(os_utf16_from_utf8(scratch.arena, bytes, count));
+            scratch_end(scratch);
         }
         #else
         {
@@ -2737,60 +2896,108 @@ static void print_(const char *format, va_list arguments) {
     string_builder_print_(scratch.arena, &output, format, arguments);
     string_builder_null_terminate(scratch.arena, &output);
 
-    #if (BASE_OS == BASE_OS_WINDOWS) && BUILD_DEBUG
-        OutputDebugStringW(os_windows_utf16_from_utf8(scratch.arena, (const char *)output.data, output.count));
+    #if (BASE_OS == BASE_OS_WINDOWS) && WINDOWS_SUBSYSTEM == WINDOWS_SUBSYSTEM_CONSOLE && BUILD_DEBUG
+        OutputDebugStringW(os_utf16_from_utf8(scratch.arena, (const char *)output.data, output.count));
     #endif
 
     os_write_console(output.data, output.count);
     scratch_end(scratch);
 }
 
+static void os_show_fatal_error(const char *file, u64 line, const char *function, const char *format, ...) {
+    #if (BASE_OS == BASE_OS_WINDOWS) && WINDOWS_SUBSYSTEM == WINDOWS_SUBSYSTEM_WINDOWS
+    {
+        static Arena fatal_error_arena = {0};
+        Scratch scratch = scratch_begin(&fatal_error_arena);
+
+        String_Builder message = {0};
+        va_list arguments;
+        va_start(arguments, format);
+        string_builder_print_(scratch.arena, &message, format, arguments);
+        va_end(arguments);
+        string_builder_print(scratch.arena, &message, "\n\n%s(%llu) in %s()", file, line, function);
+
+        const char caption[] = "panic";
+        u16 *caption_utf16 = os_utf16_from_utf8(scratch.arena, caption, sizeof caption - 1);
+        u16 *message_utf16 = os_utf16_from_utf8(scratch.arena, (const char *)message.data, message.count);
+
+        enum { MB_ICONERROR = 0x10, MB_TASKMODAL = 0x2000, MB_SETFOREGROUND = 0x10000 };
+        MessageBoxW(0, message_utf16, caption_utf16, MB_ICONERROR | MB_TASKMODAL | MB_SETFOREGROUND);
+
+        scratch_end(scratch);
+    }
+    #else
+    {
+        (void)file;
+        (void)line;
+        (void)function;
+        (void)format;
+    }
+    #endif
+}
+
 #define CLEX_IMPLEMENTATION
 #define CLEX_ASSERT assert
 #include "base/clex.h"
 
-static const char *base_clex_define(void *user_data, const char *symbol, const char *definition) {
-    assert(user_data != 0);
-    assert(symbol != 0);
-    const char *result = 0;
+static u32 build_macros_find(const Build_Macros *macros, String name) {
+    u32 hash = ds_hash_fnv1a(name.data, size_t_from_u64(name.count));
+    u32 slot = hash;
 
-    Base_Clex_Define *state = user_data;
-    bool should_get = definition == 0;
-
-    const char *symbol_end = clex_identifier_end(symbol);
-    u32 hash = ds_hash_fnv1a(symbol, (size_t)(symbol_end - symbol));
-    u32 index = hash;
-    const char *name = 0;
-    if (should_get) {
-        do {
-            index = ds_hash_step_index(hash, BASE_CLEX_DEFINE_EXPONENT, index);
-            name = state->names[index];
-        } while(name != 0 && !base_clex_symbols_match(name, symbol));
-
-        if (name != 0) result = state->definitions[index];
-    } else {
-        assert(state->used * 100 < BASE_CLEX_DEFINE_CAPACITY * 70);
-        state->used += 1;
-
-        do {
-            index = ds_hash_step_index(hash, BASE_CLEX_DEFINE_EXPONENT, index);
-            assert(index < BASE_CLEX_DEFINE_CAPACITY);
-            name = state->names[index];
-        } while (name != 0 && !base_clex_symbols_match(name, symbol));
-
-        state->names[index] = symbol;
-        state->definitions[index] = definition;
+    for (bool searching = true; searching;) {
+        slot = ds_hash_step_index(hash, BUILD_MACROS_EXPONENT, slot);
+        String slot_name = macros->slots[slot].name;
+        searching = slot_name.data != 0 && !string_equals(slot_name, name);
     }
 
-    return result;
+    return slot;
 }
 
-static bool base_clex_symbols_match(const char *a, const char *b) {
-    const char *a_end = clex_identifier_end(a);
-    const char *b_end = clex_identifier_end(b);
-    String as = string_from_pointers(a, a_end);
-    String bs = string_from_pointers(b, b_end);
-    return string_equals(as, bs);
+static u32 build_macros_insert(Build_Macros *macros, String name, bool *ok) {
+    enum { MAXIMUM_LOAD_PERCENT = 70 };
+    u32 slot = build_macros_find(macros, name);
+    bool is_new = macros->slots[slot].name.data == 0;
+    bool has_space = !is_new || (macros->used + 1) * 100 <= BUILD_MACROS_CAPACITY * MAXIMUM_LOAD_PERCENT;
+
+    if (has_space && is_new) {
+        macros->slots[slot].name = name;
+        macros->used += 1;
+    }
+    if (!has_space) log_error("more than %d macros; the metaprogram's table is full", BUILD_MACROS_CAPACITY * MAXIMUM_LOAD_PERCENT / 100);
+
+    *ok = has_space;
+    return slot;
+}
+
+#define build_unknown_reason(arena, macros, description, cause) ((macros)->collect_unknown_reasons ? build_unknown_reason_((arena), (macros), (description), (cause)) : BUILD_UNKNOWN_REASON_NOT_COLLECTED)
+enum { BUILD_UNKNOWN_REASON_NOT_COLLECTED = 1 };
+static Build_Unknown_Reason_Id build_unknown_reason_(Arena *arena, Build_Macros *macros, const char *description, Build_Unknown_Reason_Id cause) {
+    Build_Unknown_Reasons *reasons = &macros->reasons;
+    reasons->items = arena_array_reserve(arena, reasons->items, reasons->count, &reasons->capacity, reasons->count + 2);
+
+    bool id_zero_is_reserved = reasons->count == 0;
+    reasons->count += id_zero_is_reserved;
+
+    Build_Unknown_Reason_Id id = (Build_Unknown_Reason_Id)reasons->count;
+    reasons->items[id] = (Build_Unknown_Reason){ .description = description, .cause = cause };
+    reasons->count += 1;
+    return id;
+}
+
+static Build_Macro build_macros_get(Arena *arena, Build_Macros *macros, String name) {
+    u32 slot = build_macros_find(macros, name);
+    bool starts_with_underscore_and_uppercase = name.count >= 2 && name.data[0] == '_' && 'A' <= name.data[1] && name.data[1] <= 'Z';
+    bool is_reserved_name = string_starts_with(name, S("__")) || starts_with_underscore_and_uppercase;
+    bool is_unlisted_reserved_name = macros->slots[slot].name.data == 0 && is_reserved_name;
+
+    Build_Macro macro = macros->slots[slot].macro;
+
+    if (is_unlisted_reserved_name) {
+        macro.state = Build_Macro_State_UNKNOWN;
+        macro.unknown_reason = build_unknown_reason(arena, macros, cstring_print(arena, "`%S` is a reserved identifier", name), 0);
+    }
+
+    return macro;
 }
 
 static String base_string_from_clex_data(clex_Data data) {
@@ -2870,15 +3077,6 @@ static const char *build_linker_initial_command[Build_Linker_COUNT][BASE_OS_COUN
         "-nostdlib",
         "-Wl,--no-entry",
         "-Wl,--allow-undefined", // NOTE(felix): consider --allow-undefined-file for explicit whitelist
-        "-Wl,--export=platform__get_draw_surface_pointer",
-        "-Wl,--export=platform__get_temp_js_string_buffer",
-        "-Wl,--export=platform__on_key_down",
-        "-Wl,--export=platform__on_key_up",
-        "-Wl,--export=platform__on_mouse_down",
-        "-Wl,--export=platform__on_mouse_up",
-        "-Wl,--export=platform__on_scroll",
-        "-Wl,--export=platform__start",
-        "-Wl,--export=platform__update_and_render",
         "-Wl,--initial-memory=134217728", // 128mb, but TODO(felix): make configurable
         "-Wl,--stack-first",
         "-Wl,-z,stack-size=1048576", // NOTE(felix): 1mb matches windows. I ran into stack overflow on macOS but not on Windows for some reason--on the same project, in the same browser
@@ -2991,29 +3189,6 @@ static void build_objects_push(Build_Objects *objects, Build_Object object) {
     objects->count += 1;
 }
 
-static bool build_expect_include(Arena *arena, clex_Lexer *lexer, String *file) {
-    clex_lex(lexer);
-    String token_data = base_string_from_clex_data(lexer->token.data);
-    bool ok = lexer->token.kind == clex_Token_INCLUDE;
-    ok = ok && string_equals(token_data, S("include"));
-    if (!ok) {
-        log_error("expected `#include`");
-        return false;
-    }
-
-    const char *copy = cstring_from_string(arena, base_string_from_clex_data(lexer->token.data2));
-
-    clex_Lexer include = clex_init(0, 0, copy, 0, base_clex_define, 0);
-
-    clex_lex(&include);
-    if (include.token.kind != clex_Token_STRING) {
-        log_error("expected string after `#include`");
-        return false;
-    }
-    *file = base_string_from_clex_data(include.token.data);
-    return true;
-}
-
 static bool build_eat_token(clex_Lexer *parent, clex_Lexer *lexer, clex_Token_Kind expected, const char *format, ...) {
     clex_lex(lexer);
     bool ok = lexer->token.kind == expected;
@@ -3041,6 +3216,244 @@ static bool build_eat_token(clex_Lexer *parent, clex_Lexer *lexer, clex_Token_Ki
     va_end(arguments);
 
     return ok;
+}
+
+static const char *base_clex_current_location_get_as_string(Arena *arena, const clex_Lexer *lexer) {
+    int column = 0;
+    const char *path = 0;
+    const char *path_end = 0;
+    int line = clex_get_current_location(lexer, &column, &path, &path_end);
+    return cstring_print(arena, "%S:%d", string_from_pointers(path, path_end), line);
+}
+
+static void build_log_preprocessor_error(const clex_Lexer *lexer, const char *message) {
+    int column = 0;
+    const char *path = 0;
+    const char *path_end = 0;
+    int line = clex_get_current_location(lexer, &column, &path, &path_end);
+    print("error: %S:%d: %s\n", string_from_pointers(path, path_end), line, message);
+}
+
+typedef struct {
+    clex_Condition_Value value;
+    Build_Unknown_Reason_Id unknown_reason;
+} Build_Condition;
+
+static Build_Condition build_evaluate_macro_is_defined(Arena *arena, Build_Macros *macros, String name, bool expect_defined) {
+    Build_Macro macro = build_macros_get(arena, macros, name);
+
+    bool is_defined = macro.state == Build_Macro_State_DEFINED || macro.state == Build_Macro_State_DEFINED_VALUE_UNKNOWN;
+    Build_Condition condition = { .value = is_defined == expect_defined ? clex_Condition_Value_TRUE : clex_Condition_Value_FALSE };
+    if (macro.state == Build_Macro_State_UNKNOWN) condition = (Build_Condition){ .value = clex_Condition_Value_UNKNOWN, .unknown_reason = macro.unknown_reason };
+
+    return condition;
+}
+
+static Build_Condition build_evaluate_preprocessor_condition(Arena *arena, const clex_Lexer *file, Build_Macros *macros, clex_Data condition_text, bool *ok) {
+    clex_Condition line = clex_condition_init(condition_text);
+    Build_Unknown_Reason_Id first_unknown_reason = 0;
+
+    while (clex_condition_step(&line)) {
+        String name = base_string_from_clex_data(line.name);
+
+        switch (line.request) {
+            case clex_Condition_Request_TOKEN_MEMORY: {
+                line.tokens = arena_array_reserve(arena, line.tokens, line.token_count, &line.token_capacity, (u64)line.token_count + 1);
+            } break;
+            case clex_Condition_Request_DEFINED: {
+                Build_Condition definedness = build_evaluate_macro_is_defined(arena, macros, name, true);
+                if (first_unknown_reason == 0) first_unknown_reason = definedness.unknown_reason;
+                clex_condition_answer_value(&line, definedness.value);
+            } break;
+            case clex_Condition_Request_BUILTIN: {
+                // TODO(felix): Support compiler builtins like `__has_builtin(...)` and `__has_feature(...)`.
+                if (first_unknown_reason == 0) first_unknown_reason = build_unknown_reason(arena, macros, cstring_print(arena, "`%S(...)` is a compiler builtin, which the metaprogram does not evaluate", name), 0);
+                clex_condition_answer_value(&line, clex_Condition_Value_UNKNOWN);
+            } break;
+            case clex_Condition_Request_NAME: {
+                Build_Macro macro = build_macros_get(arena, macros, name);
+                switch (macro.state) {
+                    case Build_Macro_State_UNDEFINED: clex_condition_answer_value(&line, clex_Condition_Value_FALSE); break;
+                    case Build_Macro_State_DEFINED: {
+                        clex_Data definition = { .start = macro.definition.data, .end = macro.definition.data + macro.definition.count };
+                        clex_condition_answer_definition(&line, definition);
+                    } break;
+                    case Build_Macro_State_DEFINED_VALUE_UNKNOWN: case Build_Macro_State_UNKNOWN: {
+                        if (first_unknown_reason == 0) first_unknown_reason = macro.unknown_reason;
+                        clex_condition_answer_value(&line, clex_Condition_Value_UNKNOWN);
+                    } break;
+                    default: unreachable;
+                }
+            } break;
+            default: unreachable;
+        }
+    }
+
+    clex_Node *nodes = arena_make(arena, size_t_from_u64((u64)line.token_count + 1), clex_Node);
+    clex_Condition_Value value = clex_condition_evaluate(&line, nodes);
+
+    String condition_string = base_string_from_clex_data(condition_text);
+    String error_text = line.error_text.start != 0 ? base_string_from_clex_data(line.error_text) : S("end of line");
+
+    const char *message = 0;
+    switch (line.error) {
+        case clex_Condition_Error_NONE: break;
+        case clex_Condition_Error_EXPANSION_DEPTH: message = cstring_print(arena, "macro expansion is nested too deeply in condition `%S`", condition_string); break;
+        case clex_Condition_Error_DEFINED_OPERAND: message = cstring_print(arena, "expected `defined NAME` or `defined(NAME)` in condition `%S`", condition_string); break;
+        case clex_Condition_Error_BUILTIN_OPERAND: message = cstring_print(arena, "expected `(...)` after compiler builtin in condition `%S`", condition_string); break;
+        case clex_Condition_Error_FUNCTION_LIKE_MACRO: message = cstring_print(arena, "function-like macro `%S` is not supported in condition `%S`", error_text, condition_string); break;
+        case clex_Condition_Error_INVALID_TOKEN: message = cstring_print(arena, "invalid token in condition `%S`", condition_string); break;
+        case clex_Condition_Error_INVALID_EXPRESSION: message = cstring_print(arena, "invalid expression at `%S` in condition `%S`", error_text, condition_string); break;
+        case clex_Condition_Error_EVALUATION: message = cstring_print(arena, "cannot evaluate `%S` in condition `%S`", error_text, condition_string); break;
+        default: unreachable;
+    }
+    if (message != 0) build_log_preprocessor_error(file, message);
+
+    Build_Condition condition = { .value = value };
+    if (value == clex_Condition_Value_UNKNOWN) {
+        assert(first_unknown_reason != 0);
+        condition.unknown_reason = build_unknown_reason(arena, macros, cstring_print(arena, "%s: condition `%S` is unknown", base_clex_current_location_get_as_string(arena, file), condition_string), first_unknown_reason);
+    }
+
+    *ok = message == 0;
+    return condition;
+}
+
+// The metaprogram reads either a:
+// known group (group_unknown_reason == 0): the compiler builds it, so the metaprogram acts on everything; or
+// unknown group (group_unknown_reason != 0): the compiler maybe builds it, so the metaprogram reads it, but `META(...)` is an error, `#define` and `#undef` make their macro unknown, and `#error` has no effect.
+// The metaprogram doesn't read a group the compiler skips.
+typedef struct {
+    clex_Conditional chain;
+    Build_Unknown_Reason_Id group_unknown_reason;
+} Build_Conditional;
+
+static bool build_enter_conditional_group(Build_Conditional *conditionals, u32 conditional_depth, Build_Condition condition, bool is_else) {
+    Build_Conditional *conditional = &conditionals[conditional_depth - 1];
+    bool earlier_group_maybe_taken = conditional->chain.state == clex_Conditional_State_MAYBE_TAKEN;
+    bool read_group = clex_conditional_enter(&conditional->chain, condition.value, is_else);
+
+    if (read_group && condition.value == clex_Condition_Value_UNKNOWN) conditional->group_unknown_reason = condition.unknown_reason;
+    if (read_group && condition.value == clex_Condition_Value_TRUE && !earlier_group_maybe_taken) {
+        conditional->group_unknown_reason = conditional_depth >= 2 ? conditionals[conditional_depth - 2].group_unknown_reason : 0;
+    }
+
+    return read_group;
+}
+
+static void build_macros_predefine(Build_Macros *macros, const char *name, Build_Macro_State state, const char *definition, Build_Unknown_Reason_Id unknown_reason) {
+    bool ok = false;
+    u32 slot = build_macros_insert(macros, string_from_cstring(name), &ok);
+    assert(ok);
+
+    bool is_known = state == Build_Macro_State_DEFINED || state == Build_Macro_State_UNDEFINED;
+    assert(is_known == (unknown_reason == 0));
+    assert((state == Build_Macro_State_DEFINED) == (definition != 0));
+
+    macros->slots[slot].macro = (Build_Macro){
+        .state = state,
+        .definition = definition != 0 ? string_from_cstring(definition) : (String){0},
+        .unknown_reason = unknown_reason,
+    };
+}
+
+static Build_Unknown_Reason_Id build_unknown_reason_for_unset_setting(Arena *arena, Build_Macros *macros, const char *setting, const char *directive, const char *meta_location) {
+    return build_unknown_reason(arena, macros, meta_location != 0
+        ? cstring_print(arena, "%s is set only by `META(%s)` at %s, which is itself in an unknown group", setting, directive, meta_location)
+        : cstring_print(arena, "%s is set by `META(%s = ...)`, and the program has none in a known group", setting, directive), 0);
+}
+
+static void build_set_macro_from_meta(Arena *arena, const clex_Lexer *lexer, Build_Macros *macros, const char *directive, const char *name, bool is_defined, const char *definition, bool *ok) {
+    bool insert_ok = false;
+    u32 slot = build_macros_insert(macros, string_from_cstring(name), &insert_ok);
+
+    bool is_defined_by_source = insert_ok && macros->slots[slot].is_defined_by_source;
+    if (is_defined_by_source) build_log_preprocessor_error(lexer, cstring_print(arena, "`META(%s)` sets `%s`, but the source defines or undefines `%s` before it", directive, name, name));
+
+    bool set_ok = insert_ok && !is_defined_by_source;
+    if (set_ok) {
+        Build_Macro *macro = &macros->slots[slot].macro;
+        *macro = (Build_Macro){0};
+        if (is_defined) {
+            macro->state = Build_Macro_State_DEFINED;
+            macro->definition = string_from_cstring(definition);
+        }
+    }
+
+    *ok = set_ok;
+}
+
+typedef struct {
+    u8 os_mask;
+    u8 compiler_mask;
+    u8 arch_mask;
+    Build_Macro_State state;
+    const char *name;
+    const char *definition;
+} Build_Platform_Macro;
+
+enum {
+    Build_Platform_ANY_OS = BASE_OS_COUNT - 1,
+    Build_Platform_ANY_ARCH = BASE_ARCH_COUNT - 1,
+    Build_Platform_MSVC = 1 << Build_Compiler_MSVC,
+    Build_Platform_CLANG = 1 << Build_Compiler_CLANG,
+    Build_Platform_ANY_COMPILER = Build_Platform_MSVC | Build_Platform_CLANG,
+};
+
+static const Build_Platform_Macro build_platform_macros[] = {
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "_WIN32", "1" },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, BASE_ARCH_X86_64 | BASE_ARCH_ARM64, Build_Macro_State_DEFINED, "_WIN64", "1" },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED_VALUE_UNKNOWN, "_MSC_VER", 0 },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, BASE_ARCH_X86_64, Build_Macro_State_DEFINED, "_M_X64", "100" },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, BASE_ARCH_X86_64, Build_Macro_State_DEFINED, "_M_AMD64", "100" },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, BASE_ARCH_ARM64, Build_Macro_State_DEFINED, "_M_ARM64", "1" },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, BASE_ARCH_ARM64, Build_Macro_State_UNKNOWN, "_M_ARM64EC", 0 },
+    { BASE_OS_WINDOWS, Build_Platform_ANY_COMPILER, Build_Platform_ANY_ARCH, Build_Macro_State_UNKNOWN, "__STDC__", 0 },
+    { Build_Platform_ANY_OS & ~BASE_OS_WINDOWS, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__STDC__", "1" },
+    { Build_Platform_ANY_OS, Build_Platform_ANY_COMPILER, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__STDC_VERSION__", "201112L" },
+    { Build_Platform_ANY_OS, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__clang__", "1" },
+    { Build_Platform_ANY_OS & ~BASE_OS_WINDOWS, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__GNUC__", "4" },
+    { Build_Platform_ANY_OS, Build_Platform_CLANG, BASE_ARCH_X86_64, Build_Macro_State_DEFINED, "__x86_64__", "1" },
+    { Build_Platform_ANY_OS, Build_Platform_CLANG, BASE_ARCH_ARM64, Build_Macro_State_DEFINED, "__aarch64__", "1" },
+    { BASE_OS_WASM, Build_Platform_CLANG, BASE_ARCH_WASM32, Build_Macro_State_DEFINED, "__wasm__", "1" },
+    { BASE_OS_WASM, Build_Platform_CLANG, BASE_ARCH_WASM32, Build_Macro_State_DEFINED, "__wasm32__", "1" },
+    { BASE_OS_ANY_APPLE, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__APPLE__", "1" },
+    { BASE_OS_ANY_APPLE, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__MACH__", "1" },
+    { BASE_OS_LINUX, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_DEFINED, "__linux__", "1" },
+    { BASE_OS_LINUX, Build_Platform_CLANG, Build_Platform_ANY_ARCH, Build_Macro_State_UNKNOWN, "__gnu_linux__", 0 },
+};
+
+static const char *const build_os_macro_names[BASE_OS_COUNT] = {
+    [BASE_OS_WINDOWS]       = "BASE_OS_WINDOWS",
+    [BASE_OS_MACOS]         = "BASE_OS_MACOS",
+    [BASE_OS_IOS_DEVICE]    = "BASE_OS_IOS_DEVICE",
+    [BASE_OS_IOS_SIMULATOR] = "BASE_OS_IOS_SIMULATOR",
+    [BASE_OS_LINUX]         = "BASE_OS_LINUX",
+    [BASE_OS_WASM]          = "BASE_OS_WASM",
+};
+
+typedef enum {
+    Build_Meta_Setting_UNSET = 0,
+    Build_Meta_Setting_FALSE,
+    Build_Meta_Setting_TRUE,
+} Build_Meta_Setting;
+
+typedef struct {
+    Build_Meta_Setting link_crt;
+    Build_Meta_Setting subsystem_windows;
+} Build_Meta_Settings;
+
+typedef struct {
+    const char *location;
+    String directive;
+    Build_Unknown_Reason_Id unknown_reason;
+} Build_Meta_In_Unknown_Group;
+
+static bool build_flag_changes_preprocessor(String flag) {
+    bool defines = string_starts_with(flag, S("-D")) || string_starts_with(flag, S("/D"));
+    defines = defines || string_starts_with(flag, S("-U")) || string_starts_with(flag, S("/U"));
+    defines = defines || string_starts_with(flag, S("-std")) || string_starts_with(flag, S("/std"));
+    return defines;
 }
 
 static const char build_wasm_html_file[] = STRINGIFY(
@@ -3158,10 +3571,13 @@ static const char build_wasm_html_file[] = STRINGIFY(
                 const width  = memory[struct_pointer / 4 + 5];
                 const height = memory[struct_pointer / 4 + 6];
 
-                const source = new Uint8ClampedArray(wasm.instance.exports.memory.buffer, pixels, stride * height * 4);
-                const image = new ImageData(source, stride, height);
-                offscreen_context.putImageData(image, 0, 0);
-                context.drawImage(offscreen, 0, 0, width, height, 0, 0, real_width, real_height);
+                const surface_is_empty = width == 0 || height == 0;
+                if (!surface_is_empty) {
+                    const source = new Uint8ClampedArray(wasm.instance.exports.memory.buffer, pixels, stride * height * 4);
+                    const image = new ImageData(source, stride, height);
+                    offscreen_context.putImageData(image, 0, 0);
+                    context.drawImage(offscreen, 0, 0, width, height, 0, 0, real_width, real_height);
+                }
 
                 requestAnimationFrame(frame);
             }
@@ -3169,6 +3585,104 @@ static const char build_wasm_html_file[] = STRINGIFY(
         })();
     </script>
 );
+
+static void build_rebuild_and_rerun_self_if_out_of_date(Arena *scratch_arena, const char **arguments, u64 argument_count) {
+    #if BASE_OS == BASE_OS_WINDOWS
+    {
+        Scratch scratch = scratch_begin(scratch_arena);
+
+        char executable_path[4096] = {0};
+        bool executable_path_ok = fs_executable_path(executable_path, sizeof executable_path);
+        String_Cut executable_path_parts = string_cut_last(string_from_cstring(executable_path), '\\');
+        String executable_folder = executable_path_parts.head;
+        String executable_name = executable_path_parts.tail;
+
+        const char *build_source_path = cstring_print(scratch.arena, "%S\\build.c", executable_folder);
+        const char *base_folder_path = cstring_print(scratch.arena, "%S\\src\\base", executable_folder);
+
+        fs_File_Info executable_info = {0};
+        bool executable_info_ok = executable_path_ok && fs_file_info(executable_path, &executable_info);
+
+        // TODO(felix): Check the timestamps of only the files that build.c recursively depends on, once the parser supports this.
+        fs_File_Info build_source_info = {0};
+        bool build_source_ok = executable_info_ok && fs_file_info(build_source_path, &build_source_info);
+        u64 newest_source_time = build_source_info.modification_time;
+        const char *newest_source_path = build_source_path;
+
+        bool base_folder_ok = false;
+        if (build_source_ok) {
+            fs_Folder_Iterator it = fs_folder_iterator(base_folder_path, fs_Folder_Iterator_Flag_RECURSIVE);
+            while (fs_folder_iterate(&it)) {
+                bool is_newer_file = !it.info.is_folder && it.info.modification_time > newest_source_time;
+                if (is_newer_file) {
+                    newest_source_time = it.info.modification_time;
+                    newest_source_path = cstring_print(scratch.arena, "%s", it.info.path);
+                }
+            }
+            base_folder_ok = !it.had_error;
+            fs_folder_iterator_end(&it);
+        }
+
+        bool sources_ok = build_source_ok && base_folder_ok;
+        if (!sources_ok) log_error("can't check if '%s' is out of date against '%s' and '%s'", executable_path, build_source_path, base_folder_path);
+
+        bool out_of_date = sources_ok && newest_source_time > executable_info.modification_time;
+        if (!out_of_date){
+            print("info: reusing '%s'\n", executable_path);
+        } else {
+            print("info: rebuilding '%s' because '%s' is newer\n", executable_path, newest_source_path);
+
+            String executable_stem = string_cut_last(executable_name, '.').head;
+            const char *executable_folder_cstring = cstring_from_string(scratch.arena, executable_folder);
+            const char *old_executable_path = cstring_print(scratch.arena, "%S\\%S.old.exe", executable_folder, executable_stem);
+            const char *output_flag = cstring_print(scratch.arena, "-Fe:%S", executable_name);
+
+            bool renamed = fs_rename(executable_path, old_executable_path);
+            if (!renamed) log_error("can't rename '%s' to '%s'", executable_path, old_executable_path);
+
+            const char *compile[] = {
+                "cl", "-nologo", "-FC", "-diagnostics:column", "-std:c11", "-Oi", "build.c", "-Z7", "-MTd", "-DBUILD_DEBUG", "-DWINDOWS_SUBSYSTEM=WINDOWS_SUBSYSTEM_CONSOLE", "-Isrc",
+                "-link", "-subsystem:console", "-incremental:no", "-entry:entrypoint", "Kernel32.lib", "Ntdll.lib", output_flag,
+                0,
+            };
+            Os_Process_Flags compile_flags = Os_Process_Flag_PRINT_COMMAND_BEFORE_RUNNING | Os_Process_Flag_PRINT_EXIT_CODE | Os_Process_Flag_PRINT_EXECUTION_TIME;
+            u32 rebuild_exit_code = renamed ? os_process_run(scratch.arena, compile, executable_folder_cstring, compile_flags).exit_code : 1;
+            bool compiled = renamed && rebuild_exit_code == 0;
+
+            if (renamed && !compiled) {
+                bool restored = fs_rename(old_executable_path, executable_path);
+                if (restored) log_error("rebuilding '%s' failed; restored the previous executable", executable_path);
+                else log_error("rebuilding '%s' failed, and restoring it from '%s' also failed", executable_path, old_executable_path);
+            }
+
+            fs_File_Info rebuilt_info = {0};
+            bool rebuilt_info_ok = compiled && fs_file_info(executable_path, &rebuilt_info);
+            bool rebuilt_is_current = rebuilt_info_ok && rebuilt_info.modification_time >= newest_source_time;
+            if (compiled && !rebuilt_is_current) {
+                log_error("rebuilt '%s' is still older than '%s', which may have a timestamp in the future", executable_path, newest_source_path);
+                rebuild_exit_code = 1;
+            }
+
+            if (rebuilt_is_current) {
+                const char **rerun_arguments = arena_make(scratch.arena, argument_count + 1, const char *);
+                rerun_arguments[0] = executable_path;
+                for (u64 i = 1; i < argument_count; i += 1) rerun_arguments[i] = arguments[i];
+                rebuild_exit_code = os_process_run(scratch.arena, rerun_arguments, 0, 0).exit_code;
+            }
+
+            os_exit(rebuild_exit_code);
+        }
+
+        scratch_end(scratch);
+    }
+    #else
+    {
+        (void)scratch_arena;
+        (void)arguments;
+        (void)argument_count;
+    }
+    #endif
+}
 
 static u32 build_default_everything(Arena *scratch_arena, const char *program_name, const Build_Options *options) {
     Scratch scratch = scratch_begin(scratch_arena);
@@ -3180,6 +3694,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
     u64 argument_count = 0;
     const char **arguments = os_get_arguments(scratch.arena, &argument_count);
+    build_rebuild_and_rerun_self_if_out_of_date(scratch.arena, arguments, argument_count);
 
     char path_separator = (BASE_OS & BASE_OS_ANY_POSIX) ? '/' : '\\';
 
@@ -3195,6 +3710,12 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         [BASE_OS_WASM]          = Build_Compiler_CLANG,
     };
     Build_Compiler compiler = build_default_compiler[target_os];
+
+    Build_Mode build_mode = Build_Mode_DEBUG;
+    for (u64 i = 0; i < argument_count; i += 1) {
+        if (cstring_equals(arguments[i], "clang")) compiler = Build_Compiler_CLANG;
+        if (cstring_equals(arguments[i], "release")) build_mode = Build_Mode_RELEASE;
+    }
 
     Build_Objects objects = {0};
 
@@ -3220,500 +3741,527 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
     String generate_here_directive = S("generate_here");
 
-    bool meta_link_crt_override = false;
-    bool meta_link_crt_override_value = false;
+    typedef struct {
+        String name;
+        String contents;
+    } Build_Embedded_File;
 
-    bool TODO_REMOVE_THIS = false;
+    Build_Embedded_File *files_to_embed = 0;
+    u64 files_to_embed_count = 0;
+    u64 files_to_embed_capacity = 0;
 
-    Base_Clex_Define *define_state = arena_make(scratch.arena, 1, Base_Clex_Define);
-    clex_Lexer lexer = clex_init(&c_file_path[3], &c_file_path[cstring_length(c_file_path)], code.data, 0, base_clex_define, define_state);
+    enum { BUILD_CONDITIONAL_DEPTH_MAX = 64, BUILD_PASS_COUNT_MAX = 8 };
+    Build_Conditional conditionals[BUILD_CONDITIONAL_DEPTH_MAX] = {0};
+    u32 conditional_depth = 0;
+    Build_Macros *macros = 0;
+    clex_Lexer lexer = {0};
+
+    Build_Meta_Settings settings_from_earlier_passes = {0};
+    bool collect_unknown_reasons = false;
+    const char *link_libc_meta_location = 0;
+    const char *subsystem_meta_location = 0;
+    u32 pass_count = 0;
+    f64 first_pass_seconds = 0;
     f64 time_at_parse_start = time_relative_timestamp();
     bool parse_ok = build_folder_ok;
-    while (parse_ok && clex_lex(&lexer)) {
-        String preprocess_data2 = base_string_from_clex_data(lexer.token.data2);
-        switch (lexer.token.kind) {
-            case clex_Token_INCLUDE: {
-                if (TODO_REMOVE_THIS) print("#include %S\n", preprocess_data2);
 
-                String path = preprocess_data2;
+    for (bool parsing = parse_ok; parsing;) {
+        pass_count += 1;
+        assert(pass_count <= BUILD_PASS_COUNT_MAX);
 
-                if (path.data[0] == '<') { /* skip system includes for now */ }
-                else if (string_has(path, S("stb_truetype.h")).ok) {
-                    // TODO(felix): Remove once preprocessor isn't wrongly trying to take #includes inside inactive #if blocks, which stb_truetype.h has
+        compiler_extra_flags = (Build_Arguments){0};
+        linker_extra_flags = (Build_Arguments){0};
+        link_libraries = (Build_Arguments){0};
+        metaprogram_output_file = (String){0};
+        files_to_embed_count = 0;
+        conditional_depth = 0;
+
+        Build_Meta_Settings settings_this_pass = {0};
+        Build_Meta_In_Unknown_Group *metas_in_unknown_groups = 0;
+        u64 meta_in_unknown_group_count = 0;
+        u64 meta_in_unknown_group_capacity = 0;
+        Build_Unknown_Reason_Id link_crt_unset_reason = 0;
+        Build_Unknown_Reason_Id address_sanitiser_unset_reason = 0;
+        Build_Unknown_Reason_Id subsystem_unset_reason = 0;
+
+        macros = arena_make(scratch.arena, 1, Build_Macros);
+        macros->collect_unknown_reasons = collect_unknown_reasons;
+        {
+            u8 target_arch = BASE_ARCH;
+            if (target_os == BASE_OS_WASM) target_arch = BASE_ARCH_WASM32;
+            if (target_os == BASE_OS_IOS_DEVICE) target_arch = BASE_ARCH_ARM64;
+            u8 compiler_bit = (u8)(1 << compiler);
+
+            u64 platform_macro_count = sizeof build_platform_macros / sizeof build_platform_macros[0];
+            for (u64 i = 0; i < platform_macro_count; i += 1) {
+                Build_Platform_Macro macro = build_platform_macros[i];
+                bool applies = (macro.os_mask & target_os) && (macro.compiler_mask & compiler_bit) && (macro.arch_mask & target_arch);
+                if (applies) {
+                    Build_Unknown_Reason_Id unknown_reason = 0;
+                    if (macro.state == Build_Macro_State_DEFINED_VALUE_UNKNOWN) unknown_reason = build_unknown_reason(scratch.arena, macros, cstring_print(scratch.arena, "`%s` is defined, but the metaprogram does not know its value", macro.name), 0);
+                    if (macro.state == Build_Macro_State_UNKNOWN) unknown_reason = build_unknown_reason(scratch.arena, macros, cstring_print(scratch.arena, "the metaprogram does not know if the compiler defines `%s`", macro.name), 0);
+                    build_macros_predefine(macros, macro.name, macro.state, macro.definition, unknown_reason);
                 }
-                else if (path.data[0] == '"') {
-                    if (path.data[path.count - 1] != '"') {
-                        log_error("`#include` path has unterminated `\"`");
-                        parse_ok = false;
-                        continue;
-                    }
-                    if (path.count <= 2) {
-                        log_error("cannot `#include` empty path `\"\"`");
-                        parse_ok = false;
-                        continue;
-                    }
-                    path = string_range(path, 1, path.count - 1);
+            }
 
-                    const char *read_path = cstring_print(scratch.arena, "%s%S", &source_folder[3], path);
-                    String file = os_read_entire_file(scratch.arena, read_path, &ok);
-                    if (!ok) {
-                        log_error("failed reading '%s'", read_path);
-                        parse_ok = false;
-                        continue;
-                    }
+            for (u64 i = 0; i < platform_macro_count; i += 1) {
+                const char *name = build_platform_macros[i].name;
+                bool is_listed_for_target = macros->slots[build_macros_find(macros, string_from_cstring(name))].name.data != 0;
+                if (!is_listed_for_target) build_macros_predefine(macros, name, Build_Macro_State_UNDEFINED, 0, 0);
+            }
 
-                    ok = clex_push_file(&lexer, path.data, &path.data[path.count], file.data);
-                    assert(ok);
+            build_macros_predefine(macros, "BASE_OS", Build_Macro_State_DEFINED, build_os_macro_names[target_os], 0);
+            build_macros_predefine(macros, "BUILD_DEBUG", Build_Macro_State_DEFINED, build_mode == Build_Mode_DEBUG ? "1" : "0", 0);
+            if (settings_from_earlier_passes.link_crt != Build_Meta_Setting_UNSET) {
+                build_macros_predefine(macros, "LINK_CRT", Build_Macro_State_DEFINED, settings_from_earlier_passes.link_crt == Build_Meta_Setting_TRUE ? "1" : "0", 0);
+            } else {
+                link_crt_unset_reason = build_unknown_reason_for_unset_setting(scratch.arena, macros, "`LINK_CRT`", "link_libc", link_libc_meta_location);
+                build_macros_predefine(macros, "LINK_CRT", Build_Macro_State_DEFINED_VALUE_UNKNOWN, 0, link_crt_unset_reason);
+            }
+
+            if (target_os == BASE_OS_WINDOWS) {
+                if (settings_from_earlier_passes.subsystem_windows != Build_Meta_Setting_UNSET) {
+                    bool subsystem_is_windows_so_far = settings_from_earlier_passes.subsystem_windows == Build_Meta_Setting_TRUE;
+                    build_macros_predefine(macros, "WINDOWS_SUBSYSTEM", Build_Macro_State_DEFINED, subsystem_is_windows_so_far ? "WINDOWS_SUBSYSTEM_WINDOWS" : "WINDOWS_SUBSYSTEM_CONSOLE", 0);
                 } else {
-                    log_error("expected `<` or `\"` following `#include`; got `%c`", path.data[0]);
-                    parse_ok = false;
-                    continue;
+                    subsystem_unset_reason = build_unknown_reason_for_unset_setting(scratch.arena, macros, "the Windows subsystem", "subsystem", subsystem_meta_location);
+                    build_macros_predefine(macros, "WINDOWS_SUBSYSTEM", Build_Macro_State_DEFINED_VALUE_UNKNOWN, 0, subsystem_unset_reason);
                 }
-            } break;
-            case clex_Token_IF: {
-                if (TODO_REMOVE_THIS) print("#if %S\n", preprocess_data2);
-                // panic("TODO(felix): #if");
-            } break;
-            case clex_Token_ELIF: {
-                if (TODO_REMOVE_THIS) print("#elif %S\n", preprocess_data2);
-                // panic("TODO(felix): #elif");
-            } break;
-            case clex_Token_ENDIF: {
-                if (TODO_REMOVE_THIS) print("#endif\n");
-                // panic("TODO(felix): #endif");
-            } break;
-            case clex_Token_ERROR_DIRECTIVE: {
-                if (TODO_REMOVE_THIS) print("#error %S\n", preprocess_data2);
-                // panic("TODO(felix): #error");
-            } break;
-            default: break;
+            }
+
+            if (compiler == Build_Compiler_MSVC) {
+                bool address_sanitiser_is_known = build_mode == Build_Mode_RELEASE || settings_from_earlier_passes.link_crt != Build_Meta_Setting_UNSET;
+                bool uses_address_sanitiser = build_mode == Build_Mode_DEBUG && settings_from_earlier_passes.link_crt == Build_Meta_Setting_TRUE;
+                if (address_sanitiser_is_known) {
+                    build_macros_predefine(macros, "__SANITIZE_ADDRESS__", uses_address_sanitiser ? Build_Macro_State_DEFINED : Build_Macro_State_UNDEFINED, uses_address_sanitiser ? "1" : 0, 0);
+                } else {
+                    address_sanitiser_unset_reason = build_unknown_reason_for_unset_setting(scratch.arena, macros, "the address sanitiser", "link_libc", link_libc_meta_location);
+                    build_macros_predefine(macros, "__SANITIZE_ADDRESS__", Build_Macro_State_UNKNOWN, 0, address_sanitiser_unset_reason);
+                }
+            }
         }
 
-        if (TODO_REMOVE_THIS) { // TODO(felix): remove
-            String token_data = base_string_from_clex_data(lexer.token.data);
-            print("%S ", token_data);
-            char d = token_data.data[0];
-            if (d == ';' || d == '{') print("\n");
-        }
+        lexer = clex_init(&c_file_path[3], &c_file_path[cstring_length(c_file_path)], code.data, &code.data[code.count], 0);
+        while (parse_ok && clex_lex(&lexer)) {
+            String preprocess_data2 = base_string_from_clex_data(lexer.token.data2);
+            bool skip_group = false;
+            Build_Unknown_Reason_Id group_unknown_reason = conditional_depth > 0 ? conditionals[conditional_depth - 1].group_unknown_reason : 0;
+            bool group_is_unknown = group_unknown_reason != 0;
 
-        // TODO(felix): Replace with real preprocessing logic.
+            switch (lexer.token.kind) {
+                case clex_Token_DEFINE: case clex_Token_UNDEF: {
+                    bool is_define = lexer.token.kind == clex_Token_DEFINE;
+                    clex_Data name = is_define ? lexer.token.data : clex_directive_name(lexer.token.data2);
+                    parse_ok = name.start != name.end;
+                    if (!parse_ok) build_log_preprocessor_error(&lexer, "expected a name after `#undef`");
 
-        static bool in_active_preprocessor_block = true;
+                    String name_string = base_string_from_clex_data(name);
+                    u32 slot = 0;
+                    if (parse_ok) slot = build_macros_insert(macros, name_string, &parse_ok);
+                    if (parse_ok) macros->slots[slot].is_defined_by_source = true;
 
-        bool if_hack = lexer.token.kind == clex_Token_IF;
-        if_hack = if_hack || lexer.token.kind == clex_Token_ELSE;
-        if_hack = if_hack || lexer.token.kind == clex_Token_ENDIF;
-        if_hack = false;
-
-        if (if_hack) {
-            static bool aware_of_this_static_if_condition = false;
-            String token_data = base_string_from_clex_data(lexer.token.data);
-
-            if (string_equals(token_data, S("if"))) {
-                if (aware_of_this_static_if_condition) {
-                    log_error("nested #if not yet supported in `#if BASE_OS...` block parsed by metaprogram");
-                    parse_ok = false;
-                    continue;
-                }
-
-                const char *error = "expected `#if BASE_OS == BASE_OS_...`";
-
-                Scratch definition_scratch = scratch_begin(scratch.arena);
-                const char *copy = cstring_from_string(definition_scratch.arena, base_string_from_clex_data(lexer.token.data2));
-                clex_Lexer definition = clex_init(0, 0, copy, 0, base_clex_define, 0);
-                while (parse_ok && clex_lex(&definition)) {
-                    token_data = base_string_from_clex_data(definition.token.data);
-                    aware_of_this_static_if_condition = definition.token.kind == clex_Token_IDENTIFIER && string_equals(token_data, S("BASE_OS"));
-
-                    if (aware_of_this_static_if_condition) {
-                        if (!build_eat_token(&lexer, &definition, clex_Token_EQUALITY_CHECK, "error: %s", error)) {
-                            parse_ok = false;
-                            continue;
-                        }
-
-                        if (!build_eat_token(&lexer, &definition, clex_Token_IDENTIFIER, "error: %s", error)) {
-                            parse_ok = false;
-                            continue;
-                        }
-                        token_data = base_string_from_clex_data(definition.token.data);
-
-                        u8 os_to_check = 0;
-                        if (string_equals(token_data, S("BASE_OS_WINDOWS"))) os_to_check = BASE_OS_WINDOWS;
-                        else if (string_equals(token_data, S("BASE_OS_MACOS"))) os_to_check = BASE_OS_MACOS;
-                        else if (string_equals(token_data, S("BASE_OS_IOS_DEVICE"))) os_to_check = BASE_OS_IOS_DEVICE;
-                        else if (string_equals(token_data, S("BASE_OS_IOS_SIMULATOR"))) os_to_check = BASE_OS_IOS_SIMULATOR;
-                        else if (string_equals(token_data, S("BASE_OS_LINUX"))) os_to_check = BASE_OS_LINUX;
-                        else if (string_equals(token_data, S("BASE_OS_WASM"))) os_to_check = BASE_OS_WASM;
-                        else {
-                            log_error("expected `BASE_OS_{WINDOWS or MACOS or LINUX or WASM}`, got `#if BASE_OS == %S`", token_data);
-                            parse_ok = false;
-                            continue;
-                        }
-
-                        in_active_preprocessor_block = (target_os == os_to_check);
+                    if (parse_ok && group_is_unknown) {
+                        macros->slots[slot].macro = (Build_Macro){ .state = Build_Macro_State_UNKNOWN, .unknown_reason = build_unknown_reason(scratch.arena, macros, cstring_print(scratch.arena, "%s: `#%s %S` is in an unknown group", base_clex_current_location_get_as_string(scratch.arena, &lexer), is_define ? "define" : "undef", name_string), group_unknown_reason) };
+                    } else if (parse_ok) {
+                        macros->slots[slot].macro = is_define ? (Build_Macro){ .state = Build_Macro_State_DEFINED, .definition = preprocess_data2 } : (Build_Macro){ .state = Build_Macro_State_UNDEFINED };
                     }
-                }
-                scratch_end(definition_scratch);
+                } break;
+                case clex_Token_INCLUDE: {
+                    bool include_ok = false;
+                    clex_Include include = clex_include_operand(lexer.token.data2, &include_ok);
+                    parse_ok = include_ok;
+                    if (!parse_ok) build_log_preprocessor_error(&lexer, cstring_print(scratch.arena, "expected `\"path\"` or `<path>` after `#include`; got `%S`", preprocess_data2));
 
-                continue;
-            }
+                    if (parse_ok && !include.is_system) {
+                        String path = base_string_from_clex_data(include.path);
+                        const char *read_path = cstring_print(scratch.arena, "%s%S", &source_folder[3], path);
+                        String file = os_read_entire_file(scratch.arena, read_path, &parse_ok);
+                        if (!parse_ok) log_error("failed reading '%s'", read_path);
 
-            if (!aware_of_this_static_if_condition) continue;
+                        if (parse_ok) {
+                            ok = clex_push_file(&lexer, path.data, &path.data[path.count], file.data, &file.data[file.count]);
+                            assert(ok);
+                        }
+                    }
+                } break;
+                case clex_Token_IF: case clex_Token_IFDEF: case clex_Token_IFNDEF: {
+                    Build_Condition condition = { .value = clex_Condition_Value_FALSE };
+                    if (lexer.token.kind == clex_Token_IF) {
+                        condition = build_evaluate_preprocessor_condition(scratch.arena, &lexer, macros, lexer.token.data2, &parse_ok);
+                    } else {
+                        clex_Data name = clex_directive_name(lexer.token.data2);
+                        if (name.start == name.end) {
+                            build_log_preprocessor_error(&lexer, "expected a name after `#ifdef` or `#ifndef`");
+                            parse_ok = false;
+                        }
+                        String name_string = base_string_from_clex_data(name);
+                        if (parse_ok) condition = build_evaluate_macro_is_defined(scratch.arena, macros, name_string, lexer.token.kind == clex_Token_IFDEF);
+                        if (condition.value == clex_Condition_Value_UNKNOWN) {
+                            const char *directive = lexer.token.kind == clex_Token_IFDEF ? "ifdef" : "ifndef";
+                            condition.unknown_reason = build_unknown_reason(scratch.arena, macros, cstring_print(scratch.arena, "%s: `#%s %S` is unknown", base_clex_current_location_get_as_string(scratch.arena, &lexer), directive, name_string), condition.unknown_reason);
+                        }
+                    }
 
-            if (string_equals(token_data, S("else"))) {
-                in_active_preprocessor_block = !in_active_preprocessor_block;
-            }
-
-            if (string_equals(token_data, S("endif"))) {
-                in_active_preprocessor_block = true;
-                aware_of_this_static_if_condition = false;
-            }
-
-            continue;
-        }
-
-        if (!in_active_preprocessor_block) continue;
-
-        if (lexer.token.kind != clex_Token_IDENTIFIER) continue;
-        String token_data = base_string_from_clex_data(lexer.token.data);
-
-        if (!string_equals(token_data, S("META"))) continue;
-
-        clex_lex(&lexer);
-        if (lexer.token.kind != '(') continue;
-
-        if (!build_eat_token(0, &lexer, clex_Token_IDENTIFIER, "error: expected directive at start of `META(...)`")) {
-            parse_ok = false;
-            continue;
-        }
-        token_data = base_string_from_clex_data(lexer.token.data);
-
-        // TODO(felix): remove
-        if (TODO_REMOVE_THIS) print("=========================================================GOT META |%S|\n", token_data);
-
-        if (string_equals(token_data, generate_here_directive)) {
-            if (metaprogram_output_file.count != 0) {
-                log_error("directive `META(%S)` can only be used once", generate_here_directive);
-                parse_ok = false;
-                continue;
-            }
-
-            if (!build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block")) {
-                parse_ok = false;
-                continue;
-            }
-
-            if (!build_expect_include(scratch.arena, &lexer, &metaprogram_output_file)) {
-                parse_ok = false;
-                continue;
-            }
-        } else if (string_equals(token_data, S("embed"))) {
-            const char *usage = "`META(embed \"path/to/file\")\\ extern const char array_name[];\\ extern const u64 length_name;`";
-
-            if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected path, like this: %s", usage)) {
-                parse_ok = false;
-                continue;
-            }
-            String input_file = base_string_from_clex_data(lexer.token.data);
-
-            if (!build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block")) {
-                parse_ok = false;
-                continue;
-            }
-
-            // TODO(felix): get actual type info once we've got a C parser
-
-            String names[2] = {0};
-            for (u64 i = 0; parse_ok && i < 2; i += 1) {
-                clex_lex(&lexer);
-                String extern_ = base_string_from_clex_data(lexer.token.data);
-                if (lexer.token.kind != clex_Token_IDENTIFIER || !string_equals(extern_, S("extern"))) {
-                    log_error("expected this: %s", usage);
-                    parse_ok = false;
-                    continue;
-                }
-
-                clex_lex(&lexer);
-                String const_ = base_string_from_clex_data(lexer.token.data);
-                if (lexer.token.kind != clex_Token_IDENTIFIER || !string_equals(const_, S("const"))) {
-                    log_error("expected this: %s", usage);
-                    parse_ok = false;
-                    continue;
-                }
-
-                clex_lex(&lexer);
-                String type_ = base_string_from_clex_data(lexer.token.data);
-                String expected_type = i == 0 ? S("char") : S("u64");
-                if (lexer.token.kind != clex_Token_IDENTIFIER || !string_equals(type_, expected_type)) {
-                    log_error("expected this: %s", usage);
-                    parse_ok = false;
-                    continue;
-                }
-
-                if (!build_eat_token(0, &lexer, clex_Token_IDENTIFIER, "error: expected this: %s", usage)) {
-                    parse_ok = false;
-                    continue;
-                }
-                names[i] = base_string_from_clex_data(lexer.token.data);
-
-                if (i == 0) {
-                    if (!build_eat_token(0, &lexer, '[', "error: expected this: %s", usage)) {
+                    if (conditional_depth == BUILD_CONDITIONAL_DEPTH_MAX) {
+                        build_log_preprocessor_error(&lexer, "conditionals are nested too deeply");
                         parse_ok = false;
-                        continue;
                     }
-                    if (!build_eat_token(0, &lexer, ']', "error: expected this: %s", usage)) {
+
+                    if (parse_ok) {
+                        Build_Conditional *conditional = &conditionals[conditional_depth];
+                        conditional_depth += 1;
+                        *conditional = (Build_Conditional){0};
+                        skip_group = !build_enter_conditional_group(conditionals, conditional_depth, condition, false);
+                    }
+                } break;
+                case clex_Token_ELIF: case clex_Token_ELSE: {
+                    bool is_else = lexer.token.kind == clex_Token_ELSE;
+                    Build_Conditional *conditional = conditional_depth > 0 ? &conditionals[conditional_depth - 1] : 0;
+
+                    if (conditional == 0) {
+                        build_log_preprocessor_error(&lexer, is_else ? "`#else` without `#if`" : "`#elif` without `#if`");
                         parse_ok = false;
-                        continue;
+                    } else if (conditional->chain.saw_else) {
+                        build_log_preprocessor_error(&lexer, is_else ? "`#else` after `#else`" : "`#elif` after `#else`");
+                        parse_ok = false;
                     }
-                }
 
-                if (!build_eat_token(0, &lexer, ';', "error: expected this: %s", usage)) {
+                    bool chain_has_taken_group = parse_ok && conditional->chain.state == clex_Conditional_State_TAKEN;
+                    Build_Condition condition = { .value = clex_Condition_Value_TRUE };
+                    if (parse_ok && !chain_has_taken_group && !is_else) {
+                        condition = build_evaluate_preprocessor_condition(scratch.arena, &lexer, macros, lexer.token.data2, &parse_ok);
+                    }
+
+                    if (parse_ok) skip_group = !build_enter_conditional_group(conditionals, conditional_depth, condition, is_else);
+                } break;
+                case clex_Token_ENDIF: {
+                    if (conditional_depth == 0) {
+                        build_log_preprocessor_error(&lexer, "`#endif` without `#if`");
+                        parse_ok = false;
+                    } else conditional_depth -= 1;
+                } break;
+                case clex_Token_ERROR_DIRECTIVE: {
+                    if (!group_is_unknown) {
+                        build_log_preprocessor_error(&lexer, cstring_print(scratch.arena, "#error %S", preprocess_data2));
+                        parse_ok = false;
+                    }
+                } break;
+                default: break;
+            }
+
+            if (skip_group && !clex_skip_conditional_group(&lexer)) {
+                build_log_preprocessor_error(&lexer, "missing `#endif`");
+                parse_ok = false;
+            }
+
+            bool token_is_meta = parse_ok && lexer.token.kind == clex_Token_IDENTIFIER && string_equals(base_string_from_clex_data(lexer.token.data), S("META"));
+
+            if (token_is_meta && group_is_unknown) {
+                clex_Lexer directive_lexer = lexer;
+                String directive = {0};
+                bool has_directive = clex_lex(&directive_lexer) && directive_lexer.token.kind == '(' && clex_lex(&directive_lexer) && directive_lexer.token.kind == clex_Token_IDENTIFIER;
+                if (has_directive) directive = base_string_from_clex_data(directive_lexer.token.data);
+
+                metas_in_unknown_groups = arena_array_reserve(scratch.arena, metas_in_unknown_groups, meta_in_unknown_group_count, &meta_in_unknown_group_capacity, meta_in_unknown_group_count + 1);
+                metas_in_unknown_groups[meta_in_unknown_group_count] = (Build_Meta_In_Unknown_Group){ .location = base_clex_current_location_get_as_string(scratch.arena, &lexer), .directive = directive, .unknown_reason = group_unknown_reason };
+                meta_in_unknown_group_count += 1;
+            }
+
+            bool meta_has_arguments = token_is_meta && !group_is_unknown && clex_lex(&lexer) && lexer.token.kind == '(';
+            if (meta_has_arguments) parse_ok = build_eat_token(0, &lexer, clex_Token_IDENTIFIER, "error: expected directive at start of `META(...)`");
+
+            if (meta_has_arguments && parse_ok) {
+                String token_data = base_string_from_clex_data(lexer.token.data);
+
+                if (string_equals(token_data, generate_here_directive)) {
+                    parse_ok = metaprogram_output_file.count == 0;
+                    if (!parse_ok) log_error("directive `META(%S)` can only be used once", generate_here_directive);
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block");
+
+                    if (parse_ok) {
+                        clex_lex(&lexer);
+                        parse_ok = lexer.token.kind == clex_Token_INCLUDE && string_equals(base_string_from_clex_data(lexer.token.data), S("include"));
+                        if (!parse_ok) log_error("expected `#include`");
+                    }
+
+                    if (parse_ok) {
+                        bool include_ok = false;
+                        clex_Include include = clex_include_operand(lexer.token.data2, &include_ok);
+                        parse_ok = include_ok && !include.is_system;
+                        if (parse_ok) metaprogram_output_file = base_string_from_clex_data(include.path);
+                        else log_error("expected string after `#include`");
+                    }
+                } else if (string_equals(token_data, S("embed"))) {
+                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected path, like this: `META(embed \"path/to/file\")`");
+                    String input_file = base_string_from_clex_data(lexer.token.data);
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block");
+
+                    if (parse_ok) {
+                        const char *input_path = cstring_from_string(scratch.arena, input_file);
+                        String contents = os_read_entire_file(scratch.arena, input_path, &parse_ok);
+                        if (!parse_ok) log_error("failed reading `META(embed)` input '%s'", input_path);
+
+                        if (parse_ok) {
+                            files_to_embed = arena_array_reserve(scratch.arena, files_to_embed, files_to_embed_count, &files_to_embed_capacity, files_to_embed_count + 1);
+                            files_to_embed[files_to_embed_count] = (Build_Embedded_File){ .name = input_file, .contents = contents };
+                            files_to_embed_count += 1;
+                        }
+                    }
+                } else if (string_equals(token_data, S("subsystem"))) {
+                    parse_ok = settings_this_pass.subsystem_windows == Build_Meta_Setting_UNSET;
+                    if (!parse_ok) log_error("you can't specify `subsystem` multiple times");
+
+                    const char *error = "error: expected `subsystem = console/windows`";
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, '=', error);
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, clex_Token_IDENTIFIER, error);
+
+                    if (parse_ok) {
+                        token_data = base_string_from_clex_data(lexer.token.data);
+                        if (string_equals(token_data, S("console"))) {
+                            settings_this_pass.subsystem_windows = Build_Meta_Setting_FALSE;
+                        } else if (string_equals(token_data, S("windows"))) {
+                            settings_this_pass.subsystem_windows = Build_Meta_Setting_TRUE;
+                        } else {
+                            log_error("expected `console` or `windows` in `META(subsystem = console/windows)`, got `%S`", token_data);
+                            parse_ok = false;
+                        }
+                    }
+
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected `)` to close `META(...)` directive");
+
+                    if (parse_ok && target_os == BASE_OS_WINDOWS) {
+                        bool is_windows = settings_this_pass.subsystem_windows == Build_Meta_Setting_TRUE;
+                        build_set_macro_from_meta(scratch.arena, &lexer, macros, "subsystem", "WINDOWS_SUBSYSTEM", true, is_windows ? "WINDOWS_SUBSYSTEM_WINDOWS" : "WINDOWS_SUBSYSTEM_CONSOLE", &parse_ok);
+                    }
+                } else if (string_equals(token_data, S("link_libc"))) {
+                    parse_ok = settings_this_pass.link_crt == Build_Meta_Setting_UNSET;
+                    if (!parse_ok) log_error("you can't specify `link_libc` multiple times");
+
+                    const char *error = "error: expected `link_libc = true/false`";
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, '=', error);
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, clex_Token_IDENTIFIER, error);
+
+                    if (parse_ok) {
+                        token_data = base_string_from_clex_data(lexer.token.data);
+                        if (string_equals(token_data, S("true"))) {
+                            settings_this_pass.link_crt = Build_Meta_Setting_TRUE;
+                        } else if (string_equals(token_data, S("false"))) {
+                            settings_this_pass.link_crt = Build_Meta_Setting_FALSE;
+                        } else {
+                            log_error("expected `true` or `false` in `META(link_libc = true/false)`, got `%S`", token_data);
+                            parse_ok = false;
+                        }
+                    }
+
+                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected `)` to close `META(...)` directive");
+
+                    bool links_crt = settings_this_pass.link_crt == Build_Meta_Setting_TRUE;
+                    if (parse_ok && links_crt && target_os == BASE_OS_WASM) {
+                        build_log_preprocessor_error(&lexer, "`META(link_libc = true)` is not possible on wasm, which has no libc");
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok) build_set_macro_from_meta(scratch.arena, &lexer, macros, "link_libc", "LINK_CRT", true, links_crt ? "1" : "0", &parse_ok);
+                    if (parse_ok && compiler == Build_Compiler_MSVC) {
+                        bool uses_address_sanitiser = links_crt && build_mode == Build_Mode_DEBUG;
+                        build_set_macro_from_meta(scratch.arena, &lexer, macros, "link_libc", "__SANITIZE_ADDRESS__", uses_address_sanitiser, "1", &parse_ok);
+                    }
+                } else if (string_equals(token_data, S("link"))) {
+                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link \"Library\")`");
+                    String library = base_string_from_clex_data(lexer.token.data);
+
+                    if (parse_ok && library.count == 0) {
+                        log_error("link library name is empty");
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok) build_push_argument(&link_libraries, cstring_from_string(scratch.arena, library));
+                } else if (string_equals(token_data, S("compile_flag"))) {
+                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_flag \"...\")`");
+                    String flag = base_string_from_clex_data(lexer.token.data);
+
+                    if (parse_ok && flag.count == 0) {
+                        log_error("extra compile flag is empty string");
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok && build_flag_changes_preprocessor(flag)) {
+                        // TODO(felix): Let compile flags define macros.
+                        log_error("compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok) build_push_argument(&compiler_extra_flags, cstring_from_string(scratch.arena, flag));
+                } else if (string_equals(token_data, S("link_flag"))) {
+                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link_flag \"...\")`");
+                    String flag = base_string_from_clex_data(lexer.token.data);
+
+                    if (parse_ok && flag.count == 0) {
+                        log_error("extra linker flag is empty string");
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok) build_push_argument(&linker_extra_flags, cstring_from_string(scratch.arena, flag));
+                } else if (string_equals(token_data, S("compile_and_link_flag"))) {
+                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_and_link_flag \"...\")`");
+                    String flag = base_string_from_clex_data(lexer.token.data);
+
+                    if (parse_ok && flag.count == 0) {
+                        log_error("extra compile and link flag is empty string");
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok && build_flag_changes_preprocessor(flag)) {
+                        // TODO(felix): Let compile flags define macros.
+                        log_error("compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
+                        parse_ok = false;
+                    }
+
+                    if (parse_ok) {
+                        const char *as_cstring = cstring_from_string(scratch.arena, flag);
+                        build_push_argument(&linker_extra_flags, as_cstring);
+                        build_push_argument(&compiler_extra_flags, as_cstring);
+                    }
+                } else {
+                    log_error("unsupported metaprogram directive '%S'", token_data);
                     parse_ok = false;
-                    continue;
                 }
             }
-            if (!parse_ok) continue;
-
-            String variable_name = names[0];
-            String array_length_name = names[1];
-
-            String input = {0};
-            const char *input_path = cstring_from_string(scratch.arena, input_file);
-
-            bool embed_via_object = target_os == BASE_OS_WINDOWS || !!(target_os & BASE_OS_ANY_APPLE);
-            if (embed_via_object) {
-                static bool embedded_once_already = false;
-                if (embedded_once_already && embed_via_object) {
-                    log_error("TODO(felix): support embedding multiple files in object files");
-                    parse_ok = false;
-                    continue;
-                }
-                embedded_once_already = true;
-
-                fs_File input_file_handle = fs_file_open_and_get_size(input_path, fs_File_Flag_READ, &input.count);
-                if (input.count == 0) {
-                    log_error("unable to open file '%s'", input_path);
-                    parse_ok = false;
-                    continue;
-                }
-
-                // TODO(felix): Handle iOS separately from iOS-simulator.
-                object_Bundle_Flags flags = object_Bundle_READ;
-                switch (target_os) {
-                    case BASE_OS_WINDOWS: flags |= object_Bundle_COFF; break;
-                    case BASE_OS_IOS_DEVICE: flags |= object_Bundle_MACHO_IOS; break;
-                    case BASE_OS_IOS_SIMULATOR: flags |= object_Bundle_MACHO_IOS_SIMULATOR; break;
-                    case BASE_OS_MACOS: flags |= object_Bundle_MACHO_MACOS; break;
-                    default: unreachable;
-                }
-
-                const char *array_name = variable_name.data;
-                u32 array_name_length = (u32)variable_name.count;
-
-                const char *length_name = array_length_name.data;
-                u32 length_name_length = (u32)array_length_name.count;
-
-                u64 byte_count = 0;
-                u8 *to_write = object_bundle(array_name, array_name_length, length_name, length_name_length, 0, (u32)input.count, 0, &byte_count, flags);
-                assert(to_write == 0 && byte_count > 0);
-
-                u8 *bytes = arena_make(scratch.arena, size_t_from_u64(byte_count), u8);
-                to_write = object_bundle(array_name, array_name_length, length_name, length_name_length, 0, (u32)input.count, bytes, &byte_count, flags);
-                if (to_write == 0) {
-                    log_error("failure generating object file to embed '%S'", input_file);
-                    parse_ok = false;
-                    continue;
-                }
-
-                u64 read_count = fs_read_entire_file(input_file_handle, (char *)to_write, input.count);
-                assert(read_count == input.count);
-                fs_close(input_file_handle);
-
-                const char *output_name = cstring_print(scratch.arena, "meta.generated.%s", object_extension);
-                const char *output_in_build_folder = cstring_print(scratch.arena, "%s/%s", build_folder, output_name);
-                ok = os_write_entire_file(output_in_build_folder, bytes, byte_count);
-                if (!ok) {
-                    parse_ok = false;
-                    continue;
-                }
-
-                build_objects_push(&objects, (Build_Object){ .object_path = output_name });
-            } else {
-                input = os_read_entire_file(scratch.arena, input_path, &ok);
-                if (!ok) {
-                    log_error("failed reading `META(embed)` input '%s'", input_path);
-                    parse_ok = false;
-                    continue;
-                }
-
-                String qualifiers = S("static const char ");
-                String assignment = S("[] = {");
-                String closing = S("\n};\n");
-                String example_byte_as_hex = S("0x00,");
-                u64 chars_per_row_exponent = 5;
-                u64 chars_per_row = (u64)1 << chars_per_row_exponent;
-                u64 rows = input.count / chars_per_row + 1;
-
-                String indent = S("\n    ");
-                u64 bytes_for_indentation = rows * indent.count;
-                u64 bytes_total = bytes_for_indentation + rows * (chars_per_row * example_byte_as_hex.count);
-                bytes_total += qualifiers.count + variable_name.count + assignment.count + closing.count;
-
-                String length_qualifiers = S("static const u64 ");
-                String length_assignment = S(" = ");
-                String length_closing = S(";\n");
-                u64 max_digits = sizeof(u64) * 8;
-                bytes_total += length_qualifiers.count + array_length_name.count + length_assignment.count + max_digits + length_closing.count;
-
-                string_builder_reserve_unused(scratch.arena, &metaprogram_code, bytes_total);
-                string_builder_push(&metaprogram_code, qualifiers);
-                string_builder_push(&metaprogram_code, variable_name);
-                string_builder_push(&metaprogram_code, assignment);
-
-                u64 column_mask = chars_per_row - 1;
-                const char *chars = "0123456789abcdef";
-                char byte_string[] = "0x!!,";
-                for (u64 i = 0; i < input.count; i += 1) {
-                    u64 column = i & column_mask;
-                    if (column == 0) string_builder_push(&metaprogram_code, indent);
-
-                    u8 byte = (u8)input.data[i];
-
-                    // NOTE(felix): this is much faster than string_builder_print in a hot, unoptimised loop. it is equivalent to:
-                    // string_builder_print(&metaprogram_code, "0x%c%c,", chars[byte >> 4], chars[byte & 0x0f]);
-                    byte_string[2] = chars[byte >> 4];
-                    byte_string[3] = chars[byte & 0x0f];
-                    string_builder_push(&metaprogram_code, (String){ .data = byte_string, .count = sizeof byte_string - 1 });
-                }
-                string_builder_push(&metaprogram_code, closing);
-
-                string_builder_push(&metaprogram_code, length_qualifiers);
-                string_builder_push(&metaprogram_code, array_length_name);
-                string_builder_push(&metaprogram_code, length_assignment);
-                string_builder_print(scratch.arena, &metaprogram_code, "%llu", input.count);
-                string_builder_push(&metaprogram_code, length_closing);
-            }
-        } else if (string_equals(token_data, S("link_libc"))) {
-            static bool specified_already = false;
-            if (specified_already) {
-                log_error("you can't specify `link_libc` multiple times");
-                parse_ok = false;
-                continue;
-            }
-            specified_already = true;
-
-            const char *error = "error: expected `link_libc = true/false`";
-            if (!build_eat_token(0, &lexer, '=', error)) {
-                parse_ok = false;
-                continue;
-            }
-
-            if (!build_eat_token(0, &lexer, clex_Token_IDENTIFIER, error)) {
-                parse_ok = false;
-                continue;
-            }
-            token_data = base_string_from_clex_data(lexer.token.data);
-
-            meta_link_crt_override = true;
-            if (string_equals(token_data, S("true"))) {
-                meta_link_crt_override_value = true;
-            } else if (string_equals(token_data, S("false"))) {
-                meta_link_crt_override_value = false;
-            } else {
-                log_error("expected `true` or `false` in `META(link_libc = true/false)`, got `%S`", token_data);
-                parse_ok = false;
-                continue;
-            }
-
-            if (!build_eat_token(0, &lexer, ')', "error: expected `)` to close `META(...)` directive")) {
-                parse_ok = false;
-                continue;
-            }
-        } else if (string_equals(token_data, S("link"))) {
-            if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link \"Library\")`")) {
-                parse_ok = false;
-                continue;
-            }
-            String library = base_string_from_clex_data(lexer.token.data);
-            if (library.count == 0) {
-                log_error("link library name is empty");
-                parse_ok = false;
-                continue;
-            }
-
-            // TODO(felix): Remove this hack once parser correctly handles #if branches.
-            bool link_this = true;
-            if (target_os == BASE_OS_WASM) link_this = false;
-            if (target_os & BASE_OS_ANY_APPLE) {
-                if (string_equals(library, S("Kernel32"))) link_this = false;
-                else if (string_equals(library, S("Shell32"))) link_this = false;
-                else if (string_equals(library, S("Ntdll"))) link_this = false;
-            }
-
-            if (link_this) build_push_argument(&link_libraries, cstring_from_string(scratch.arena, library));
-        } else if (string_equals(token_data, S("compile_flag"))) {
-            if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_flag \"...\")`")) {
-                parse_ok = false;
-                continue;
-            }
-            String flag = base_string_from_clex_data(lexer.token.data);
-            if (flag.count == 0) {
-                log_error("extra compile flag is empty string");
-                parse_ok = false;
-                continue;
-            }
-
-            build_push_argument(&compiler_extra_flags, cstring_from_string(scratch.arena, flag));
-        } else if (string_equals(token_data, S("link_flag"))) {
-            if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link_flag \"...\")`")) {
-                parse_ok = false;
-                continue;
-            }
-            String flag = base_string_from_clex_data(lexer.token.data);
-            if (flag.count == 0) {
-                log_error("extra linker flag is empty string");
-                parse_ok = false;
-                continue;
-            }
-
-            build_push_argument(&linker_extra_flags, cstring_from_string(scratch.arena, flag));
-        } else if (string_equals(token_data, S("compile_and_link_flag"))) {
-            if (!build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_and_link_flag \"...\")`")) {
-                parse_ok = false;
-                continue;
-            }
-            String flag = base_string_from_clex_data(lexer.token.data);
-            if (flag.count == 0) {
-                log_error("extra compile and link flag is empty string");
-                parse_ok = false;
-                continue;
-            }
-
-            const char *as_cstring = cstring_from_string(scratch.arena, flag);
-            build_push_argument(&linker_extra_flags, as_cstring);
-            build_push_argument(&compiler_extra_flags, as_cstring);
-        } else {
-            log_error("unsupported metaprogram directive '%S'", token_data);
-            parse_ok = false;
-            continue;
         }
-    }
-    if (parse_ok && lexer.token.kind == clex_Token_ERROR) {
-        int column = 0;
-        const char *path = 0, *path_end = 0;
-        int line = clex_get_current_location(&lexer, &column, &path, &path_end);
+        if (parse_ok && conditional_depth != 0) {
+            log_error("%u `#if`s are missing their `#endif`", conditional_depth);
+            parse_ok = false;
+        }
 
-        String s = string_from_pointers(path, path_end);
-        print("%S(%d,%d): error: parser error\n", s, line, column);
-        // TODO(felix): print absolute path
-        // TODO(felix): print parser message
-        parse_ok = false;
+        if (parse_ok && lexer.token.kind == clex_Token_ERROR) {
+            int column = 0;
+            const char *path = 0, *path_end = 0;
+            int line = clex_get_current_location(&lexer, &column, &path, &path_end);
+
+            String s = string_from_pointers(path, path_end);
+            print("%S(%d,%d): error: parser error\n", s, line, column);
+            // TODO(felix): Print absolute path.
+            // TODO(felix): Print parser message.
+            parse_ok = false;
+        }
+
+        if (pass_count == 1) first_pass_seconds = time_seconds_between_relative_timestamps(time_at_parse_start, time_relative_timestamp());
+
+        if (parse_ok) {
+            assert(settings_from_earlier_passes.link_crt == Build_Meta_Setting_UNSET || settings_this_pass.link_crt == settings_from_earlier_passes.link_crt);
+            assert(settings_from_earlier_passes.subsystem_windows == Build_Meta_Setting_UNSET || settings_this_pass.subsystem_windows == settings_from_earlier_passes.subsystem_windows);
+        }
+
+        bool link_crt_was_set_this_pass = settings_this_pass.link_crt != settings_from_earlier_passes.link_crt;
+        bool subsystem_was_set_this_pass = settings_this_pass.subsystem_windows != settings_from_earlier_passes.subsystem_windows;
+        bool another_pass_can_fix_errors = meta_in_unknown_group_count != 0 && (link_crt_was_set_this_pass || subsystem_was_set_this_pass);
+        parsing = parse_ok && another_pass_can_fix_errors;
+
+        bool has_final_errors = parse_ok && !parsing && meta_in_unknown_group_count != 0;
+        if (has_final_errors && !collect_unknown_reasons) {
+            for (u64 i = 0; i < meta_in_unknown_group_count; i += 1) {
+                const Build_Meta_In_Unknown_Group *meta = &metas_in_unknown_groups[i];
+                if (link_libc_meta_location == 0 && string_equals(meta->directive, S("link_libc"))) link_libc_meta_location = meta->location;
+                if (subsystem_meta_location == 0 && string_equals(meta->directive, S("subsystem"))) subsystem_meta_location = meta->location;
+            }
+            collect_unknown_reasons = true;
+            parsing = true;
+        } else if (has_final_errors) {
+            for (u64 i = 0; i < meta_in_unknown_group_count; i += 1) {
+                const Build_Meta_In_Unknown_Group *meta = &metas_in_unknown_groups[i];
+                bool sets_link_crt = string_equals(meta->directive, S("link_libc"));
+                bool sets_subsystem = string_equals(meta->directive, S("subsystem"));
+
+                bool sets_own_condition = false;
+                for (Build_Unknown_Reason_Id reason = meta->unknown_reason; reason != 0; reason = macros->reasons.items[reason].cause) {
+                    bool reason_is_link_crt = reason == link_crt_unset_reason || reason == address_sanitiser_unset_reason;
+                    bool reason_is_subsystem = reason == subsystem_unset_reason;
+                    sets_own_condition = sets_own_condition || (sets_link_crt && reason_is_link_crt) || (sets_subsystem && reason_is_subsystem);
+                }
+
+                const char *message = "`META(...)` is in an unknown group, so the metaprogram doesn't know if the compiler builds it";
+                if (sets_own_condition) message = cstring_print(scratch.arena, "`META(%S)` sets the condition of its own group; this is an unrecoverable cycle", meta->directive);
+                print("error: %s: %s\n", meta->location, message);
+                for (Build_Unknown_Reason_Id reason = meta->unknown_reason; reason != 0; reason = macros->reasons.items[reason].cause) {
+                    print("    because %s\n", macros->reasons.items[reason].description);
+                }
+            }
+            parse_ok = false;
+        }
+
+        settings_from_earlier_passes = settings_this_pass;
     }
 
     if (parse_ok) {
-        f64 time_at_parse_end = time_relative_timestamp();
-        f64 parse_seconds = time_seconds_between_relative_timestamps(time_at_parse_start, time_at_parse_end);
-        print("Parsing took %.2lf seconds.\n", parse_seconds);
+        f64 parse_seconds = time_seconds_between_relative_timestamps(time_at_parse_start, time_relative_timestamp());
+        if (pass_count == 1) print("Parsing took %.3lf seconds in 1 pass.\n", parse_seconds);
+        else print("Parsing took %.3lf seconds in %u passes; the first pass took %.3lf seconds.\n", parse_seconds, pass_count, first_pass_seconds);
+    }
+
+    if (parse_ok && files_to_embed_count > 0) {
+        object_Bundle_Flags flags = object_Bundle_READ;
+        switch (target_os) {
+            case BASE_OS_WINDOWS: flags |= object_Bundle_COFF; break;
+            // TODO(felix): Handle iOS separately from iOS-simulator.
+            case BASE_OS_IOS_DEVICE: flags |= object_Bundle_MACHO_IOS; break;
+            case BASE_OS_IOS_SIMULATOR: flags |= object_Bundle_MACHO_IOS_SIMULATOR; break;
+            case BASE_OS_MACOS: flags |= object_Bundle_MACHO_MACOS; break;
+            case BASE_OS_WASM: flags |= object_Bundle_WASM; break;
+            default: {
+                log_error("`META(embed)` is not supported for this target");
+                parse_ok = false;
+            } break;
+        }
+
+        u64 entries_offset = sizeof(u64);
+        u64 names_offset = entries_offset + files_to_embed_count * sizeof(Embedded_File_Entry);
+        u64 table_size = names_offset;
+        u64 terminator_size = 1;
+        for (u64 i = 0; i < files_to_embed_count; i += 1) table_size += files_to_embed[i].name.count + terminator_size + files_to_embed[i].contents.count + terminator_size;
+        if (table_size > UINT32_MAX) {
+            log_error("embedded files total %llu bytes, but object files support at most %u", table_size, UINT32_MAX);
+            parse_ok = false;
+        }
+
+        if (parse_ok) {
+            u8 *table = arena_make(scratch.arena, size_t_from_u64(table_size), u8);
+            memcpy(table, &files_to_embed_count, sizeof files_to_embed_count);
+
+            u64 cursor = names_offset;
+            for (u64 i = 0; i < files_to_embed_count; i += 1) {
+                Build_Embedded_File *file = &files_to_embed[i];
+                Embedded_File_Entry entry = { .name_offset = cursor };
+                memcpy(table + cursor, file->name.data, file->name.count);
+                cursor += file->name.count;
+                table[cursor] = 0;
+                cursor += terminator_size;
+
+                entry.data_offset = cursor;
+                entry.data_size = file->contents.count;
+                memcpy(table + cursor, file->contents.data, file->contents.count);
+                cursor += file->contents.count;
+                table[cursor] = 0;
+                cursor += terminator_size;
+
+                memcpy(table + entries_offset + i * sizeof entry, &entry, sizeof entry);
+            }
+            assert(cursor == table_size);
+
+            const char array_name[] = "embedded_files";
+            u64 byte_count = 0;
+            u8 *to_write = object_bundle(array_name, sizeof array_name - 1, table, (u32)table_size, 0, &byte_count, flags);
+            assert(to_write == 0 && byte_count > 0);
+
+            u8 *bytes = arena_make(scratch.arena, size_t_from_u64(byte_count), u8);
+            to_write = object_bundle(array_name, sizeof array_name - 1, table, (u32)table_size, bytes, &byte_count, flags);
+
+            const char *output_name = cstring_print(scratch.arena, "meta.generated.%s", object_extension);
+            const char *output_in_build_folder = cstring_print(scratch.arena, "%s/%s", build_folder, output_name);
+            parse_ok = to_write != 0 && os_write_entire_file(output_in_build_folder, bytes, byte_count);
+            if (!parse_ok) log_error("failure writing the object file for embedded files to '%s'", output_in_build_folder);
+
+            build_objects_push(&objects, (Build_Object){ .object_path = output_name });
+        }
     }
 
     bool metaprogram_output_ok = parse_ok;
@@ -3729,12 +4277,9 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
     build_objects_push(&objects, (Build_Object){ .code_path = c_file_path });
 
-    bool link_crt = false;
-    if (meta_link_crt_override) {
-        link_crt = meta_link_crt_override_value;
-    } else {
-        link_crt = !!(target_os & BASE_OS_ANY_APPLE);
-    }
+    bool link_crt = settings_from_earlier_passes.link_crt == Build_Meta_Setting_TRUE;
+    if (settings_from_earlier_passes.link_crt == Build_Meta_Setting_UNSET) link_crt = !!(target_os & BASE_OS_ANY_APPLE);
+    bool subsystem_is_windows = settings_from_earlier_passes.subsystem_windows != Build_Meta_Setting_FALSE;
 
     // TODO(felix): should be handled by metaprogram
     const char *include_paths[] = {
@@ -3744,20 +4289,43 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         0,
     };
 
-    Build_Mode build_mode = Build_Mode_DEBUG;
-    for (u64 i = 0; i < argument_count; i += 1) {
-        if (cstring_equals(arguments[i], "clang")) compiler = Build_Compiler_CLANG;
-        if (cstring_equals(arguments[i], "release")) build_mode = Build_Mode_RELEASE;
-    }
-
     Build_Linker linker = compiler == Build_Compiler_CLANG ? Build_Linker_CLANG : Build_Linker_MSVC;
     bool use_asan = link_crt && build_mode == Build_Mode_DEBUG;
-    if (use_asan && linker == Build_Linker_CLANG && target_os == BASE_OS_WINDOWS) {
-        // NOTE(felix): for some reason with clang I can only get an asan-enabled executable to run if I copy clang_rt.asan_dynamic-x86_64.dll to the build directory.
-        // TODO(felix): implement logic for finding C:\Program Files\LLVM\lib\clang\[VERSION]\lib\windows\[asan dll], so we can do this
-        // OR it's possible this is a clang/msvc version mismatch since there shouldn't be a difference
-        print("info: disabling asan with clang on windows (see base.h, line %llu)\n", __LINE__ - 2);
-        use_asan = false;
+
+    // NOTE(felix): MSVC and LLVM ship incompatible clang_rt.asan_dynamic-x86_64.dll, so the executable must find the one from its own compiler before any on PATH.
+    if (use_asan && target_os == BASE_OS_WINDOWS) {
+        String runtime_folder = {0};
+        u32 query_exit_code = 1;
+        switch (compiler) {
+            case Build_Compiler_CLANG: {
+                const char *query[] = { "clang", "-print-resource-dir", 0 };
+                Os_Process_Result result = os_process_run(scratch.arena, query, 0, Os_Process_Flag_CAPTURE_OUTPUT);
+                query_exit_code = result.exit_code;
+                String resource_folder = result.output;
+                while (resource_folder.count > 0 && ascii_is_whitespace(resource_folder.data[resource_folder.count - 1])) resource_folder.count -= 1;
+                runtime_folder = string_print(scratch.arena, "%S\\lib\\windows", resource_folder);
+            } break;
+            case Build_Compiler_MSVC: {
+                const char *query[] = { "where", "cl", 0 };
+                Os_Process_Result result = os_process_run(scratch.arena, query, 0, Os_Process_Flag_CAPTURE_OUTPUT);
+                query_exit_code = result.exit_code;
+                String compiler_paths = result.output;
+                u64 first_path_length = 0;
+                while (first_path_length < compiler_paths.count && compiler_paths.data[first_path_length] != '\r' && compiler_paths.data[first_path_length] != '\n') first_path_length += 1;
+                String first_compiler_path = string_range(compiler_paths, 0, first_path_length);
+                runtime_folder = string_cut_last(first_compiler_path, '\\').head;
+            } break;
+            default: unreachable;
+        }
+
+        const char *runtime_name = "clang_rt.asan_dynamic-x86_64.dll";
+        const char *runtime_source = cstring_print(scratch.arena, "%S\\%s", runtime_folder, runtime_name);
+        const char *runtime_destination = cstring_print(scratch.arena, "%s\\%s", build_folder, runtime_name);
+
+        bool read_ok = false;
+        String runtime = query_exit_code == 0 ? os_read_entire_file(scratch.arena, runtime_source, &read_ok) : (String){0};
+        bool copy_ok = read_ok && os_write_entire_file(runtime_destination, runtime.data, runtime.count);
+        if (!copy_ok) log_error("unable to copy the address sanitiser runtime from '%s' to '%s'", runtime_source, runtime_destination);
     }
 
     Os_Process_Flags process_flags =
@@ -3800,13 +4368,16 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             }
 
             build_push_arguments(&compile, include_paths);
-            if (link_crt) build_push_argument(&compile, "-DLINK_CRT=1");
+            build_push_argument(&compile, link_crt ? "-DLINK_CRT=1" : "-DLINK_CRT=0");
+            if (target_os == BASE_OS_WINDOWS) {
+                build_push_argument(&compile, subsystem_is_windows ? "-DWINDOWS_SUBSYSTEM=WINDOWS_SUBSYSTEM_WINDOWS" : "-DWINDOWS_SUBSYSTEM=WINDOWS_SUBSYSTEM_CONSOLE");
+            }
 
             if (!object->no_extra_errors) build_push_arguments(&compile, build_compiler_extra_errors[compiler]);
             build_push_arguments(&compile, build_compiler_disabled_errors[compiler]);
 
             build_push_arguments(&compile, build_compiler_mode_flags[build_mode][compiler]);
-            if (build_mode == Build_Mode_DEBUG) build_push_argument(&compile, "-DBUILD_DEBUG=1");
+            build_push_argument(&compile, build_mode == Build_Mode_DEBUG ? "-DBUILD_DEBUG=1" : "-DBUILD_DEBUG=0");
             if (use_asan) build_push_argument(&compile, "-fsanitize=address");
 
             build_push_arguments(&compile, object->extra_flags);
@@ -3829,7 +4400,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             const char *output = cstring_print(scratch.arena, "%s%s", build_compiler_out[compiler], object->object_path);
             build_push_argument(&compile, output);
 
-            exit_code = os_process_run(scratch.arena, compile.items, build_folder, process_flags);
+            exit_code = os_process_run(scratch.arena, compile.items, build_folder, process_flags).exit_code;
             compile_ok = exit_code == 0;
         }
     }
@@ -3841,36 +4412,24 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         build_push_arguments(&link, build_linker_initial_command[linker][target_os]);
 
         if (target_os == BASE_OS_WINDOWS) {
-            if (build_mode == Build_Mode_DEBUG) {
-                if (linker == Build_Linker_MSVC) {
+            const char *subsystem = subsystem_is_windows ? "windows" : "console";
+            const char *entry = link_crt ? "mainCRTStartup" : "entrypoint";
+
+            if (linker == Build_Linker_MSVC) {
+                build_push_argument(&link, cstring_print(scratch.arena, "-subsystem:%s", subsystem));
+                build_push_argument(&link, cstring_print(scratch.arena, "-entry:%s", entry));
+                if (build_mode == Build_Mode_DEBUG) {
                     build_push_argument(&link, "-debug");
-                    build_push_argument(&link, "-subsystem:console");
                     if (link_crt) build_push_argument(&link, "libucrtd.lib");
                 } else {
-                    build_push_argument(&link, "-g");
-                }
-            } else {
-                if (linker == Build_Linker_MSVC) {
                     build_push_argument(&link, "-opt:ref");
                     build_push_argument(&link, "-opt:icf");
-                    build_push_argument(&link, "-subsystem:console");
-                    // TODO(felix): subsystem:windows and entry:main don't work currently (silent crash). I'm pretty sure this has to do with the entrypoint being set incorrectly. I'm also not sure about the WINDOWS_SUBSYSTEM_[...] #defines in base_context.h
-                    // build_push_argument(&link, "-subsystem:windows");
-                    if (link_crt) {
-                        // build_push_argument(&link, "-entry:main");
-                        build_push_argument(&link, "libucrt.lib");
-                    }
+                    if (link_crt) build_push_argument(&link, "libucrt.lib");
                 }
-            }
-
-            // TODO(felix): handle in metaprogram
-            if (!link_crt) switch (compiler) {
-                case Build_Compiler_MSVC: build_push_argument(&link, "-entry:entrypoint"); break;
-                case Build_Compiler_CLANG: {
-                    build_push_argument(&link, "-Wl,-entry:entrypoint");
-                    build_push_argument(&link, "-Wl,-subsystem:windows");
-                } break;
-                default: unreachable;
+            } else {
+                build_push_argument(&link, cstring_print(scratch.arena, "-Wl,-subsystem:%s", subsystem));
+                build_push_argument(&link, cstring_print(scratch.arena, "-Wl,-entry:%s", entry));
+                if (build_mode == Build_Mode_DEBUG) build_push_argument(&link, "-g");
             }
         }
 
@@ -3911,7 +4470,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         build_push_argument(&link, output);
 
         if (app_folder_ok) {
-            exit_code = os_process_run(scratch.arena, link.items, build_folder, process_flags);
+            exit_code = os_process_run(scratch.arena, link.items, build_folder, process_flags).exit_code;
             link_attempted = true;
         } else exit_code = 1;
 
@@ -4074,7 +4633,7 @@ static ui_Box *base_ui_draw_command(Arena *frame_arena, ui_State *ui, ui_Box *pa
 
     V2 bounds = draw_command_bounds(command);
     for (int axis = 0; axis < ui_Axis_COUNT; axis += 1) {
-        box->size[axis] = (ui_Size){ .kind = ui_Size_PIXELS, .value = v(bounds)[axis] };
+        box->size[axis] = (ui_Size){ .kind = ui_Size_Kind_PIXELS, .value = v(bounds)[axis] };
     }
 
     return box;

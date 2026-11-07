@@ -1,24 +1,18 @@
 #define BASE_PLATFORM_IOS
 
-// TODO(felix): Add the right flags based on BASE_OS once metaprogram parser handles #ifs.
-
-// Actual iPhone
-META(compile_and_link_flag "-isysroot")
-META(compile_and_link_flag "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk")
-META(compile_and_link_flag "-target")
-META(compile_and_link_flag "arm64-apple-ios")
-#if BASE_OS != BASE_OS_IOS_DEVICE
-    #error "This is the wrong block."
+#if BASE_OS == BASE_OS_IOS_DEVICE
+    META(compile_and_link_flag "-isysroot")
+    META(compile_and_link_flag "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk")
+    META(compile_and_link_flag "-target")
+    META(compile_and_link_flag "arm64-apple-ios")
+#elif BASE_OS == BASE_OS_IOS_SIMULATOR
+    META(compile_and_link_flag "-isysroot")
+    META(compile_and_link_flag "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk")
+    META(compile_and_link_flag "-target")
+    META(compile_and_link_flag "arm64-apple-ios-simulator")
+#else
+    #error "base_platform_ios.c supports only iOS devices and the iOS simulator"
 #endif
-
-// // iPhone Simulator
-// META(compile_and_link_flag "-isysroot")
-// META(compile_and_link_flag "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk")
-// META(compile_and_link_flag "-target")
-// META(compile_and_link_flag "arm64-apple-ios-simulator")
-// #if BASE_OS != BASE_OS_IOS_SIMULATOR
-//     #error "This is the wrong block."
-// #endif
 
 META(link_flag "-framework") META(link_flag "UIKit")
 META(link_flag "-framework") META(link_flag "Foundation")
@@ -709,8 +703,8 @@ static void platform__touches_began(id self, SEL command, id touches, id event) 
     App_Frame_Info *frame = &platform__.base.frame;
     assert(frame->dpi_scale > 0);
     frame->mouse_position = v2_scale((V2){ .x = (f32)point.x, .y = (f32)point.y }, frame->dpi_scale);
-    frame->mouse_clicked[App_Mouse_LEFT] = true;
-    frame->mouse_down[App_Mouse_LEFT] = true;
+    frame->mouse_clicked[App_Mouse_Button_LEFT] = true;
+    frame->mouse_down[App_Mouse_Button_LEFT] = true;
 }
 
 static void platform__touches_moved(id self, SEL command, id touches, id event) {
@@ -732,7 +726,7 @@ static void platform__touches_ended(id self, SEL command, id touches, id event) 
     (void)touches;
     (void)event;
 
-    platform__.base.frame.mouse_down[App_Mouse_LEFT] = false;
+    platform__.base.frame.mouse_down[App_Mouse_Button_LEFT] = false;
 }
 
 static Class platform__layer_class(id self, SEL command) {

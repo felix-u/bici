@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-11-03
+// https://github.com/felix-u 2026-11-07
 // Public domain. NO WARRANTY - use at your own risk.
 
 #if !defined(FS_H)
@@ -24,29 +24,46 @@ typedef struct {
     #elif defined(FS_OS_POSIX)
         FILE *handle;
     #else
-        int _stub;
+        void *handle;
     #endif
 } fs_File;
 
 typedef struct {
-    const char *folder_path;
+    const char *path;
+    const char *name;
+    unsigned long long size;
+    unsigned long long modification_time;
+    unsigned depth;
+    _Bool is_folder;
+} fs_File_Info;
+
+typedef enum {
+    fs_Folder_Iterator_Flag_RECURSIVE = 1 << 0,
+} fs_Folder_Iterator_Flags;
+
+#if !defined(FS_FOLDER_ITERATOR_MAX_DEPTH)
+    #define FS_FOLDER_ITERATOR_MAX_DEPTH 64
+#endif
+
+enum {
+    FS__NAME_MAX_UTF16_UNITS = 255,
+    FS__UTF8_UNITS_PER_UTF16_UNIT_MAX = 3,
+    FS__DIRECTORY_ENTRY_FIXED_SIZE = 64,
+};
+
+typedef struct {
+    fs_File_Info info;
+    fs_Folder_Iterator_Flags flags;
+    _Bool had_error;
 
     #if defined(FS_OS_WINDOWS)
-        void *handle;
-        // The output of NtQueryDirectoryFile
-        unsigned long long entries[1024];
-        unsigned entry_offset;
-        _Bool has_entries;
+        void *handles[FS_FOLDER_ITERATOR_MAX_DEPTH];
+        unsigned path_lengths[FS_FOLDER_ITERATOR_MAX_DEPTH];
+        unsigned open_folder_count;
+        unsigned long long entry[(FS__DIRECTORY_ENTRY_FIXED_SIZE + FS__NAME_MAX_UTF16_UNITS * 2) / sizeof(unsigned long long) + 1];
 
         char path[4096];
-        // NOTE(felix): A filename has max 255 UTF16 units, each of which is max 3 bytes as UTF8.
-        char name[255 * 3 + 1];
-    #elif defined(FS_OS_POSIX)
-        FILE *handle;
-        char path[4096];
-        char name[4096];
-    #else
-        int _stub;
+        char name[FS__NAME_MAX_UTF16_UNITS * FS__UTF8_UNITS_PER_UTF16_UNIT_MAX + 1];
     #endif
 } fs_Folder_Iterator;
 
@@ -59,19 +76,22 @@ typedef enum {
     #define FS_FUNCTION
 #endif
 
-FS_FUNCTION _Bool              fs_close(fs_File file);
 FS_FUNCTION _Bool              fs_absolute_path(const char *path, char *buffer, unsigned long long buffer_size);
+FS_FUNCTION _Bool              fs_close(fs_File file);
+FS_FUNCTION _Bool              fs_executable_path(char *buffer, unsigned long long buffer_size);
 FS_FUNCTION _Bool              fs_exists(const char *path);
+FS_FUNCTION _Bool              fs_file_info(const char *path, fs_File_Info *info);
 FS_FUNCTION fs_File            fs_file_open_and_get_size(const char *path, fs_File_Flags flags, unsigned long long *size);
 FS_FUNCTION unsigned long long fs_file_size(const char *path);
 FS_FUNCTION _Bool              fs_file_write(fs_File file, const void *bytes, unsigned long long size);
 FS_FUNCTION _Bool              fs_folder_iterate(fs_Folder_Iterator *it);
-FS_FUNCTION fs_Folder_Iterator fs_folder_iterator(const char *relative_path);
+FS_FUNCTION fs_Folder_Iterator fs_folder_iterator(const char *relative_path, fs_Folder_Iterator_Flags flags);
 FS_FUNCTION void               fs_folder_iterator_end(fs_Folder_Iterator *it);
 FS_FUNCTION _Bool              fs_make_folder(const char *relative_path);
 FS_FUNCTION fs_File            fs_open(const char *path, fs_File_Flags flags);
 FS_FUNCTION unsigned long long fs_read_entire_file(fs_File file, char *buffer, unsigned long long size);
 FS_FUNCTION _Bool              fs_remove_file(const char *relative_path);
+FS_FUNCTION _Bool              fs_rename(const char *old_path, const char *new_path);
 
 
 #endif // FS_H
@@ -133,6 +153,7 @@ FS_FUNCTION _Bool              fs_remove_file(const char *relative_path);
     long NtQueryInformationFile(void *FileHandle, IO_STATUS_BLOCK *IoStatusBlock, void *FileInformation, unsigned long Length, int FileInformationClass);
     long NtQuerySymbolicLinkObject(void *LinkHandle, UNICODE_STRING *LinkTarget, unsigned long *ReturnedLength);
     long NtReadFile(void *FileHandle, void *Event, void *ApcRoutine, void *ApcContext, IO_STATUS_BLOCK *IoStatusBlock, void *Buffer, unsigned long Length, long long *ByteOffset, unsigned long *Key);
+    long NtSetInformationFile(void *FileHandle, IO_STATUS_BLOCK *IoStatusBlock, void *FileInformation, unsigned long Length, int FileInformationClass);
     long NtWriteFile(void *FileHandle, void *Event, void *ApcRoutine, void *ApcContext, IO_STATUS_BLOCK *IoStatusBlock, const void *Buffer, unsigned long Length, long long *ByteOffset, unsigned long *Key);
 
     unsigned long RtlGetFullPathName_U(const unsigned short *FileName, unsigned long BufferLength, unsigned short *Buffer, unsigned short **FilePart);
@@ -176,6 +197,7 @@ typedef enum {
     fs__Nt_Information_Class_FILE_DIRECTORY       = 1,
     fs__Nt_Information_Class_FILE_STANDARD        = 5,
     fs__Nt_Information_Class_FILE_NAME            = 9,
+    fs__Nt_Information_Class_FILE_RENAME          = 10,
     fs__Nt_Information_Class_FILE_NORMALIZED_NAME = 48,
     fs__Nt_Information_Class_OBJECT_NAME          = 1,
 } fs__Nt_Information_Class;
@@ -252,54 +274,6 @@ static _Bool fs__utf16_from_utf8(unsigned short *destination, unsigned destinati
 
             written += unit_count;
             read += sequence_length;
-        }
-    }
-
-    *destination_count = written;
-    return ok;
-}
-
-static _Bool fs__utf8_from_utf16(char *destination, unsigned long long destination_capacity, unsigned long long *destination_count, const unsigned short *source, unsigned source_count) {
-    _Bool ok = 1;
-    unsigned char *bytes = (unsigned char *)destination;
-    unsigned read = 0;
-    unsigned long long written = 0;
-
-    while (ok && read < source_count) {
-        unsigned codepoint = source[read];
-        unsigned unit_count = 1;
-        _Bool is_high_surrogate = 0xd800 <= codepoint && codepoint <= 0xdbff;
-        _Bool has_low_surrogate = read + 1 < source_count && 0xdc00 <= source[read + 1] && source[read + 1] <= 0xdfff;
-        if (is_high_surrogate && has_low_surrogate) {
-            codepoint = 0x10000 + ((codepoint - 0xd800) << 10) + (source[read + 1] - 0xdc00u);
-            unit_count = 2;
-        }
-
-        unsigned byte_count = codepoint < 0x80 ? 1 : codepoint < 0x800 ? 2 : codepoint < 0x10000 ? 3 : 4;
-        ok = written + byte_count <= destination_capacity;
-        if (ok) {
-            switch (byte_count) {
-                case 1: {
-                    bytes[written] = (unsigned char)codepoint;
-                } break;
-                case 2: {
-                    bytes[written + 0] = (unsigned char)(0xc0 | (codepoint >> 6));
-                    bytes[written + 1] = (unsigned char)(0x80 | (codepoint & 0x3f));
-                } break;
-                case 3: {
-                    bytes[written + 0] = (unsigned char)(0xe0 | (codepoint >> 12));
-                    bytes[written + 1] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
-                    bytes[written + 2] = (unsigned char)(0x80 | (codepoint & 0x3f));
-                } break;
-                default: {
-                    bytes[written + 0] = (unsigned char)(0xf0 | (codepoint >> 18));
-                    bytes[written + 1] = (unsigned char)(0x80 | ((codepoint >> 12) & 0x3f));
-                    bytes[written + 2] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
-                    bytes[written + 3] = (unsigned char)(0x80 | (codepoint & 0x3f));
-                } break;
-            }
-            written += byte_count;
-            read += unit_count;
         }
     }
 
@@ -395,23 +369,51 @@ static void *fs__nt_open(fs__Path_Storage *path_storage, const char *path, fs_Fi
     return fs__nt_create_file(path_storage, path, desired_access, fs__Nt_Share_READ | fs__Nt_Share_DELETE, create_disposition, create_options);
 }
 
-FS_FUNCTION _Bool fs_close(fs_File file) {
-    _Bool ok = 0;
-    if (file.handle == 0) return ok;
+static _Bool fs__utf8_from_utf16(char *destination, unsigned long long destination_capacity, unsigned long long *destination_count, const unsigned short *source, unsigned source_count) {
+    _Bool ok = 1;
+    unsigned char *bytes = (unsigned char *)destination;
+    unsigned read = 0;
+    unsigned long long written = 0;
 
-    #if defined(FS_OS_WINDOWS)
-    {
-        ok = NtClose(file.handle) >= 0;
-    }
-    #elif defined(FS_OS_POSIX)
-    {
-        fclose(file.handle);
-        ok = 1;
-    }
-    #else
-        #error "UNSUPPORTED OS"
-    #endif
+    while (ok && read < source_count) {
+        unsigned codepoint = source[read];
+        unsigned unit_count = 1;
+        _Bool is_high_surrogate = 0xd800 <= codepoint && codepoint <= 0xdbff;
+        _Bool has_low_surrogate = read + 1 < source_count && 0xdc00 <= source[read + 1] && source[read + 1] <= 0xdfff;
+        if (is_high_surrogate && has_low_surrogate) {
+            codepoint = 0x10000 + ((codepoint - 0xd800) << 10) + (source[read + 1] - 0xdc00u);
+            unit_count = 2;
+        }
 
+        unsigned byte_count = codepoint < 0x80 ? 1 : codepoint < 0x800 ? 2 : codepoint < 0x10000 ? 3 : 4;
+        ok = written + byte_count <= destination_capacity;
+        if (ok) {
+            switch (byte_count) {
+                case 1: {
+                    bytes[written] = (unsigned char)codepoint;
+                } break;
+                case 2: {
+                    bytes[written + 0] = (unsigned char)(0xc0 | (codepoint >> 6));
+                    bytes[written + 1] = (unsigned char)(0x80 | (codepoint & 0x3f));
+                } break;
+                case 3: {
+                    bytes[written + 0] = (unsigned char)(0xe0 | (codepoint >> 12));
+                    bytes[written + 1] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
+                    bytes[written + 2] = (unsigned char)(0x80 | (codepoint & 0x3f));
+                } break;
+                default: {
+                    bytes[written + 0] = (unsigned char)(0xf0 | (codepoint >> 18));
+                    bytes[written + 1] = (unsigned char)(0x80 | ((codepoint >> 12) & 0x3f));
+                    bytes[written + 2] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
+                    bytes[written + 3] = (unsigned char)(0x80 | (codepoint & 0x3f));
+                } break;
+            }
+            written += byte_count;
+            read += unit_count;
+        }
+    }
+
+    *destination_count = written;
     return ok;
 }
 
@@ -501,6 +503,53 @@ FS_FUNCTION _Bool fs_absolute_path(const char *path, char *buffer, unsigned long
     return ok;
 }
 
+FS_FUNCTION _Bool fs_close(fs_File file) {
+    _Bool ok = 0;
+    if (file.handle == 0) return ok;
+
+    #if defined(FS_OS_WINDOWS)
+    {
+        ok = NtClose(file.handle) >= 0;
+    }
+    #elif defined(FS_OS_POSIX)
+    {
+        fclose(file.handle);
+        ok = 1;
+    }
+    #else
+        #error "UNSUPPORTED OS"
+    #endif
+
+    return ok;
+}
+
+FS_FUNCTION _Bool fs_executable_path(char *buffer, unsigned long long buffer_size) {
+    FS_ASSERT(buffer_size > 0);
+    _Bool ok = 0;
+
+    #if defined(FS_OS_WINDOWS)
+    {
+        enum { FS__PROCESS_IMAGE_FILE_NAME_WIN32 = 43 };
+        void *current_process = (void *)-1;
+        fs__Name_Storage image_name_storage = {0};
+        unsigned long returned_size = 0;
+        int status = NtQueryInformationProcess(current_process, FS__PROCESS_IMAGE_FILE_NAME_WIN32, &image_name_storage, sizeof image_name_storage, &returned_size);
+
+        UNICODE_STRING *image_name = &image_name_storage.object_name.Name;
+        unsigned long long path_size = 0;
+        ok = status >= 0 && fs__utf8_from_utf16(buffer, buffer_size - 1, &path_size, image_name->Buffer, image_name->Length / 2);
+        buffer[ok ? path_size : 0] = 0;
+    }
+    #else
+    {
+        buffer[0] = 0;
+        FS_ASSERT(0 && "unimplemented for this OS");
+    }
+    #endif
+
+    return ok;
+}
+
 FS_FUNCTION _Bool fs_exists(const char *path) {
     _Bool exists = 0;
 
@@ -524,6 +573,39 @@ FS_FUNCTION _Bool fs_exists(const char *path) {
     #endif
 
     return exists;
+}
+
+FS_FUNCTION _Bool fs_file_info(const char *path, fs_File_Info *info) {
+    _Bool ok = 0;
+    *info = (fs_File_Info){ .path = path, .name = path };
+    for (const char *c = path; *c != 0; c += 1) {
+        _Bool is_separator = *c == '/' || *c == '\\';
+        if (is_separator) info->name = c + 1;
+    }
+
+    #if defined(FS_OS_WINDOWS)
+    {
+        fs__Path_Storage path_storage = {0};
+        UNICODE_STRING name = {0};
+        if (fs__nt_path_from_path(&path_storage, path, &name)) {
+            OBJECT_ATTRIBUTES attributes = fs__object_attributes(&name);
+            FILE_NETWORK_OPEN_INFORMATION information = {0};
+            ok = NtQueryFullAttributesFile(&attributes, &information) >= 0;
+            if (ok) {
+                enum { FS__FILE_ATTRIBUTE_DIRECTORY = 0x10 };
+                info->size = (unsigned long long)information.EndOfFile;
+                info->modification_time = (unsigned long long)information.LastWriteTime;
+                info->is_folder = !!(information.FileAttributes & FS__FILE_ATTRIBUTE_DIRECTORY);
+            }
+        }
+    }
+    #else
+    {
+        FS_ASSERT(0 && "unimplemented for this OS");
+    }
+    #endif
+
+    return ok;
 }
 
 FS_FUNCTION fs_File fs_file_open_and_get_size(const char *path, fs_File_Flags flags, unsigned long long *size) {
@@ -611,76 +693,107 @@ FS_FUNCTION _Bool fs_file_write(fs_File file, const void *bytes, unsigned long l
     return ok;
 }
 
-static void fs__folder_iterator_fill_info(fs_Folder_Iterator *it) {
-    unsigned long long name_size = 0;
+#if defined(FS_OS_WINDOWS)
+    static void *fs__nt_open_folder(const char *path) {
+        fs__Path_Storage path_storage = {0};
+        unsigned share_access = fs__Nt_Share_READ | fs__Nt_Share_WRITE | fs__Nt_Share_DELETE;
+        void *handle = fs__nt_create_file(&path_storage, path, fs__Nt_Access_FILE_LIST_DIRECTORY | fs__Nt_Access_SYNCHRONIZE, share_access, fs__Nt_Disposition_OPEN, fs__Nt_Create_Option_DIRECTORY_FILE);
+        return handle;
+    }
+#endif
+
+FS_FUNCTION _Bool fs_folder_iterate(fs_Folder_Iterator *it) {
+    _Bool found = 0;
 
     #if defined(FS_OS_WINDOWS)
     {
-        FILE_DIRECTORY_INFORMATION *entry = (FILE_DIRECTORY_INFORMATION *)((char *)it->entries + it->entry_offset);
-        unsigned long long converted_size = 0;
-        if (fs__utf8_from_utf16(it->name, sizeof it->name - 1, &converted_size, entry->FileName, entry->FileNameLength / 2)) name_size = converted_size;
-        it->name[name_size] = 0;
+        enum { FS__FILE_ATTRIBUTE_DIRECTORY = 0x10, FS__FILE_ATTRIBUTE_REPARSE_POINT = 0x400 };
+        unsigned char return_single_entry = 1;
+
+        while (!found && it->open_folder_count > 0) {
+            unsigned level = it->open_folder_count - 1;
+            IO_STATUS_BLOCK status_block = {0};
+            int status = NtQueryDirectoryFile(it->handles[level], 0, 0, 0, &status_block, it->entry, sizeof it->entry, fs__Nt_Information_Class_FILE_DIRECTORY, return_single_entry, 0, 0);
+            _Bool folder_has_entry = status == 0;
+
+            if (!folder_has_entry) {
+                NtClose(it->handles[level]);
+                it->handles[level] = 0;
+                it->open_folder_count -= 1;
+            } else {
+                FILE_DIRECTORY_INFORMATION *entry = (FILE_DIRECTORY_INFORMATION *)it->entry;
+                unsigned long long name_size = 0;
+                _Bool name_converted = fs__utf8_from_utf16(it->name, sizeof it->name - 1, &name_size, entry->FileName, entry->FileNameLength / 2);
+                if (!name_converted) name_size = 0;
+                it->name[name_size] = 0;
+
+                _Bool is_self_or_parent = it->name[0] == '.' && (name_size == 1 || (name_size == 2 && it->name[1] == '.'));
+                unsigned folder_path_length = it->path_lengths[level];
+                _Bool path_fits = folder_path_length + 1 + name_size < sizeof it->path;
+                _Bool entry_usable = name_converted && path_fits;
+                if (!entry_usable) it->had_error = 1;
+
+                if (entry_usable && !is_self_or_parent) {
+                    it->path[folder_path_length] = FS_PATH_SEPARATOR;
+                    for (unsigned long long i = 0; i < name_size; i += 1) it->path[folder_path_length + 1 + i] = it->name[i];
+                    it->path[folder_path_length + 1 + name_size] = 0;
+
+                    _Bool is_folder = !!(entry->FileAttributes & FS__FILE_ATTRIBUTE_DIRECTORY);
+                    _Bool is_reparse_point = !!(entry->FileAttributes & FS__FILE_ATTRIBUTE_REPARSE_POINT);
+                    it->info = (fs_File_Info){
+                        .path = it->path,
+                        .name = it->name,
+                        .size = (unsigned long long)entry->EndOfFile,
+                        .modification_time = (unsigned long long)entry->LastWriteTime,
+                        .depth = level,
+                        .is_folder = is_folder,
+                    };
+                    found = 1;
+
+                    _Bool should_enter_folder = (it->flags & fs_Folder_Iterator_Flag_RECURSIVE) && is_folder && !is_reparse_point;
+                    if (should_enter_folder) {
+                        _Bool depth_fits = it->open_folder_count < FS_FOLDER_ITERATOR_MAX_DEPTH;
+                        void *child = depth_fits ? fs__nt_open_folder(it->path) : 0;
+                        if (child != 0) {
+                            it->handles[it->open_folder_count] = child;
+                            it->path_lengths[it->open_folder_count] = folder_path_length + 1 + (unsigned)name_size;
+                            it->open_folder_count += 1;
+                        } else it->had_error = 1;
+                    }
+                }
+            }
+        }
     }
     #else
     {
+        (void)it;
         FS_ASSERT(0 && "unimplemented for this OS");
     }
     #endif
 
-    unsigned long long folder_path_size = 0;
-    while (it->folder_path[folder_path_size] != 0) folder_path_size += 1;
-
-    _Bool path_fits = folder_path_size + 1 + name_size < sizeof it->path;
-    if (path_fits) {
-        unsigned long long i = 0;
-        for (unsigned long long j = 0; j < folder_path_size; j += 1) it->path[i++] = it->folder_path[j];
-        it->path[i++] = FS_PATH_SEPARATOR;
-        for (unsigned long long j = 0; j < name_size; j += 1) it->path[i++] = it->name[j];
-        it->path[i] = 0;
-    } else it->path[0] = 0;
+    return found;
 }
 
-FS_FUNCTION _Bool fs_folder_iterate(fs_Folder_Iterator *it) {
-    _Bool keep_going = 0;
-
-    if (it->handle != 0) {
-        #if defined(FS_OS_WINDOWS)
-        {
-            FILE_DIRECTORY_INFORMATION *entry = (FILE_DIRECTORY_INFORMATION *)((char *)it->entries + it->entry_offset);
-            _Bool has_next_entry_in_buffer = it->has_entries && entry->NextEntryOffset != 0;
-            if (has_next_entry_in_buffer) {
-                it->entry_offset += entry->NextEntryOffset;
-                keep_going = 1;
-            } else {
-                IO_STATUS_BLOCK status_block = {0};
-                int status = NtQueryDirectoryFile(it->handle, 0, 0, 0, &status_block, it->entries, sizeof it->entries, fs__Nt_Information_Class_FILE_DIRECTORY, 0, 0, 0);
-                it->has_entries = status == 0;
-                it->entry_offset = 0;
-                keep_going = it->has_entries;
-            }
-        }
-        #else
-        {
-            FS_ASSERT(0 && "unimplemented for this OS");
-        }
-        #endif
-    }
-
-    if (keep_going) fs__folder_iterator_fill_info(it);
-    return keep_going;
-}
-
-FS_FUNCTION fs_Folder_Iterator fs_folder_iterator(const char *relative_path) {
-    fs_Folder_Iterator it = { .folder_path = relative_path };
+FS_FUNCTION fs_Folder_Iterator fs_folder_iterator(const char *relative_path, fs_Folder_Iterator_Flags flags) {
+    fs_Folder_Iterator it = { .flags = flags };
 
     #if defined(FS_OS_WINDOWS)
     {
-        fs__Path_Storage path_storage = {0};
-        unsigned share_access = fs__Nt_Share_READ | fs__Nt_Share_WRITE | fs__Nt_Share_DELETE;
-        it.handle = fs__nt_create_file(&path_storage, relative_path, fs__Nt_Access_FILE_LIST_DIRECTORY | fs__Nt_Access_SYNCHRONIZE, share_access, fs__Nt_Disposition_OPEN, fs__Nt_Create_Option_DIRECTORY_FILE);
+        unsigned path_length = 0;
+        while (relative_path[path_length] != 0) path_length += 1;
+
+        _Bool path_fits = path_length < sizeof it.path;
+        void *handle = path_fits ? fs__nt_open_folder(relative_path) : 0;
+        if (handle != 0) {
+            for (unsigned i = 0; i <= path_length; i += 1) it.path[i] = relative_path[i];
+            it.handles[0] = handle;
+            it.path_lengths[0] = path_length;
+            it.open_folder_count = 1;
+        } else it.had_error = 1;
     }
     #else
     {
+        (void)relative_path;
         FS_ASSERT(0 && "unimplemented for this OS");
     }
     #endif
@@ -689,12 +802,10 @@ FS_FUNCTION fs_Folder_Iterator fs_folder_iterator(const char *relative_path) {
 }
 
 FS_FUNCTION void fs_folder_iterator_end(fs_Folder_Iterator *it) {
-    if (it->handle == 0) return;
-
     #if defined(FS_OS_WINDOWS)
     {
-        NtClose(it->handle);
-        it->handle = 0;
+        for (unsigned level = 0; level < it->open_folder_count; level += 1) NtClose(it->handles[level]);
+        it->open_folder_count = 0;
     }
     #else
     {
@@ -810,6 +921,44 @@ FS_FUNCTION _Bool fs_remove_file(const char *relative_path) {
     }
     #else
         #error "UNSUPPORTED OS"
+    #endif
+
+    return ok;
+}
+
+FS_FUNCTION _Bool fs_rename(const char *old_path, const char *new_path) {
+    _Bool ok = 0;
+
+    #if defined(FS_OS_WINDOWS)
+    {
+        fs__Path_Storage path_storage = {0};
+        unsigned share_access = fs__Nt_Share_READ | fs__Nt_Share_WRITE | fs__Nt_Share_DELETE;
+        void *handle = fs__nt_create_file(&path_storage, old_path, fs__Nt_Access_DELETE | fs__Nt_Access_SYNCHRONIZE, share_access, fs__Nt_Disposition_OPEN, 0);
+
+        UNICODE_STRING new_name = {0};
+        _Bool new_name_ok = handle != 0 && fs__nt_path_from_path(&path_storage, new_path, &new_name);
+        if (new_name_ok) {
+            typedef struct {
+                unsigned char ReplaceIfExists;
+                void *RootDirectory;
+                unsigned long FileNameLength;
+                unsigned short FileName[FS__NT_PATH_CAPACITY];
+            } FILE_RENAME_INFORMATION;
+            FILE_RENAME_INFORMATION rename_information = { .ReplaceIfExists = 1, .FileNameLength = new_name.Length };
+            for (unsigned i = 0; i < new_name.Length / 2u; i += 1) rename_information.FileName[i] = new_name.Buffer[i];
+
+            IO_STATUS_BLOCK status_block = {0};
+            ok = NtSetInformationFile(handle, &status_block, &rename_information, sizeof rename_information, fs__Nt_Information_Class_FILE_RENAME) >= 0;
+        }
+
+        if (handle != 0) NtClose(handle);
+    }
+    #else
+    {
+        (void)old_path;
+        (void)new_path;
+        FS_ASSERT(0 && "unimplemented for this OS");
+    }
     #endif
 
     return ok;

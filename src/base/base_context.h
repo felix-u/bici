@@ -112,17 +112,11 @@
     #define BUILD_DEBUG 0
 #endif
 
-#if BASE_OS == BASE_OS_WINDOWS
-    #if !defined(WINDOWS_SUBSYSTEM_WINDOWS) && !defined(WINDOWS_SUBSYSTEM_CONSOLE)
-        #define WINDOWS_SUBSYSTEM_WINDOWS 0
-        #define WINDOWS_SUBSYSTEM_CONSOLE 1
-    #elif !defined(WINDOWS_SUBSYSTEM_WINDOWS)
-        #define WINDOWS_SUBSYSTEM_WINDOWS 0
-    #elif !defined(WINDOWS_SUBSYSTEM_CONSOLE)
-        #define WINDOWS_SUBSYSTEM_CONSOLE 0
-    #else
-        #error "unreachable"
-    #endif
+#define WINDOWS_SUBSYSTEM_WINDOWS (1 << 0)
+#define WINDOWS_SUBSYSTEM_CONSOLE (1 << 1)
+
+#if !defined(WINDOWS_SUBSYSTEM)
+    #define WINDOWS_SUBSYSTEM WINDOWS_SUBSYSTEM_WINDOWS
 #endif
 
 #if !defined(PLATFORM_NONE)

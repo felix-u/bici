@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-11-07
+// https://github.com/felix-u 2026-11-08
 // Public domain. NO WARRANTY - use at your own risk
 
 #if !defined(CLEX_H)
@@ -146,6 +146,7 @@ typedef struct {
     int depth;
     clex_Flags flags;
     clex_Token token;
+    const char *error_message;
 } clex_Lexer;
 
 typedef enum {
@@ -827,7 +828,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             const char *directive = c->c;
             clex__skip_identifier(c);
             const char *directive_end = c->c;
-            if (directive_end == directive) goto error;
+            if (directive_end == directive) { l->error_message = "expected a directive name after `#`"; goto error; }
 
             clex__skip_horizontal_whitespace(c);
             const char *definition = c->c;
@@ -847,7 +848,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                 l->token.data.start = d->c;
 
                 clex__skip_identifier(d);
-                if (d->c == l->token.data.start) goto error;
+                if (d->c == l->token.data.start) { l->error_message = "expected a macro name after `#define`"; goto error; }
                 l->token.data.end = d->c;
 
                 l->token.data2.start = d->c;
@@ -874,7 +875,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                 l->token.kind = clex_Token_PRAGMA;
             } else if (clex__string_equals(directive, directive_end, "undef")) {
                 l->token.kind = clex_Token_UNDEF;
-            } else goto error;
+            } else { l->error_message = "unknown preprocessor directive"; goto error; }
 
             return 1;
         } break;
@@ -917,7 +918,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
                 } else {
                     CLEX_ASSERT(old_comment);
                     while (*comment_end != 0 && !(*comment_end == '*' && comment_end[1] == '/')) comment_end += 1;
-                    if (*comment_end == 0) goto error;
+                    if (*comment_end == 0) { l->error_message = "block comment has no closing `*/`"; goto error; }
                     c->c = comment_end + 2;
                 }
 
@@ -945,24 +946,22 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             _Bool doubled = c->c[1] == *c->c;
             if (doubled) switch (*operator) {
                 case '+': case '-': case '<': case '>': case '=': case '&': case '|': break;
-                case '!': case '~': case '^': case '*': doubled = 0; break;
-                default: goto error;
+                default: doubled = 0; break;
             }
             c->c += doubled;
 
-            _Bool assignment = c->c[1] == '=';
+            _Bool has_assignment_form = 0;
+            switch (*operator) {
+                case '!': case '<': case '>': case '*': case '/': case '%': case '+': case '-': case '&': case '^': case '|': has_assignment_form = 1; break;
+                default: break;
+            }
+            _Bool is_shift = *operator == '<' || *operator == '>';
+            if (doubled) has_assignment_form = is_shift;
+
+            _Bool assignment = has_assignment_form && c->c[1] == '=';
             c->c += assignment;
 
-            // only some operators have `!=` form
-            if (assignment) switch (*operator) {
-                case '!': case '<': case '>': case '*': case '/': case '%': case '+': case '-': case '&': case '^': case '|': break;
-                default: goto error;
-            }
-
             const char *operator_end = ++c->c;
-
-            // only `<<=` and `>>=` have this form
-            if (doubled && assignment && *operator != '<' && *operator != '>') goto error;
 
             clex_Token_Kind kind = (clex_Token_Kind)(*operator + doubled * clex_Token__DOUBLE_OPERATOR + assignment * clex_Token__ASSIGNMENT_OPERATOR);
 
@@ -973,18 +972,18 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
             return 1;
         } break;
         case '\'': {
-            if (c->c[1] == 0 || c->c[2] == 0) goto error;
+            if (c->c[1] == 0 || c->c[2] == 0) { l->error_message = "character constant has no closing quote"; goto error; }
 
             c->c += 1;
             const char *character = c->c;
 
             const char *character_end = c->c + 1;
             if (*c->c == '\\') {
-                if (!clex__skip_escape_sequence(c)) goto error;
+                if (!clex__skip_escape_sequence(c)) { l->error_message = "invalid escape sequence in character constant"; goto error; }
                 character_end = c->c;
             }
 
-            if (*character_end != '\'') goto error;
+            if (*character_end != '\'') { l->error_message = "character constant has no closing quote after one character"; goto error; }
             c->c = character_end + 1;
 
             l->token = (clex_Token){
@@ -996,21 +995,21 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
         } break;
         case '"': {
             c->c += 1;
-            if (*c->c == 0) goto error;
+            if (*c->c == 0) { l->error_message = "string has no closing quote"; goto error; }
 
             const char *string = c->c;
 
             while (*c->c != 0) {
                 if (*c->c == '\\') {
-                    if (!clex__skip_escape_sequence(c)) goto error;
+                    if (!clex__skip_escape_sequence(c)) { l->error_message = "invalid escape sequence in string"; goto error; }
                     continue;
                 }
                 if (*c->c == '"') break;
-                if (clex__is_newline(c->c)) goto error;
+                if (clex__is_newline(c->c)) { l->error_message = "string has no closing quote before the end of the line"; goto error; }
 
                 c->c += 1;
             }
-            if (*c->c == 0) goto error;
+            if (*c->c == 0) { l->error_message = "string has no closing quote"; goto error; }
 
             const char *string_end = c->c++;
             l->token = (clex_Token){
@@ -1131,7 +1130,10 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
         // NOTE(felix): 0 is a complete octal constant, and a decimal like .5 can have no digits before the decimal point.
         _Bool is_prefix_without_digits = c->c == digits && (base == 2 || base == 16);
         _Bool is_digit_invalid_for_base = clex__is_digit(*c->c);
-        if (is_prefix_without_digits || is_digit_invalid_for_base) goto error;
+        if (is_prefix_without_digits || is_digit_invalid_for_base) {
+            l->error_message = is_prefix_without_digits ? "expected digits after the number prefix" : "digit is not valid in the base of this number";
+            goto error;
+        }
 
         _Bool has_fraction = base == 10 && *c->c == '.';
         if (has_fraction) {
@@ -1143,7 +1145,7 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
         if (has_exponent) {
             const char *exponent_digits = c->c + 1;
             exponent_digits += *exponent_digits == '+' || *exponent_digits == '-';
-            if (!clex__is_digit(*exponent_digits)) goto error;
+            if (!clex__is_digit(*exponent_digits)) { l->error_message = "expected digits in the exponent"; goto error; }
 
             c->c = exponent_digits;
             while (clex__is_digit(*c->c)) c->c += 1;
@@ -1191,6 +1193,8 @@ CLEX_FUNCTION _Bool clex_lex(clex_Lexer *l) {
         };
         return 1;
     }
+
+    l->error_message = "unexpected character";
 
     error:
     l->token = (clex_Token){0};

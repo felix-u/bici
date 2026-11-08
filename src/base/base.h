@@ -365,7 +365,7 @@ _Static_assert(sizeof(f64) == 8, "");
 #endif
 
 #if BUILD_DEBUG
-    #define assert(expr) do { if((expr) == 0) panic("failed assertion `"#expr"`"); } while (0)
+    #define assert(expr) do { if((expr) == 0) panic("failed assertion `%s`", #expr); } while (0)
     #define ensure(expression) assert(expression)
     #define unreachable panic("reached unreachable code")
 #else
@@ -1180,81 +1180,209 @@ typedef struct {
 
 static void app_frame_info_reset_end_of_frame(App_Frame_Info *);
 
-typedef enum {
-    Draw_Kind_NIL = 0,
-    Draw_Kind_TEXT,
-    Draw_Kind_RECTANGLE,
-    Draw_Kind_QUADRILATERAL,
-    Draw_Kind_LINE,
-    Draw_Kind_SPRITE_1BIT,
-
-    Draw_Kind_COUNT,
-} Draw_Kind;
-
-typedef enum {
-    Draw_Color_SOLID = 0,
-
-    Draw_Color_TOP_LEFT = Draw_Color_SOLID,
-    Draw_Color_BOTTOM_LEFT,
-    Draw_Color_BOTTOM_RIGHT,
-    Draw_Color_TOP_RIGHT,
-
-    Draw_Color_MAX_VALUE,
-} Draw_Color;
-
-typedef enum {
-    Draw_Corner_TOP_LEFT,
-    Draw_Corner_BOTTOM_LEFT,
-    Draw_Corner_BOTTOM_RIGHT,
-    Draw_Corner_TOP_RIGHT,
-
-    Draw_Corner_COUNT,
-} Draw_Corner;
-
 #define BYTE_FROM_BITS(_0, _1, _2, _3, _4, _5, _6, _7) \
     ( ((_0) << 7) | ((_1) << 6) | ((_2) << 5) | ((_3) << 4) | \
       ((_4) << 3) | ((_5) << 2) | ((_6) << 1) | ((_7) << 0) )
 
+typedef u32 GPU_Mesh_Id;
+typedef u32 GPU_Shader_Id;
+typedef u32 GPU_Texture_Id;
+
 typedef struct {
-    Draw_Kind kind;
-    V2 position;
+    const void *data;
+    u64 size;
+} GPU_Bytes;
+
+// TODO(felix): Check the full std140 layout once the metaprogram can use the parser to do that.
+#define gpu_arguments(value) ((GPU_Bytes){ \
+    .data = &(value), \
+    .size = sizeof(value) + 0 * sizeof(char[sizeof(value) % 16 == 0 ? 1 : -1]), /*NOTE(felix): This acts as a static assert.*/\
+})
+
+typedef u8 GPU_Blend_Mode;
+enum {
+    GPU_Blend_Mode_ALPHA = 0,
+    GPU_Blend_Mode_PREMULTIPLIED_ALPHA,
+    GPU_Blend_Mode_ADDITIVE,
+    GPU_Blend_Mode_NONE,
+
+    GPU_Blend_Mode_COUNT,
+};
+
+typedef u8 GPU_Cull_Mode;
+enum {
+    GPU_Cull_Mode_NONE = 0,
+    GPU_Cull_Mode_BACK,
+    GPU_Cull_Mode_FRONT,
+
+    GPU_Cull_Mode_COUNT,
+};
+
+typedef u8 GPU_Depth_Test;
+enum {
+    GPU_Depth_Test_NONE = 0,
+    GPU_Depth_Test_LESS,
+    GPU_Depth_Test_LESS_OR_EQUAL,
+
+    GPU_Depth_Test_COUNT,
+};
+
+typedef u8 GPU_Index_Format;
+enum {
+    GPU_Index_Format_NONE = 0,
+    GPU_Index_Format_U16,
+    GPU_Index_Format_U32,
+
+    GPU_Index_Format_COUNT,
+};
+
+typedef u8 GPU_Texture_Filter;
+enum {
+    GPU_Texture_Filter_LINEAR = 0,
+    GPU_Texture_Filter_NEAREST,
+
+    GPU_Texture_Filter_COUNT,
+};
+
+typedef u8 GPU_Texture_Flags;
+enum {
+    GPU_Texture_Flag_RENDER_TARGET = 1 << 0,
+    GPU_Texture_Flag_DEPTH_BUFFER  = 1 << 1,
+    GPU_Texture_Flag_MIPMAPS       = 1 << 2,
+};
+
+typedef u8 GPU_Texture_Format;
+enum {
+    GPU_Texture_Format_RGBA8 = 0,
+    GPU_Texture_Format_R8,
+    GPU_Texture_Format_RGBA16F,
+
+    GPU_Texture_Format_COUNT,
+};
+
+typedef u8 GPU_Texture_Wrap;
+enum {
+    GPU_Texture_Wrap_CLAMP_TO_EDGE = 0,
+    GPU_Texture_Wrap_REPEAT,
+    GPU_Texture_Wrap_MIRRORED_REPEAT,
+
+    GPU_Texture_Wrap_COUNT,
+};
+
+typedef u8 GPU_Topology;
+enum {
+    GPU_Topology_TRIANGLES = 0,
+    GPU_Topology_TRIANGLE_STRIP,
+    GPU_Topology_LINES,
+    GPU_Topology_POINTS,
+
+    GPU_Topology_COUNT,
+};
+
+// TODO(felix): Vertex pulling (texelFetch from an RGBA32F/RGBA32UI data texture with gl_VertexID) would remove GPU_Vertex_Format and the per-mesh vertex array state.
+typedef u8 GPU_Vertex_Format;
+enum {
+    GPU_Vertex_Format_NONE = 0,
+    GPU_Vertex_Format_F32X1,
+    GPU_Vertex_Format_F32X2,
+    GPU_Vertex_Format_F32X3,
+    GPU_Vertex_Format_F32X4,
+    GPU_Vertex_Format_U8X4_NORMALISED,
+    GPU_Vertex_Format_U32X1,
+
+    GPU_Vertex_Format_COUNT,
+};
+
+typedef struct {
+    String vertex_source;
+    String fragment_source;
+} GPU_Shader;
+
+#define GPU_MAX_VERTEX_ATTRIBUTES 8
+typedef struct {
+    GPU_Bytes vertices;
+    GPU_Vertex_Format vertex_attributes[GPU_MAX_VERTEX_ATTRIBUTES];
+    GPU_Bytes indices;
+    GPU_Index_Format index_format;
+} GPU_Mesh;
+
+// NOTE(felix): Key == 0 identifies the texture by a hash of its content; key != 0 with pixels uploads them under the key; key != 0 without pixels uses what the key already has, or creates an empty texture if given a size.
+typedef struct {
+    u64 key;
+    u32 width;
+    u32 height;
+    u32 pixels_per_row;
+    GPU_Texture_Format format;
+    GPU_Texture_Flags flags;
+    GPU_Texture_Filter filter;
+    GPU_Texture_Wrap wrap;
+    GPU_Bytes pixels;
+} GPU_Texture;
+
+#define GPU_MAX_TEXTURES_PER_DRAW 4
+#define GPU_MAX_INSTANCE_ATTRIBUTES 8
+_Static_assert(GPU_MAX_VERTEX_ATTRIBUTES + GPU_MAX_INSTANCE_ATTRIBUTES <= 16, "GLES 3.0 and WebGL2 guarantee 16 vertex attributes");
+typedef struct {
+    GPU_Texture_Id target;
     V4 clip;
-    u32 color[Draw_Color_MAX_VALUE];
-    bool gradient;
-    union {
-        struct {
-            String string;
-            f32 font_size;
-        } text;
-        struct {
-            u32 border_color;
-            f32 border_width;
-            f32 border_radius;
-            V2 size;
-        } rectangle;
-        struct {
-            V2 corners[Draw_Corner_COUNT];
-            u32 border_color;
-            f32 border_width;
-        } quadrilateral;
-        struct {
-            V2 end;
-            f32 thickness;
-        } line;
-        struct {
-            u64 width, height;
-            u8 bytes[32];
-        } sprite;
-    };
-    u64 user_data;
-} Draw_Command;
+    M4 transform;
+
+    GPU_Shader_Id shader;
+    GPU_Mesh_Id mesh;
+    V4 rectangle;
+    GPU_Texture_Id textures[GPU_MAX_TEXTURES_PER_DRAW];
+    GPU_Bytes arguments;
+
+    GPU_Bytes instances;
+    GPU_Vertex_Format instance_attributes[GPU_MAX_INSTANCE_ATTRIBUTES];
+    u32 instance_count;
+
+    GPU_Topology topology;
+    GPU_Blend_Mode blend_mode;
+    GPU_Depth_Test depth_test;
+    bool depth_write;
+    GPU_Cull_Mode cull_mode;
+} GPU_Draw;
+
+typedef struct {
+    u32 commands;
+    u32 draw_calls;
+    u32 program_changes;
+    u32 shader_compiles;
+    u32 cache_hits;
+    u32 cache_misses;
+    u32 promotions;
+    u32 evictions;
+    u32 failed_draws;
+    u64 bytes_uploaded;
+    u64 cached_bytes;
+} GPU_Frame_Stats;
+
+static const u32 gpu_vertex_format_size[GPU_Vertex_Format_COUNT] = {
+    [GPU_Vertex_Format_F32X1] = 4,
+    [GPU_Vertex_Format_F32X2] = 8,
+    [GPU_Vertex_Format_F32X3] = 12,
+    [GPU_Vertex_Format_F32X4] = 16,
+    [GPU_Vertex_Format_U8X4_NORMALISED] = 4,
+    [GPU_Vertex_Format_U32X1] = 4,
+};
+
+static const u32 gpu_index_format_size[GPU_Index_Format_COUNT] = {
+    [GPU_Index_Format_U16] = 2,
+    [GPU_Index_Format_U32] = 4,
+};
+
+static const u32 gpu_texture_bytes_per_pixel[GPU_Texture_Format_COUNT] = {
+    [GPU_Texture_Format_RGBA8]   = 4,
+    [GPU_Texture_Format_R8]      = 1,
+    [GPU_Texture_Format_RGBA16F] = 8,
+};
 
 typedef struct {
     App_Frame_Info frame;
     Arena *persistent_arena;
     Arena *frame_arena;
-    Draw_Command *draw_commands;
-    u64 draw_command_count, draw_command_capacity;
+    GPU_Frame_Stats gpu_stats_of_last_frame;
 
     bool hide_cursor;
     bool should_quit;
@@ -1281,9 +1409,13 @@ typedef struct {
     static void app_update_and_render(Platform *);
 #endif
 
-static void draw(Platform *platform, Draw_Command command);
-static V2   draw_command_bounds(Draw_Command command);
-static void draw_many(Platform *platform, Draw_Command *commands, u64 count);
+
+// TODO(felix): Reorder neighbouring draws by state when their blend mode does not depend on order.
+static void           gpu_clear(Platform *platform, GPU_Texture_Id target, u32 color);
+static void           gpu_draw(Platform *platform, const GPU_Draw *draw);
+static GPU_Mesh_Id    gpu_mesh_id(Platform *platform, const GPU_Mesh *mesh);
+static GPU_Shader_Id  gpu_shader_id(Platform *platform, const GPU_Shader *shader, bool *ok);
+static GPU_Texture_Id gpu_texture_id(Platform *platform, const GPU_Texture *texture);
 
 #define UI_FUNCTION static
 #define ui_va_list va_list
@@ -1293,7 +1425,6 @@ static void draw_many(Platform *platform, Draw_Command *commands, u64 count);
 
 static ui_Box *base_ui_begin(ui_State *ui, App_Frame_Info *frame);
 static void    base_ui_create(ui_State *ui, Platform *platform);
-static ui_Box *base_ui_draw_command(Arena *frame_arena, ui_State *ui, ui_Box *parent, Draw_Command command, ui_Flags flags, const ui_Style *style, const char *format, ...);
 static void    base_ui_measure_text(void *user_data, const char *string, ui_Style style, f32 size[2]);
 static void    base_ui_render(ui_State *ui, ui_Box *box);
 
@@ -1530,10 +1661,10 @@ static void rgba_double_from_hex(u32 hex, double rgba[4]) {
 static V4 rgba_float_from_hex(u32 hex) {
     f32 pack = 1.f / 255.f;
     V4 result = {
-        pack * (hex >> 24),
-        pack * ((hex >> 16) & 0xff),
-        pack * ((hex >> 8) & 0xff),
-        pack * (hex & 0xff),
+        .x = pack * (hex >> 24),
+        .y = pack * ((hex >> 16) & 0xff),
+        .z = pack * ((hex >> 8) & 0xff),
+        .w = pack * (hex & 0xff),
     };
     return result;
 }
@@ -2051,138 +2182,6 @@ static u32 pixel_from_rgba(u32 rgba) {
         default: unreachable;
     }
     return pixel;
-}
-
-static void cpu_draw_commands(cpu_draw_Surface surface, const cpu_draw_Font *font, Draw_Command *commands, u64 count) {
-    u32 (*color)(u32) = pixel_from_rgba;
-
-    cpu_draw_Surface unclipped_surface = surface;
-
-    for (u64 i = 0; i < count; i += 1) {
-        Draw_Command *c = &commands[i];
-
-        surface = unclipped_surface;
-        bool has_clip = !!memcmp(&c->clip, &(V4){0}, sizeof c->clip);
-        if (has_clip) {
-            int x = (int)roundf(c->clip.x);
-            int y = (int)roundf(c->clip.y);
-            int width = (int)roundf(c->clip.z);
-            int height = (int)roundf(c->clip.w);
-            surface = cpu_draw_subsurface(unclipped_surface, x, y, width, height);
-        }
-
-        u32 argb = color(c->color[Draw_Color_SOLID]);
-
-        switch (c->kind) {
-            case Draw_Kind_TEXT: {
-                assert(font->height > 0);
-                String s = c->text.string;
-                int left = (int)(c->position.x + 0.5f);
-                int top = (int)(c->position.y + 0.5f);
-                cpu_draw_text(surface, font, left, top, argb, s.data, (int)s.count, 0);
-            } break;
-            case Draw_Kind_RECTANGLE: {
-                i32 left = (i32)c->position.x;
-                i32 top = (i32)c->position.y;
-                i32 width = (i32)c->rectangle.size.x;
-                i32 height = (i32)c->rectangle.size.y;
-                i32 bottom = top + height;
-                i32 right = left + width;
-
-                f32 border_radius_f32 = roundf(c->rectangle.border_radius);
-                i32 border_width = (i32)roundf(c->rectangle.border_width);
-                if (border_width >= 1 || border_radius_f32 >= 1.f) {
-                    i32 border_radius = (i32)border_radius_f32;
-
-                    u32 border_color = color(c->rectangle.border_color);
-
-                    cpu_draw_rounded_rectangle(surface, left, top, right, bottom, argb, border_color, border_radius, border_width);
-                } else {
-                    cpu_draw_rectangle(surface, left, top, right, bottom, argb);
-                }
-            } break;
-            case Draw_Kind_QUADRILATERAL: {
-                int coordinates[2 * Draw_Corner_COUNT] = {0};
-                for (Draw_Corner corner = 0; corner < Draw_Corner_COUNT; corner += 1) {
-                    V2 position = c->quadrilateral.corners[corner];
-                    for (unsigned axis = 0; axis < 2; axis += 1) {
-                        coordinates[(unsigned)corner * 2 + axis] = (int)(v(position)[axis] + 0.5f);
-                    }
-                }
-
-                int *tl = &coordinates[Draw_Corner_TOP_LEFT * 2];
-                int *bl = &coordinates[Draw_Corner_BOTTOM_LEFT * 2];
-                int *br = &coordinates[Draw_Corner_BOTTOM_RIGHT * 2];
-                int *tr = &coordinates[Draw_Corner_TOP_RIGHT * 2];
-
-                bool gradient = false;
-                u32 tl_color = argb;
-                u32 bl_color = argb;
-                u32 br_color = argb;
-                u32 tr_color = argb;
-                if (c->gradient) {
-                    bl_color = color(c->color[Draw_Color_BOTTOM_LEFT]);
-                    br_color = color(c->color[Draw_Color_BOTTOM_RIGHT]);
-                    tr_color = color(c->color[Draw_Color_TOP_RIGHT]);
-
-                    gradient = tl_color != bl_color || bl_color != br_color || br_color != tr_color || tr_color != tl_color;
-                }
-
-                bool is_rectangle = tl[0] == bl[0] && tr[0] == br[0] && tl[1] == tr[1] && bl[1] == br[1];
-                if (gradient) {
-                    cpu_draw_triangle_interpolate(surface, tl[0], tl[1], bl[0], bl[1], br[0], br[1], tl_color, bl_color, br_color);
-                    cpu_draw_triangle_interpolate(surface, tl[0], tl[1], br[0], br[1], tr[0], tr[1], tl_color, br_color, tr_color);
-                } else {
-                    if (is_rectangle) {
-                        cpu_draw_rectangle(surface, tl[0], tl[1], br[0], br[1], argb);
-                    } else {
-                        cpu_draw_triangle(surface, tl[0], tl[1], bl[0], bl[1], br[0], br[1], argb);
-                        cpu_draw_triangle(surface, tl[0], tl[1], br[0], br[1], tr[0], tr[1], argb);
-                    }
-                }
-
-                if (c->quadrilateral.border_width != 0.f) {
-                    u32 border_color = color(c->quadrilateral.border_color);
-                    if (is_rectangle) {
-                        i32 thickness = (i32)roundf(c->quadrilateral.border_width);
-                        cpu_draw_rectangle(surface, tl[0], tl[1], tr[0], tr[1] + thickness, border_color);
-                        cpu_draw_rectangle(surface, bl[0], bl[1] - thickness, br[0], br[1], border_color);
-                        cpu_draw_rectangle(surface, tl[0], tl[1], bl[0] + thickness, bl[1], border_color);
-                        cpu_draw_rectangle(surface, tr[0] - thickness, tr[1], br[0], br[1], border_color);
-                    } else {
-                        // TODO(felix): don't assume border thickness rounds to 1
-                        cpu_draw_line(surface, tl[0], tl[1], tr[0], tr[1], border_color);
-                        cpu_draw_line(surface, tr[0], tr[1], br[0], br[1], border_color);
-                        cpu_draw_line(surface, br[0], br[1], bl[0], bl[1], border_color);
-                        cpu_draw_line(surface, bl[0], bl[1], tl[0], tl[1], border_color);
-                    }
-                }
-            } break;
-            case Draw_Kind_LINE: {
-                assert(c->line.thickness == 1.f); // TODO(felix)
-                int start_x = (int)(c->position.x + 0.5f);
-                int start_y = (int)(c->position.y + 0.5f);
-                int end_x = (int)(c->line.end.x + 0.5f);
-                int end_y = (int)(c->line.end.y + 0.5f);
-                cpu_draw_line(surface, start_x, start_y, end_x, end_y, argb);
-            } break;
-            case Draw_Kind_SPRITE_1BIT: {
-                assert(c->sprite.width / 8 <= CPU_DRAW_SPRITE_MAX_WIDTH_OVER_8);
-                assert(c->sprite.height <= CPU_DRAW_SPRITE_MAX_HEIGHT);
-
-                cpu_draw_Sprite sprite = {
-                    .width = (i8)c->sprite.width,
-                    .height = (i8)c->sprite.height,
-                };
-                memcpy(sprite.bytes, c->sprite.bytes, MIN(sizeof sprite.bytes, sizeof c->sprite.bytes));
-
-                int x = (int)roundf(c->position.x);
-                int y = (int)roundf(c->position.y);
-                cpu_draw_sprite_1bit(surface, x, y, sprite, color(c->color[Draw_Color_SOLID]));
-            } break;
-            default: unreachable;
-        }
-    }
 }
 
 #define BDF_ASSERT assert
@@ -3189,29 +3188,39 @@ static void build_objects_push(Build_Objects *objects, Build_Object object) {
     objects->count += 1;
 }
 
-static bool build_eat_token(clex_Lexer *parent, clex_Lexer *lexer, clex_Token_Kind expected, const char *format, ...) {
+enum { BUILD_LOCATION_CAPACITY = 4128 };
+
+static void build_format_location(char *buffer, u64 buffer_size, const clex_Lexer *lexer) {
+    int column = 0;
+    const char *path = 0;
+    const char *path_end = 0;
+    int line = clex_get_current_location(lexer, &column, &path, &path_end);
+
+    enum { PATH_CAPACITY = 4096 };
+    char path_as_given[PATH_CAPACITY] = {0};
+    u64 path_count = MIN((u64)(path_end - path), PATH_CAPACITY - 1);
+    if (path_count > 0) memcpy(path_as_given, path, size_t_from_u64(path_count));
+    char absolute_path[PATH_CAPACITY] = {0};
+    bool has_absolute_path = path_count > 0 && fs_absolute_path(path_as_given, absolute_path, sizeof absolute_path);
+
+    const char *shown_path = path_count > 0 ? path_as_given : "<MACRO>";
+    if (has_absolute_path) shown_path = absolute_path;
+    small_snprintf(buffer, size_t_from_u64(buffer_size), "%s(%d,%d)", shown_path, line, column);
+}
+
+static bool build_eat_token(clex_Lexer *lexer, clex_Token_Kind expected, const char *format, ...) {
     clex_lex(lexer);
     bool ok = lexer->token.kind == expected;
 
     va_list arguments;
     va_start(arguments, format);
     if (!ok) {
+        char location[BUILD_LOCATION_CAPACITY] = {0};
+        build_format_location(location, sizeof location, lexer);
+
+        print("%s: error: ", location);
         print_(format, arguments);
-
-        int column = 0;
-        const char *path = 0, *path_end = 0;
-        int line = 0;
-        if (parent != 0) {
-            clex_Lexer shifted = *parent;
-            shifted.stack[shifted.depth].c = lexer->stack[lexer->depth].c;
-            line = clex_get_current_location(&shifted, &column, &path, &path_end);
-        } else {
-            line = clex_get_current_location(lexer, &column, &path, &path_end);
-        }
-
-        String path_string = string_from_pointers(path, path_end);
-        String token = base_string_from_clex_data(lexer->token.data);
-        print("; got '%S' in %S:%d:%d\n", token, path_string.count > 0 ? path_string : S("<MACRO>"), line, column);
+        print("; got '%S'\n", base_string_from_clex_data(lexer->token.data));
     }
     va_end(arguments);
 
@@ -3219,19 +3228,21 @@ static bool build_eat_token(clex_Lexer *parent, clex_Lexer *lexer, clex_Token_Ki
 }
 
 static const char *base_clex_current_location_get_as_string(Arena *arena, const clex_Lexer *lexer) {
-    int column = 0;
-    const char *path = 0;
-    const char *path_end = 0;
-    int line = clex_get_current_location(lexer, &column, &path, &path_end);
-    return cstring_print(arena, "%S:%d", string_from_pointers(path, path_end), line);
+    char location[BUILD_LOCATION_CAPACITY] = {0};
+    build_format_location(location, sizeof location, lexer);
+    return cstring_print(arena, "%s", location);
 }
 
-static void build_log_preprocessor_error(const clex_Lexer *lexer, const char *message) {
-    int column = 0;
-    const char *path = 0;
-    const char *path_end = 0;
-    int line = clex_get_current_location(lexer, &column, &path, &path_end);
-    print("error: %S:%d: %s\n", string_from_pointers(path, path_end), line, message);
+static void build_log_error(const clex_Lexer *lexer, const char *format, ...) {
+    char location[BUILD_LOCATION_CAPACITY] = {0};
+    build_format_location(location, sizeof location, lexer);
+
+    print("%s: error: ", location);
+    va_list arguments;
+    va_start(arguments, format);
+    print_(format, arguments);
+    va_end(arguments);
+    print("\n");
 }
 
 typedef struct {
@@ -3307,7 +3318,7 @@ static Build_Condition build_evaluate_preprocessor_condition(Arena *arena, const
         case clex_Condition_Error_EVALUATION: message = cstring_print(arena, "cannot evaluate `%S` in condition `%S`", error_text, condition_string); break;
         default: unreachable;
     }
-    if (message != 0) build_log_preprocessor_error(file, message);
+    if (message != 0) build_log_error(file, "%s", message);
 
     Build_Condition condition = { .value = value };
     if (value == clex_Condition_Value_UNKNOWN) {
@@ -3363,12 +3374,12 @@ static Build_Unknown_Reason_Id build_unknown_reason_for_unset_setting(Arena *are
         : cstring_print(arena, "%s is set by `META(%s = ...)`, and the program has none in a known group", setting, directive), 0);
 }
 
-static void build_set_macro_from_meta(Arena *arena, const clex_Lexer *lexer, Build_Macros *macros, const char *directive, const char *name, bool is_defined, const char *definition, bool *ok) {
+static void build_set_macro_from_meta(const clex_Lexer *lexer, Build_Macros *macros, const char *directive, const char *name, bool is_defined, const char *definition, bool *ok) {
     bool insert_ok = false;
     u32 slot = build_macros_insert(macros, string_from_cstring(name), &insert_ok);
 
     bool is_defined_by_source = insert_ok && macros->slots[slot].is_defined_by_source;
-    if (is_defined_by_source) build_log_preprocessor_error(lexer, cstring_print(arena, "`META(%s)` sets `%s`, but the source defines or undefines `%s` before it", directive, name, name));
+    if (is_defined_by_source) build_log_error(lexer, "`META(%s)` sets `%s`, but the source defines or undefines `%s` before it", directive, name, name);
 
     bool set_ok = insert_ok && !is_defined_by_source;
     if (set_ok) {
@@ -3470,8 +3481,6 @@ static const char build_wasm_html_file[] = STRINGIFY(
             width: 100vw;
             height: 100vh;
             display: block;
-            image-rendering: pixelated;
-            image-rendering: crisp-edges;
         }
     </style>
 
@@ -3480,21 +3489,184 @@ static const char build_wasm_html_file[] = STRINGIFY(
     <script>
         (async () => {
             const canvas = document.getElementById("wasm_canvas");
+            const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: true, stencil: true });
+            if (gl === null) {
+                document.body.textContent = "This page needs WebGL2, which is not available in this browser.";
+                return;
+            }
+            gl.getExtension("EXT_color_buffer_float");
 
-            const offscreen = document.createElement("canvas");
-            // NOTE(felix): these have to match the max values on the C side!
-            offscreen.width = 1920;
-            offscreen.height = 1200;
-            const offscreen_context = offscreen.getContext("2d");
+            let wasm = null;
+            const memory_u8 = () => new Uint8Array(wasm.instance.exports.memory.buffer);
+            const memory_i32 = () => new Int32Array(wasm.instance.exports.memory.buffer);
+            const memory_u32 = () => new Uint32Array(wasm.instance.exports.memory.buffer);
+            const read_string = (pointer, count) => new TextDecoder().decode(memory_u8().subarray(pointer, pointer + count));
+            const read_cstring = pointer => {
+                const bytes = memory_u8();
+                let end = pointer;
+                while (bytes[end] != 0) end += 1;
+                return read_string(pointer, end - pointer);
+            };
+
+            const gl_objects = [null];
+            const gl_uniform_locations = [null];
+            const gl_object_add = object => {
+                gl_objects.push(object);
+                return gl_objects.length - 1;
+            };
+            const gl_generate = (count, pointer, create) => {
+                const ids = memory_i32();
+                for (let i = 0; i < count; i += 1) ids[(pointer >> 2) + i] = gl_object_add(create());
+            };
+            const gl_delete = (count, pointer, destroy) => {
+                const ids = memory_i32();
+                for (let i = 0; i < count; i += 1) {
+                    const id = ids[(pointer >> 2) + i];
+                    destroy(gl_objects[id]);
+                    gl_objects[id] = null;
+                }
+            };
+            const gl_delete_one = (id, destroy) => {
+                destroy(gl_objects[id]);
+                gl_objects[id] = null;
+            };
+            const GL_FLOAT = 0x1406;
+            const GL_HALF_FLOAT = 0x140B;
+            const GL_INFO_LOG_LENGTH = 0x8B84;
+            const gl_pixel_view = type => {
+                const buffer = wasm.instance.exports.memory.buffer;
+                let view = new Uint8Array(buffer);
+                if (type == GL_HALF_FLOAT) view = new Uint16Array(buffer);
+                if (type == GL_FLOAT) view = new Float32Array(buffer);
+                return view;
+            };
+            const gl_pixel_offset = (type, pointer) => pointer / gl_pixel_view(type).BYTES_PER_ELEMENT;
+            const gl_integer_from_parameter = value => {
+                let integer = value;
+                if (value === true) integer = 1;
+                if (value === false) integer = 0;
+                return integer;
+            };
+            const gl_write_info_log = (log, capacity, length_pointer, log_pointer) => {
+                const bytes = new TextEncoder().encode(log ?? "");
+                const count = Math.max(0, Math.min(bytes.length, capacity - 1));
+                const memory = memory_u8();
+                memory.set(bytes.subarray(0, count), log_pointer);
+                memory[log_pointer + count] = 0;
+                if (length_pointer != 0) memory_i32()[length_pointer >> 2] = count;
+            };
+
+            const gl_imports = {
+                glActiveTexture: texture => gl.activeTexture(texture),
+                glAttachShader: (program, shader) => gl.attachShader(gl_objects[program], gl_objects[shader]),
+                glBindBuffer: (target, buffer) => gl.bindBuffer(target, gl_objects[buffer]),
+                glBindBufferRange: (target, index, buffer, offset, size) => gl.bindBufferRange(target, index, gl_objects[buffer], offset, size),
+                glBindFramebuffer: (target, framebuffer) => gl.bindFramebuffer(target, gl_objects[framebuffer]),
+                glBindRenderbuffer: (target, renderbuffer) => gl.bindRenderbuffer(target, gl_objects[renderbuffer]),
+                glBindTexture: (target, texture) => gl.bindTexture(target, gl_objects[texture]),
+                glBindVertexArray: array => gl.bindVertexArray(gl_objects[array]),
+                glBlendFunc: (source, destination) => gl.blendFunc(source, destination),
+                glBufferData: (target, size, data, usage) => {
+                    if (data == 0) gl.bufferData(target, size, usage);
+                    else gl.bufferData(target, memory_u8(), usage, data, size);
+                },
+                glCheckFramebufferStatus: target => gl.checkFramebufferStatus(target),
+                glClear: mask => gl.clear(mask),
+                glClearColor: (red, green, blue, alpha) => gl.clearColor(red, green, blue, alpha),
+                glCompileShader: shader => gl.compileShader(gl_objects[shader]),
+                glCreateProgram: () => gl_object_add(gl.createProgram()),
+                glCreateShader: type => gl_object_add(gl.createShader(type)),
+                glCullFace: mode => gl.cullFace(mode),
+                glDebugMessageCallbackKHR: () => {},
+                glDeleteBuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteBuffer(object)),
+                glDeleteFramebuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteFramebuffer(object)),
+                glDeleteProgram: program => gl_delete_one(program, object => gl.deleteProgram(object)),
+                glDeleteRenderbuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteRenderbuffer(object)),
+                glDeleteShader: shader => gl_delete_one(shader, object => gl.deleteShader(object)),
+                glDeleteTextures: (count, pointer) => gl_delete(count, pointer, object => gl.deleteTexture(object)),
+                glDepthFunc: function_ => gl.depthFunc(function_),
+                glDepthMask: flag => gl.depthMask(flag != 0),
+                glDisable: capability => gl.disable(capability),
+                glDisableVertexAttribArray: index => gl.disableVertexAttribArray(index),
+                glDrawArraysInstanced: (mode, first, count, instance_count) => gl.drawArraysInstanced(mode, first, count, instance_count),
+                glDrawElementsInstanced: (mode, count, type, offset, instance_count) => gl.drawElementsInstanced(mode, count, type, offset, instance_count),
+                glEnable: capability => gl.enable(capability),
+                glEnableVertexAttribArray: index => gl.enableVertexAttribArray(index),
+                glFramebufferRenderbuffer: (target, attachment, renderbuffer_target, renderbuffer) => gl.framebufferRenderbuffer(target, attachment, renderbuffer_target, gl_objects[renderbuffer]),
+                glFramebufferTexture2D: (target, attachment, texture_target, texture, level) => gl.framebufferTexture2D(target, attachment, texture_target, gl_objects[texture], level),
+                glGenBuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createBuffer()),
+                glGenFramebuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createFramebuffer()),
+                glGenRenderbuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createRenderbuffer()),
+                glGenTextures: (count, pointer) => gl_generate(count, pointer, () => gl.createTexture()),
+                glGenVertexArrays: (count, pointer) => gl_generate(count, pointer, () => gl.createVertexArray()),
+                glGenerateMipmap: target => gl.generateMipmap(target),
+                glGetActiveUniformBlockiv: (program, index, name, pointer) => {
+                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(gl.getActiveUniformBlockParameter(gl_objects[program], index, name));
+                },
+                glGetIntegerv: (name, pointer) => {
+                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(gl.getParameter(name));
+                },
+                glGetProgramInfoLog: (program, capacity, length_pointer, log_pointer) => gl_write_info_log(gl.getProgramInfoLog(gl_objects[program]), capacity, length_pointer, log_pointer),
+                glGetProgramiv: (program, name, pointer) => {
+                    let value = 0;
+                    if (name == GL_INFO_LOG_LENGTH) value = (gl.getProgramInfoLog(gl_objects[program]) ?? "").length + 1;
+                    else value = gl.getProgramParameter(gl_objects[program], name);
+                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(value);
+                },
+                glGetShaderInfoLog: (shader, capacity, length_pointer, log_pointer) => gl_write_info_log(gl.getShaderInfoLog(gl_objects[shader]), capacity, length_pointer, log_pointer),
+                glGetShaderiv: (shader, name, pointer) => {
+                    let value = 0;
+                    if (name == GL_INFO_LOG_LENGTH) value = (gl.getShaderInfoLog(gl_objects[shader]) ?? "").length + 1;
+                    else value = gl.getShaderParameter(gl_objects[shader], name);
+                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(value);
+                },
+                glGetUniformBlockIndex: (program, name) => gl.getUniformBlockIndex(gl_objects[program], read_cstring(name)),
+                glGetUniformLocation: (program, name) => {
+                    const location = gl.getUniformLocation(gl_objects[program], read_cstring(name));
+                    let id = -1;
+                    if (location !== null) {
+                        gl_uniform_locations.push(location);
+                        id = gl_uniform_locations.length - 1;
+                    }
+                    return id;
+                },
+                glLinkProgram: program => gl.linkProgram(gl_objects[program]),
+                glPixelStorei: (name, value) => gl.pixelStorei(name, value),
+                glReadPixels: (x, y, width, height, format, type, pointer) => gl.readPixels(x, y, width, height, format, type, gl_pixel_view(type), gl_pixel_offset(type, pointer)),
+                glRenderbufferStorage: (target, format, width, height) => gl.renderbufferStorage(target, format, width, height),
+                glScissor: (x, y, width, height) => gl.scissor(x, y, width, height),
+                glShaderSource: (shader, count, strings_pointer, lengths_pointer) => {
+                    const pointers = memory_u32();
+                    const lengths = memory_i32();
+                    let source = "";
+                    for (let i = 0; i < count; i += 1) {
+                        const pointer = pointers[(strings_pointer >> 2) + i];
+                        const length = lengths_pointer == 0 ? -1 : lengths[(lengths_pointer >> 2) + i];
+                        source += length < 0 ? read_cstring(pointer) : read_string(pointer, length);
+                    }
+                    gl.shaderSource(gl_objects[shader], source);
+                },
+                glTexImage2D: (target, level, internal_format, width, height, border, format, type, pixels) => {
+                    if (pixels == 0) gl.texImage2D(target, level, internal_format, width, height, border, format, type, null);
+                    else gl.texImage2D(target, level, internal_format, width, height, border, format, type, gl_pixel_view(type), gl_pixel_offset(type, pixels));
+                },
+                glTexParameteri: (target, name, value) => gl.texParameteri(target, name, value),
+                glTexSubImage2D: (target, level, x, y, width, height, format, type, pixels) => gl.texSubImage2D(target, level, x, y, width, height, format, type, gl_pixel_view(type), gl_pixel_offset(type, pixels)),
+                glUniform1i: (location, value) => gl.uniform1i(gl_uniform_locations[location] ?? null, value),
+                glUniform2f: (location, x, y) => gl.uniform2f(gl_uniform_locations[location] ?? null, x, y),
+                glUniformBlockBinding: (program, index, binding) => gl.uniformBlockBinding(gl_objects[program], index, binding),
+                glUseProgram: program => gl.useProgram(gl_objects[program]),
+                glVertexAttribDivisor: (index, divisor) => gl.vertexAttribDivisor(index, divisor),
+                glVertexAttribIPointer: (index, size, type, stride, offset) => gl.vertexAttribIPointer(index, size, type, stride, offset),
+                glVertexAttribPointer: (index, size, type, normalised, stride, offset) => gl.vertexAttribPointer(index, size, type, normalised != 0, stride, offset),
+                glViewport: (x, y, width, height) => gl.viewport(x, y, width, height),
+            };
 
             const imports = { env: {
+                ...gl_imports,
                 js_file_write: (name_cstring, pointer, count) => {
-                    const bytes = new Uint8Array(wasm.instance.exports.memory.buffer, pointer, count).slice();
-
-                    const memory = new Uint8Array(wasm.instance.exports.memory.buffer);
-                    let end = name_cstring;
-                    while (memory[end] != 0) end += 1;
-                    const name = new TextDecoder().decode(memory.subarray(name_cstring, end));
+                    const bytes = memory_u8().slice(pointer, pointer + count);
+                    const name = read_cstring(name_cstring);
 
                     console.assert(!name.includes("/") && !name.includes("\\"), "js_file_write: path separators forbidden in name", name);
 
@@ -3512,14 +3684,12 @@ static const char build_wasm_html_file[] = STRINGIFY(
                     canvas.style.cursor = hidden ? "none" : "";
                 },
                 os_write_console_js: (pointer, count) => {
-                    const bytes = new Uint8Array(wasm.instance.exports.memory.buffer, pointer, count);
-                    const string = new TextDecoder().decode(bytes);
-                    console.log(string);
+                    console.log(read_string(pointer, count));
                 },
             } };
 
             // TODO(felix): make .wasm file name changeable in build
-            const wasm = await WebAssembly.instantiateStreaming(fetch("module.wasm"), imports);
+            wasm = await WebAssembly.instantiateStreaming(fetch("module.wasm"), imports);
             const exports = wasm.instance.exports;
 
             exports.platform__start();
@@ -3534,7 +3704,7 @@ static const char build_wasm_html_file[] = STRINGIFY(
             function write_js_string(string) {
                 const bytes = new TextEncoder().encode(string);
                 const buffer = exports.platform__get_temp_js_string_buffer();
-                new Uint8Array(wasm.instance.exports.memory.buffer, buffer, bytes.length).set(bytes);
+                memory_u8().set(bytes, buffer);
                 return [buffer, bytes.length];
             }
             addEventListener("keydown", e => {
@@ -3548,9 +3718,10 @@ static const char build_wasm_html_file[] = STRINGIFY(
 
             canvas.addEventListener("mousedown", e => exports.platform__on_mouse_down(e.button));
             canvas.addEventListener("mouseup", e => exports.platform__on_mouse_up(e.button));
-            canvas.addEventListener("wheel", e => exports.platform__on_scroll(e.deltaX, e.deltaY));
-
-            const context = canvas.getContext("2d");
+            canvas.addEventListener("wheel", e => {
+                e.preventDefault();
+                exports.platform__on_scroll(e.deltaX, e.deltaY);
+            }, { passive: false });
 
             function frame() {
                 const real_width = Math.round(window.innerWidth * devicePixelRatio);
@@ -3558,27 +3729,9 @@ static const char build_wasm_html_file[] = STRINGIFY(
                 if (canvas.width != real_width || canvas.height != real_height) {
                     canvas.width = real_width;
                     canvas.height = real_height;
-                    context.imageSmoothingEnabled = false;
                 }
 
                 exports.platform__update_and_render(real_width, real_height, mouse_x, mouse_y);
-
-                // must match cpu_draw_Surface layout
-                const struct_pointer = exports.platform__get_draw_surface_pointer();
-                const memory = new Uint32Array(wasm.instance.exports.memory.buffer);
-                const pixels = memory[struct_pointer / 4 + 0];
-                const stride = memory[struct_pointer / 4 + 1];
-                const width  = memory[struct_pointer / 4 + 5];
-                const height = memory[struct_pointer / 4 + 6];
-
-                const surface_is_empty = width == 0 || height == 0;
-                if (!surface_is_empty) {
-                    const source = new Uint8ClampedArray(wasm.instance.exports.memory.buffer, pixels, stride * height * 4);
-                    const image = new ImageData(source, stride, height);
-                    offscreen_context.putImageData(image, 0, 0);
-                    context.drawImage(offscreen, 0, 0, width, height, 0, 0, real_width, real_height);
-                }
-
                 requestAnimationFrame(frame);
             }
             requestAnimationFrame(frame);
@@ -3761,7 +3914,6 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
     const char *link_libc_meta_location = 0;
     const char *subsystem_meta_location = 0;
     u32 pass_count = 0;
-    f64 first_pass_seconds = 0;
     f64 time_at_parse_start = time_relative_timestamp();
     bool parse_ok = build_folder_ok;
 
@@ -3853,7 +4005,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     bool is_define = lexer.token.kind == clex_Token_DEFINE;
                     clex_Data name = is_define ? lexer.token.data : clex_directive_name(lexer.token.data2);
                     parse_ok = name.start != name.end;
-                    if (!parse_ok) build_log_preprocessor_error(&lexer, "expected a name after `#undef`");
+                    if (!parse_ok) build_log_error(&lexer, "expected a name after `#undef`");
 
                     String name_string = base_string_from_clex_data(name);
                     u32 slot = 0;
@@ -3870,13 +4022,13 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     bool include_ok = false;
                     clex_Include include = clex_include_operand(lexer.token.data2, &include_ok);
                     parse_ok = include_ok;
-                    if (!parse_ok) build_log_preprocessor_error(&lexer, cstring_print(scratch.arena, "expected `\"path\"` or `<path>` after `#include`; got `%S`", preprocess_data2));
+                    if (!parse_ok) build_log_error(&lexer, "expected `\"path\"` or `<path>` after `#include`; got `%S`", preprocess_data2);
 
                     if (parse_ok && !include.is_system) {
                         String path = base_string_from_clex_data(include.path);
                         const char *read_path = cstring_print(scratch.arena, "%s%S", &source_folder[3], path);
                         String file = os_read_entire_file(scratch.arena, read_path, &parse_ok);
-                        if (!parse_ok) log_error("failed reading '%s'", read_path);
+                        if (!parse_ok) build_log_error(&lexer, "failed reading '%s'", read_path);
 
                         if (parse_ok) {
                             ok = clex_push_file(&lexer, path.data, &path.data[path.count], file.data, &file.data[file.count]);
@@ -3891,7 +4043,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     } else {
                         clex_Data name = clex_directive_name(lexer.token.data2);
                         if (name.start == name.end) {
-                            build_log_preprocessor_error(&lexer, "expected a name after `#ifdef` or `#ifndef`");
+                            build_log_error(&lexer, "expected a name after `#ifdef` or `#ifndef`");
                             parse_ok = false;
                         }
                         String name_string = base_string_from_clex_data(name);
@@ -3903,7 +4055,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     }
 
                     if (conditional_depth == BUILD_CONDITIONAL_DEPTH_MAX) {
-                        build_log_preprocessor_error(&lexer, "conditionals are nested too deeply");
+                        build_log_error(&lexer, "conditionals are nested too deeply");
                         parse_ok = false;
                     }
 
@@ -3919,10 +4071,10 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     Build_Conditional *conditional = conditional_depth > 0 ? &conditionals[conditional_depth - 1] : 0;
 
                     if (conditional == 0) {
-                        build_log_preprocessor_error(&lexer, is_else ? "`#else` without `#if`" : "`#elif` without `#if`");
+                        build_log_error(&lexer, is_else ? "`#else` without `#if`" : "`#elif` without `#if`");
                         parse_ok = false;
                     } else if (conditional->chain.saw_else) {
-                        build_log_preprocessor_error(&lexer, is_else ? "`#else` after `#else`" : "`#elif` after `#else`");
+                        build_log_error(&lexer, is_else ? "`#else` after `#else`" : "`#elif` after `#else`");
                         parse_ok = false;
                     }
 
@@ -3936,13 +4088,13 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                 } break;
                 case clex_Token_ENDIF: {
                     if (conditional_depth == 0) {
-                        build_log_preprocessor_error(&lexer, "`#endif` without `#if`");
+                        build_log_error(&lexer, "`#endif` without `#if`");
                         parse_ok = false;
                     } else conditional_depth -= 1;
                 } break;
                 case clex_Token_ERROR_DIRECTIVE: {
                     if (!group_is_unknown) {
-                        build_log_preprocessor_error(&lexer, cstring_print(scratch.arena, "#error %S", preprocess_data2));
+                        build_log_error(&lexer, "#error %S", preprocess_data2);
                         parse_ok = false;
                     }
                 } break;
@@ -3950,7 +4102,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             }
 
             if (skip_group && !clex_skip_conditional_group(&lexer)) {
-                build_log_preprocessor_error(&lexer, "missing `#endif`");
+                build_log_error(&lexer, "missing `#endif`");
                 parse_ok = false;
             }
 
@@ -3968,20 +4120,20 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
             }
 
             bool meta_has_arguments = token_is_meta && !group_is_unknown && clex_lex(&lexer) && lexer.token.kind == '(';
-            if (meta_has_arguments) parse_ok = build_eat_token(0, &lexer, clex_Token_IDENTIFIER, "error: expected directive at start of `META(...)`");
+            if (meta_has_arguments) parse_ok = build_eat_token(&lexer, clex_Token_IDENTIFIER, "expected directive at start of `META(...)`");
 
             if (meta_has_arguments && parse_ok) {
                 String token_data = base_string_from_clex_data(lexer.token.data);
 
                 if (string_equals(token_data, generate_here_directive)) {
                     parse_ok = metaprogram_output_file.count == 0;
-                    if (!parse_ok) log_error("directive `META(%S)` can only be used once", generate_here_directive);
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block");
+                    if (!parse_ok) build_log_error(&lexer, "directive `META(%S)` can only be used once", generate_here_directive);
+                    parse_ok = parse_ok && build_eat_token(&lexer, ')', "expected ')' closing META(...) block");
 
                     if (parse_ok) {
                         clex_lex(&lexer);
                         parse_ok = lexer.token.kind == clex_Token_INCLUDE && string_equals(base_string_from_clex_data(lexer.token.data), S("include"));
-                        if (!parse_ok) log_error("expected `#include`");
+                        if (!parse_ok) build_log_error(&lexer, "expected `#include`");
                     }
 
                     if (parse_ok) {
@@ -3989,17 +4141,17 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                         clex_Include include = clex_include_operand(lexer.token.data2, &include_ok);
                         parse_ok = include_ok && !include.is_system;
                         if (parse_ok) metaprogram_output_file = base_string_from_clex_data(include.path);
-                        else log_error("expected string after `#include`");
+                        else build_log_error(&lexer, "expected string after `#include`");
                     }
                 } else if (string_equals(token_data, S("embed"))) {
-                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected path, like this: `META(embed \"path/to/file\")`");
+                    parse_ok = build_eat_token(&lexer, clex_Token_STRING, "expected path, like this: `META(embed \"path/to/file\")`");
                     String input_file = base_string_from_clex_data(lexer.token.data);
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected ')' closing META(...) block");
+                    parse_ok = parse_ok && build_eat_token(&lexer, ')', "expected ')' closing META(...) block");
 
                     if (parse_ok) {
                         const char *input_path = cstring_from_string(scratch.arena, input_file);
                         String contents = os_read_entire_file(scratch.arena, input_path, &parse_ok);
-                        if (!parse_ok) log_error("failed reading `META(embed)` input '%s'", input_path);
+                        if (!parse_ok) build_log_error(&lexer, "failed reading `META(embed)` input '%s'", input_path);
 
                         if (parse_ok) {
                             files_to_embed = arena_array_reserve(scratch.arena, files_to_embed, files_to_embed_count, &files_to_embed_capacity, files_to_embed_count + 1);
@@ -4009,11 +4161,11 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                     }
                 } else if (string_equals(token_data, S("subsystem"))) {
                     parse_ok = settings_this_pass.subsystem_windows == Build_Meta_Setting_UNSET;
-                    if (!parse_ok) log_error("you can't specify `subsystem` multiple times");
+                    if (!parse_ok) build_log_error(&lexer, "you can't specify `subsystem` multiple times");
 
-                    const char *error = "error: expected `subsystem = console/windows`";
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, '=', error);
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, clex_Token_IDENTIFIER, error);
+                    const char *error = "expected `subsystem = console/windows`";
+                    parse_ok = parse_ok && build_eat_token(&lexer, '=', error);
+                    parse_ok = parse_ok && build_eat_token(&lexer, clex_Token_IDENTIFIER, error);
 
                     if (parse_ok) {
                         token_data = base_string_from_clex_data(lexer.token.data);
@@ -4022,24 +4174,24 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                         } else if (string_equals(token_data, S("windows"))) {
                             settings_this_pass.subsystem_windows = Build_Meta_Setting_TRUE;
                         } else {
-                            log_error("expected `console` or `windows` in `META(subsystem = console/windows)`, got `%S`", token_data);
+                            build_log_error(&lexer, "expected `console` or `windows` in `META(subsystem = console/windows)`, got `%S`", token_data);
                             parse_ok = false;
                         }
                     }
 
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected `)` to close `META(...)` directive");
+                    parse_ok = parse_ok && build_eat_token(&lexer, ')', "expected `)` to close `META(...)` directive");
 
                     if (parse_ok && target_os == BASE_OS_WINDOWS) {
                         bool is_windows = settings_this_pass.subsystem_windows == Build_Meta_Setting_TRUE;
-                        build_set_macro_from_meta(scratch.arena, &lexer, macros, "subsystem", "WINDOWS_SUBSYSTEM", true, is_windows ? "WINDOWS_SUBSYSTEM_WINDOWS" : "WINDOWS_SUBSYSTEM_CONSOLE", &parse_ok);
+                        build_set_macro_from_meta(&lexer, macros, "subsystem", "WINDOWS_SUBSYSTEM", true, is_windows ? "WINDOWS_SUBSYSTEM_WINDOWS" : "WINDOWS_SUBSYSTEM_CONSOLE", &parse_ok);
                     }
                 } else if (string_equals(token_data, S("link_libc"))) {
                     parse_ok = settings_this_pass.link_crt == Build_Meta_Setting_UNSET;
-                    if (!parse_ok) log_error("you can't specify `link_libc` multiple times");
+                    if (!parse_ok) build_log_error(&lexer, "you can't specify `link_libc` multiple times");
 
-                    const char *error = "error: expected `link_libc = true/false`";
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, '=', error);
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, clex_Token_IDENTIFIER, error);
+                    const char *error = "expected `link_libc = true/false`";
+                    parse_ok = parse_ok && build_eat_token(&lexer, '=', error);
+                    parse_ok = parse_ok && build_eat_token(&lexer, clex_Token_IDENTIFIER, error);
 
                     if (parse_ok) {
                         token_data = base_string_from_clex_data(lexer.token.data);
@@ -4048,72 +4200,79 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                         } else if (string_equals(token_data, S("false"))) {
                             settings_this_pass.link_crt = Build_Meta_Setting_FALSE;
                         } else {
-                            log_error("expected `true` or `false` in `META(link_libc = true/false)`, got `%S`", token_data);
+                            build_log_error(&lexer, "expected `true` or `false` in `META(link_libc = true/false)`, got `%S`", token_data);
                             parse_ok = false;
                         }
                     }
 
-                    parse_ok = parse_ok && build_eat_token(0, &lexer, ')', "error: expected `)` to close `META(...)` directive");
+                    parse_ok = parse_ok && build_eat_token(&lexer, ')', "expected `)` to close `META(...)` directive");
 
                     bool links_crt = settings_this_pass.link_crt == Build_Meta_Setting_TRUE;
                     if (parse_ok && links_crt && target_os == BASE_OS_WASM) {
-                        build_log_preprocessor_error(&lexer, "`META(link_libc = true)` is not possible on wasm, which has no libc");
+                        build_log_error(&lexer, "`META(link_libc = true)` is not possible on wasm, which has no libc");
                         parse_ok = false;
                     }
 
-                    if (parse_ok) build_set_macro_from_meta(scratch.arena, &lexer, macros, "link_libc", "LINK_CRT", true, links_crt ? "1" : "0", &parse_ok);
+                    if (parse_ok) build_set_macro_from_meta(&lexer, macros, "link_libc", "LINK_CRT", true, links_crt ? "1" : "0", &parse_ok);
                     if (parse_ok && compiler == Build_Compiler_MSVC) {
                         bool uses_address_sanitiser = links_crt && build_mode == Build_Mode_DEBUG;
-                        build_set_macro_from_meta(scratch.arena, &lexer, macros, "link_libc", "__SANITIZE_ADDRESS__", uses_address_sanitiser, "1", &parse_ok);
+                        build_set_macro_from_meta(&lexer, macros, "link_libc", "__SANITIZE_ADDRESS__", uses_address_sanitiser, "1", &parse_ok);
                     }
                 } else if (string_equals(token_data, S("link"))) {
-                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link \"Library\")`");
+                    parse_ok = build_eat_token(&lexer, clex_Token_STRING, "expected `META(link \"Library\")`");
                     String library = base_string_from_clex_data(lexer.token.data);
 
                     if (parse_ok && library.count == 0) {
-                        log_error("link library name is empty");
+                        build_log_error(&lexer, "link library name is empty");
                         parse_ok = false;
                     }
 
-                    if (parse_ok) build_push_argument(&link_libraries, cstring_from_string(scratch.arena, library));
+                    if (parse_ok) {
+                        const char *library_cstring = cstring_from_string(scratch.arena, library);
+                        bool is_already_linked = false;
+                        for (u64 i = 0; i < link_libraries.count && !is_already_linked; i += 1) {
+                            is_already_linked = cstring_equals_case_insensitive(link_libraries.items[i], library_cstring);
+                        }
+                        if (!is_already_linked) build_push_argument(&link_libraries, library_cstring);
+                    }
                 } else if (string_equals(token_data, S("compile_flag"))) {
-                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_flag \"...\")`");
+                    parse_ok = build_eat_token(&lexer, clex_Token_STRING, "expected `META(compile_flag \"...\")`");
                     String flag = base_string_from_clex_data(lexer.token.data);
 
                     if (parse_ok && flag.count == 0) {
-                        log_error("extra compile flag is empty string");
+                        build_log_error(&lexer, "extra compile flag is empty string");
                         parse_ok = false;
                     }
 
                     if (parse_ok && build_flag_changes_preprocessor(flag)) {
                         // TODO(felix): Let compile flags define macros.
-                        log_error("compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
+                        build_log_error(&lexer, "compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
                         parse_ok = false;
                     }
 
                     if (parse_ok) build_push_argument(&compiler_extra_flags, cstring_from_string(scratch.arena, flag));
                 } else if (string_equals(token_data, S("link_flag"))) {
-                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(link_flag \"...\")`");
+                    parse_ok = build_eat_token(&lexer, clex_Token_STRING, "expected `META(link_flag \"...\")`");
                     String flag = base_string_from_clex_data(lexer.token.data);
 
                     if (parse_ok && flag.count == 0) {
-                        log_error("extra linker flag is empty string");
+                        build_log_error(&lexer, "extra linker flag is empty string");
                         parse_ok = false;
                     }
 
                     if (parse_ok) build_push_argument(&linker_extra_flags, cstring_from_string(scratch.arena, flag));
                 } else if (string_equals(token_data, S("compile_and_link_flag"))) {
-                    parse_ok = build_eat_token(0, &lexer, clex_Token_STRING, "error: expected `META(compile_and_link_flag \"...\")`");
+                    parse_ok = build_eat_token(&lexer, clex_Token_STRING, "expected `META(compile_and_link_flag \"...\")`");
                     String flag = base_string_from_clex_data(lexer.token.data);
 
                     if (parse_ok && flag.count == 0) {
-                        log_error("extra compile and link flag is empty string");
+                        build_log_error(&lexer, "extra compile and link flag is empty string");
                         parse_ok = false;
                     }
 
                     if (parse_ok && build_flag_changes_preprocessor(flag)) {
                         // TODO(felix): Let compile flags define macros.
-                        log_error("compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
+                        build_log_error(&lexer, "compile flag `%S` defines macros or sets the C standard, which `META(...)` does not support yet", flag);
                         parse_ok = false;
                     }
 
@@ -4123,29 +4282,25 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
                         build_push_argument(&compiler_extra_flags, as_cstring);
                     }
                 } else {
-                    log_error("unsupported metaprogram directive '%S'", token_data);
+                    build_log_error(&lexer, "unsupported metaprogram directive '%S'", token_data);
                     parse_ok = false;
                 }
             }
         }
+        bool lexing_failed = parse_ok && lexer.token.kind != clex_Token_END_OK;
+        if (lexing_failed) {
+            const clex_Cursor *cursor = &lexer.stack[lexer.depth];
+            const char *text_end = cursor->c;
+            while (text_end < cursor->end && text_end - cursor->c < 40 && *text_end != '\n' && *text_end != '\r') text_end += 1;
+            String text = string_from_pointers(cursor->c, text_end);
+            build_log_error(&lexer, "%s: `%S`", lexer.error_message, text);
+            parse_ok = false;
+        }
+
         if (parse_ok && conditional_depth != 0) {
-            log_error("%u `#if`s are missing their `#endif`", conditional_depth);
+            build_log_error(&lexer, "%u `#if`s are missing their `#endif`", conditional_depth);
             parse_ok = false;
         }
-
-        if (parse_ok && lexer.token.kind == clex_Token_ERROR) {
-            int column = 0;
-            const char *path = 0, *path_end = 0;
-            int line = clex_get_current_location(&lexer, &column, &path, &path_end);
-
-            String s = string_from_pointers(path, path_end);
-            print("%S(%d,%d): error: parser error\n", s, line, column);
-            // TODO(felix): Print absolute path.
-            // TODO(felix): Print parser message.
-            parse_ok = false;
-        }
-
-        if (pass_count == 1) first_pass_seconds = time_seconds_between_relative_timestamps(time_at_parse_start, time_relative_timestamp());
 
         if (parse_ok) {
             assert(settings_from_earlier_passes.link_crt == Build_Meta_Setting_UNSET || settings_this_pass.link_crt == settings_from_earlier_passes.link_crt);
@@ -4181,7 +4336,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
                 const char *message = "`META(...)` is in an unknown group, so the metaprogram doesn't know if the compiler builds it";
                 if (sets_own_condition) message = cstring_print(scratch.arena, "`META(%S)` sets the condition of its own group; this is an unrecoverable cycle", meta->directive);
-                print("error: %s: %s\n", meta->location, message);
+                print("%s: error: %s\n", meta->location, message);
                 for (Build_Unknown_Reason_Id reason = meta->unknown_reason; reason != 0; reason = macros->reasons.items[reason].cause) {
                     print("    because %s\n", macros->reasons.items[reason].description);
                 }
@@ -4194,8 +4349,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
 
     if (parse_ok) {
         f64 parse_seconds = time_seconds_between_relative_timestamps(time_at_parse_start, time_relative_timestamp());
-        if (pass_count == 1) print("Parsing took %.3lf seconds in 1 pass.\n", parse_seconds);
-        else print("Parsing took %.3lf seconds in %u passes; the first pass took %.3lf seconds.\n", parse_seconds, pass_count, first_pass_seconds);
+        print("Parsing took %.2lf seconds in %u pass%s.\n", parse_seconds, pass_count, pass_count > 1 ? "es" : "");
     }
 
     if (parse_ok && files_to_embed_count > 0) {
@@ -4557,29 +4711,140 @@ static void app_frame_info_reset_end_of_frame(App_Frame_Info *frame) {
     memset(frame->key_pressed, 0, sizeof frame->key_pressed);
 }
 
-static void draw(Platform *platform, Draw_Command command) {
-    draw_many(platform, &command, 1);
+typedef struct {
+    u64 key;
+    u64 last_used_frame;
+    u32 generation;
+    u32 next_in_bucket;
+    u32 older_slot;
+    u32 newer_slot;
+    bool is_used;
+    bool is_keyed_by_content;
+    bool must_not_be_evicted;
+} GPU_Cache_Entry;
+
+typedef struct {
+    GPU_Cache_Entry *entries;
+    u32 *first_slot_from_bucket;
+    u32 exponent;
+    u32 oldest_slot;
+    u32 newest_slot;
+} GPU_Cache;
+
+static u32 gpu__cache_bucket(const GPU_Cache *cache, u64 key) {
+    return (u32)(key ^ (key >> 32)) & ((1u << cache->exponent) - 1);
 }
 
-static V2 draw_command_bounds(Draw_Command command) {
-    V2 size = {0};
-
-    switch (command.kind) {
-        case Draw_Kind_SPRITE_1BIT: {
-            size.x = (f32)command.sprite.width;
-            size.y = (f32)command.sprite.height;
-        } break;
-        default: unreachable;
+static u32 gpu__cache_find(const GPU_Cache *cache, u64 key, bool is_keyed_by_content) {
+    u32 found_slot = 0;
+    u32 slot = cache->first_slot_from_bucket[gpu__cache_bucket(cache, key)];
+    while (slot != 0 && found_slot == 0) {
+        const GPU_Cache_Entry *entry = &cache->entries[slot];
+        if (entry->key == key && entry->is_keyed_by_content == is_keyed_by_content) found_slot = slot;
+        slot = entry->next_in_bucket;
     }
-
-    return size;
+    return found_slot;
 }
 
-static void draw_many(Platform *platform, Draw_Command *commands, u64 count) {
-    u64 new_count = platform->draw_command_count + count;
-    platform->draw_commands = arena_array_reserve(platform->frame_arena, platform->draw_commands, platform->draw_command_count, &platform->draw_command_capacity, new_count);
-    memcpy(&platform->draw_commands[platform->draw_command_count], commands, size_t_from_u64(count) * sizeof *commands);
-    platform->draw_command_count = new_count;
+static void gpu__cache_link_as_newest(GPU_Cache *cache, u32 slot) {
+    GPU_Cache_Entry *entry = &cache->entries[slot];
+    entry->older_slot = cache->newest_slot;
+    entry->newer_slot = 0;
+    if (cache->newest_slot != 0) cache->entries[cache->newest_slot].newer_slot = slot;
+    else cache->oldest_slot = slot;
+    cache->newest_slot = slot;
+}
+
+static void gpu__cache_unlink(GPU_Cache *cache, u32 slot) {
+    GPU_Cache_Entry *entry = &cache->entries[slot];
+    if (entry->older_slot != 0) cache->entries[entry->older_slot].newer_slot = entry->newer_slot;
+    else cache->oldest_slot = entry->newer_slot;
+    if (entry->newer_slot != 0) cache->entries[entry->newer_slot].older_slot = entry->older_slot;
+    else cache->newest_slot = entry->older_slot;
+}
+
+static u32 gpu__cache_insert(GPU_Cache *cache, u64 key, bool is_keyed_by_content, u64 frame_index) {
+    u32 slot = cache->oldest_slot;
+    GPU_Cache_Entry *entry = &cache->entries[slot];
+    assert(!entry->is_used);
+
+    u32 bucket = gpu__cache_bucket(cache, key);
+    entry->key = key;
+    entry->last_used_frame = frame_index;
+    entry->is_used = true;
+    entry->is_keyed_by_content = is_keyed_by_content;
+    entry->next_in_bucket = cache->first_slot_from_bucket[bucket];
+    cache->first_slot_from_bucket[bucket] = slot;
+    gpu__cache_unlink(cache, slot);
+    gpu__cache_link_as_newest(cache, slot);
+    return slot;
+}
+
+static GPU_Cache gpu__cache_make(Arena *persistent_arena, u32 exponent) {
+    u32 capacity = 1u << exponent;
+    GPU_Cache cache = {
+        .entries = arena_make(persistent_arena, capacity + 1, GPU_Cache_Entry),
+        .first_slot_from_bucket = arena_make(persistent_arena, capacity, u32),
+        .exponent = exponent,
+    };
+    for (u32 slot = 1; slot <= capacity; slot += 1) gpu__cache_link_as_newest(&cache, slot);
+    return cache;
+}
+
+static void gpu__cache_mark_used(GPU_Cache *cache, u32 slot, u64 frame_index) {
+    GPU_Cache_Entry *entry = &cache->entries[slot];
+    if (entry->last_used_frame != frame_index) {
+        gpu__cache_unlink(cache, slot);
+        gpu__cache_link_as_newest(cache, slot);
+        entry->last_used_frame = frame_index;
+    }
+}
+
+static u32 gpu__cache_oldest_evictable_slot(const GPU_Cache *cache) {
+    u32 slot = cache->oldest_slot;
+    while (slot != 0 && (!cache->entries[slot].is_used || cache->entries[slot].must_not_be_evicted)) slot = cache->entries[slot].newer_slot;
+    return slot;
+}
+
+#define GPU_MAX_MESHES_EXPONENT 12
+#define GPU_MAX_SHADERS_EXPONENT 8
+#define GPU_MAX_TEXTURES_EXPONENT 10
+#define GPU_ID_SLOT_BITS 20
+#define GPU_ID_GENERATION_MASK ((1u << (32 - GPU_ID_SLOT_BITS)) - 1)
+_Static_assert(GPU_MAX_MESHES_EXPONENT < GPU_ID_SLOT_BITS && GPU_MAX_SHADERS_EXPONENT < GPU_ID_SLOT_BITS && GPU_MAX_TEXTURES_EXPONENT < GPU_ID_SLOT_BITS, "every cache slot fits in an Id");
+static void gpu__cache_remove(GPU_Cache *cache, u32 slot) {
+    GPU_Cache_Entry *entry = &cache->entries[slot];
+
+    u32 *link = &cache->first_slot_from_bucket[gpu__cache_bucket(cache, entry->key)];
+    while (*link != slot) link = &cache->entries[*link].next_in_bucket;
+    *link = entry->next_in_bucket;
+
+    gpu__cache_unlink(cache, slot);
+    entry->older_slot = 0;
+    entry->newer_slot = cache->oldest_slot;
+    if (cache->oldest_slot != 0) cache->entries[cache->oldest_slot].older_slot = slot;
+    else cache->newest_slot = slot;
+    cache->oldest_slot = slot;
+    entry->is_used = false;
+    entry->generation = (entry->generation + 1) & GPU_ID_GENERATION_MASK;
+}
+
+static u32 gpu__id_from_slot(const GPU_Cache *cache, u32 slot) {
+    return (cache->entries[slot].generation << GPU_ID_SLOT_BITS) | slot;
+}
+
+static u32 gpu__slot_from_id(const GPU_Cache *cache, u32 id, bool *ok) {
+    u32 slot = id & ((1u << GPU_ID_SLOT_BITS) - 1);
+    u32 generation = id >> GPU_ID_SLOT_BITS;
+    u32 capacity = 1u << cache->exponent;
+
+    bool slot_is_in_range = slot != 0 && slot <= capacity;
+    u32 checked_slot = slot_is_in_range ? slot : 0;
+    const GPU_Cache_Entry *entry = &cache->entries[checked_slot];
+    bool is_valid = slot_is_in_range && entry->is_used && entry->generation == generation;
+
+    *ok = is_valid;
+    return is_valid ? slot : 0;
 }
 
 #define UI_ASSERT assert
@@ -4618,125 +4883,8 @@ static void base_ui_create(ui_State *ui, Platform *platform) {
     ui->user_data = platform;
 }
 
-static ui_Box *base_ui_draw_command(Arena *frame_arena, ui_State *ui, ui_Box *parent, Draw_Command command, ui_Flags flags, const ui_Style *style, const char *format, ...) {
-    va_list arguments;
-    va_start(arguments, format);
-    ui_Box *box = ui_pushv(ui, parent, ui_Flag_DRAW_COMMAND | flags, format, arguments);
-    va_end(arguments);
-
-    assert(style != 0);
-    box->style = *style;
-
-    Draw_Command *copy = arena_make(frame_arena, 1, Draw_Command);
-    *copy = command;
-    box->user_data = copy;
-
-    V2 bounds = draw_command_bounds(command);
-    for (int axis = 0; axis < ui_Axis_COUNT; axis += 1) {
-        box->size[axis] = (ui_Size){ .kind = ui_Size_Kind_PIXELS, .value = v(bounds)[axis] };
-    }
-
-    return box;
-}
-
 static void base_ui_render(ui_State *ui, ui_Box *box) {
-    Platform *platform = ui->user_data;
-    assert(platform != 0);
-
-    if (box->flags & UI_FLAG_ANY_VISIBLE) {
-        V4 clip = {0};
-        if (box->flags & ui_Flag_CLIP_TO_PARENT) {
-            assert(box->parent != 0);
-            memcpy(&clip, &box->parent->rectangle, sizeof clip);
-            f32 border_width = box->parent->style.border_width * (f32)!!(box->parent->flags & ui_Flag_DRAW_BORDER);
-            clip.x += border_width;
-            clip.y += border_width;
-            clip.z -= 2.f * border_width;
-            clip.w -= 2.f * border_width;
-        }
-
-        ui_Style style = box->style;
-        u32 background_color = style.bg_color;
-        u32 border_color = style.border_color;
-        u32 foreground_color = style.fg_color;
-        f32 border_width = style.border_width;
-        f32 border_radius = style.border_radius;
-        V2 shadow_offset = { style.shadow_offset[ui_X], style.shadow_offset[ui_Y] };
-        u32 shadow_color = style.shadow_color;
-
-        bool draw_shadow = !!(box->flags & ui_Flag_DRAW_SHADOW);
-        if (draw_shadow) {
-            Draw_Command command = {
-                .kind = Draw_Kind_RECTANGLE,
-                .rectangle = {
-                    .border_radius = border_radius,
-                    .size = { box->rectangle.size[0], box->rectangle.size[1] },
-                },
-            };
-            command.position = v2_add((V2){ box->rectangle.position[0], box->rectangle.position[1] }, shadow_offset);
-            command.color[Draw_Color_SOLID] = shadow_color;
-
-            command.clip = clip;
-            draw(platform, command);
-        }
-
-        bool draw_rectangle = !!(box->flags & (ui_Flag_DRAW_BORDER | ui_Flag_DRAW_BACKGROUND));
-        if (draw_rectangle) {
-            Draw_Command command = {
-                .kind = Draw_Kind_RECTANGLE,
-                .rectangle = {
-                    .border_width = border_width * (f32)!!(box->flags & ui_Flag_DRAW_BORDER),
-                    .border_radius = border_radius,
-                },
-            };
-            command.position = (V2){ box->rectangle.position[0], box->rectangle.position[1] };
-            command.color[Draw_Color_SOLID] = (u32)!!(box->flags & ui_Flag_DRAW_BACKGROUND) * background_color;
-            command.rectangle.size = (V2){ box->rectangle.size[0], box->rectangle.size[1] };
-            command.rectangle.border_color = border_color;
-
-            command.clip = clip;
-            draw(platform, command);
-        }
-
-        bool draw_text = !!(box->flags & ui_Flag_DRAW_TEXT);
-        if (draw_text) {
-            assert(box->display_string != 0 && box->display_string[0] != 0);
-
-            V2 position = (V2){ box->rectangle.position[0], box->rectangle.position[1] };
-            for (int axis = 0; axis < ui_Axis_COUNT; axis += 1) {
-                f32 add = box->style.padding[axis];
-                v(position)[axis] += add;
-            }
-
-            Draw_Command command = {
-                .kind = Draw_Kind_TEXT,
-                .text = {
-                    .string = { .data = box->display_string, .count = cstring_length(box->display_string) },
-                    .font_size = box->style.font_size,
-                },
-            };
-            command.position = position;
-            command.color[Draw_Color_SOLID] = foreground_color;
-
-            command.clip = clip;
-            draw(platform, command);
-        }
-
-        bool draw_command = !!(box->flags & ui_Flag_DRAW_COMMAND);
-        if (draw_command) {
-            Draw_Command *command = box->user_data;
-
-            V2 command_size = draw_command_bounds(*command);
-
-            V2 leftover = v2_sub((V2){ box->rectangle.size[0], box->rectangle.size[1] }, command_size);
-            V2 pad_for_align = v2_scale(leftover, 0.5f);
-            command->position = v2_add((V2){ box->rectangle.position[0], box->rectangle.position[1] }, pad_for_align);
-
-            command->color[Draw_Color_SOLID] = foreground_color;
-
-            draw(platform, *command);
-        }
-    }
+    panic("TODO(felix): Support the new GPU API: draw the shadow, background, border and text of each visible box, clipped to the inside of its parent's border if ui_Flag_CLIP_TO_PARENT is set.");
 
     for (ui_Box *child = box->first_child; child != 0; child = child->next_sibling) {
         base_ui_render(ui, child);

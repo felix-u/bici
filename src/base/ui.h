@@ -36,7 +36,6 @@ enum {
     ui_Flag_DRAW_BACKGROUND = 1 <<  1,
     ui_Flag_DRAW_BORDER     = 1 <<  2,
     ui_Flag_DRAW_TEXT       = 1 <<  3,
-    ui_Flag_DRAW_COMMAND    = 1 <<  4,
     ui_Flag_DRAW_SHADOW     = 1 <<  5,
     ui_Flag_HOVERABLE       = 1 <<  7,
     ui_Flag_CLICKABLE       = 1 <<  8,
@@ -48,7 +47,7 @@ enum {
     ui_Flag_CLICKED         = 1 << 12,
     ui_Flag_DRAGGING        = 1 << 13, // persisted across frames
 };
-#define UI_FLAG_ANY_VISIBLE (ui_Flag_DRAW_BACKGROUND | ui_Flag_DRAW_BORDER | ui_Flag_DRAW_TEXT | ui_Flag_DRAW_COMMAND | ui_Flag_DRAW_SHADOW)
+#define UI_FLAG_ANY_VISIBLE (ui_Flag_DRAW_BACKGROUND | ui_Flag_DRAW_BORDER | ui_Flag_DRAW_TEXT | ui_Flag_DRAW_SHADOW)
 #define UI_FLAG_ANY_INTERACTABLE (ui_Flag_HOVERABLE | ui_Flag_CLICKABLE | ui_Flag_DRAGGABLE)
 #define UI_FLAG_ANY_INTERACTION (ui_Flag_HOVERED | ui_Flag_CLICKED | ui_Flag_DRAGGING)
 

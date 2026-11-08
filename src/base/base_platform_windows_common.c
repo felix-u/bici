@@ -140,7 +140,6 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
         WM_LBUTTONUP     = 0x0202,
         WM_RBUTTONDOWN   = 0x0204,
         WM_RBUTTONUP     = 0x0205,
-        WM_SIZING        = 0x0214,
         WM_DPICHANGED    = 0x02E0,
     };
 
@@ -229,10 +228,6 @@ static i64 win32_window_procedure(void *window, u32 message, u64 w, i64 l, Platf
         case WM_SIZE: {
             window_size[0] = (f32)WIN32__LOWORD(l);
             window_size[1] = (f32)WIN32__HIWORD(l);
-        } break;
-        case WM_SIZING: {
-            // TODO(felix): handle redrawing here so that we're not blocked while resizing
-            // NOTE(felix): apparently there might be some problems with this and the better way to do it is for the thread with window events to be different than the application thread that submits draw calls and updates the program
         } break;
         default: break;
     }

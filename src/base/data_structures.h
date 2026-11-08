@@ -1,4 +1,4 @@
-// https://github.com/felix-u 2026-11-03
+// https://github.com/felix-u 2026-11-08
 // Public domain. NO WARRANTY - use at your own risk
 
 #if !defined(DS_H)
@@ -31,6 +31,8 @@ typedef struct {
 DS_FUNCTION ds_u64 ds_array_grow_capacity(ds_u64 capacity, ds_u64 minimum);
 DS_FUNCTION void  *ds_array_resize(void *allocate_context, void *data, ds_size_t item_size, ds_u64 capacity, ds_u64 new_capacity);
 DS_FUNCTION ds_u32 ds_hash_fnv1a(const void *data, ds_size_t count);
+DS_FUNCTION ds_u64 ds_hash_fnv1a_64(const void *data, ds_u64 count);
+DS_FUNCTION ds_u64 ds_hash_fnv1a_64_update(ds_u64 hash, const void *data, ds_u64 count);
 DS_FUNCTION ds_u32 ds_hash_fnv1a_update(ds_u32 hash, const void *data, ds_size_t count);
 DS_FUNCTION ds_u32 ds_hash_step_index(ds_u32 hash, int exponent, ds_u32 index);
 DS_FUNCTION void  *ds_static_buffer_allocate(void *context, void *pointer, ds_size_t old_size, ds_size_t new_size);
@@ -75,6 +77,21 @@ DS_FUNCTION void *ds_array_resize(void *allocate_context, void *data, ds_size_t 
 
 DS_FUNCTION ds_u32 ds_hash_fnv1a(const void *data, ds_size_t count) {
     return ds_hash_fnv1a_update(DS_HASH_FNV1A_OFFSET_BASIS, data, count);
+}
+
+#define DS_HASH_FNV1A_64_OFFSET_BASIS 14695981039346656037ull
+
+DS_FUNCTION ds_u64 ds_hash_fnv1a_64(const void *data, ds_u64 count) {
+    return ds_hash_fnv1a_64_update(DS_HASH_FNV1A_64_OFFSET_BASIS, data, count);
+}
+
+DS_FUNCTION ds_u64 ds_hash_fnv1a_64_update(ds_u64 hash, const void *data, ds_u64 count) {
+    const unsigned char *bytes = data;
+    for (ds_u64 i = 0; i < count; i += 1) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 DS_FUNCTION ds_u32 ds_hash_fnv1a_update(ds_u32 hash, const void *data, ds_size_t count) {

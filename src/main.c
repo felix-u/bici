@@ -5,7 +5,7 @@
     #include "base/base_platform_wasm.c"
 #elif BASE_OS == BASE_OS_WINDOWS
     META(subsystem = console)
-    #include "base/base_platform_wingdi.c"
+    #include "base/base_platform_wingles3.c"
 #endif
 
 typedef enum {
@@ -146,6 +146,26 @@ typedef struct {
 } Vm;
 static Vm global_vm = {0};
 
+typedef struct {
+    u32 *pixels;
+    i32 pixel_stride;
+    V2 size;
+    V2 mouse_position;
+    f32 window_over_screen_scale;
+    f32 window_over_screen_scale_target;
+} Screen;
+static Screen global_screen = {0};
+
+enum {
+    SCREEN_MAX_WIDTH = 1920,
+    SCREEN_MAX_HEIGHT = 1200,
+    SCREEN_INITIAL_SCALE = 3,
+    SCREEN_LEAST_SCALE = 1,
+    SCREEN_GREATEST_SCALE = 5,
+};
+#define SCREEN_SCALE_LOGARITHM_PER_SCROLL_NOTCH 0.1f
+#define SCREEN_SCALE_APPROACH_RATE_PER_SECOND 20.f
+
 static inline u16 get16(u8 *address) {
     u16 result = 0;
     result |= (u16)*address << 8;
@@ -184,7 +204,7 @@ static inline u32 pixel_from_colour(Vm *vm, u8 colour_index) {
     u32 g = ((u32)colour & 0x00f0) >> 4;
     u32 b = ((u32)colour & 0x000f) >> 0;
     u32 rgba = (r << 28) | (r << 24) | (g << 20) | (g << 16) | (b << 12) | (b << 8) | 0xff;
-    return pixel_from_rgba(rgba);
+    return abgr_from_rgba(rgba);
 }
 
 static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
@@ -297,11 +317,10 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                             u8 *y_address = &vm->memory[Vm_Device_SCREEN | (Vm_Device)Vm_Screen_Y];
                             u16 x = get16(x_address);
                             u16 y = get16(y_address);
-                            u16 screen_width = (u16)platform->frame.window_size.x;
-                            u16 screen_height = (u16)platform->frame.window_size.y;
-                            Platform_Implementation *implementation = (Platform_Implementation *)platform;
-                            u32 *pixels = implementation->pixels;
-                            i32 stride = implementation->pixel_stride;
+                            u16 screen_width = (u16)global_screen.size.x;
+                            u16 screen_height = (u16)global_screen.size.y;
+                            u32 *pixels = global_screen.pixels;
+                            i32 stride = global_screen.pixel_stride;
                             switch (action) {
                                 case Vm_Screen_PIXEL: {
                                     if (x >= screen_width) break;
@@ -413,13 +432,13 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                     u16 to_push = get16(&vm->memory[Vm_Device_AND_ACTION]);
                     switch (device) {
                         case Vm_Device_SCREEN: switch (action) {
-                            case Vm_Screen_WIDTH: to_push = (u16)platform->frame.window_size.x; break;
-                            case Vm_Screen_HEIGHT: to_push = (u16)platform->frame.window_size.y; break;
+                            case Vm_Screen_WIDTH: to_push = (u16)global_screen.size.x; break;
+                            case Vm_Screen_HEIGHT: to_push = (u16)global_screen.size.y; break;
                             default: panic("[read.2] invalid action #%02x for screen device", action);
                         } break;
                         case Vm_Device_MOUSE: {
-                            V2 mouse_position = platform->frame.mouse_position;
-                            V2 window_size = platform->frame.window_size;
+                            V2 mouse_position = global_screen.mouse_position;
+                            V2 window_size = global_screen.size;
                             switch (action) {
                                 case Vm_Mouse_X: to_push = (u16)CLAMP(mouse_position.x, 0.f, MAX(window_size.x - 1.f, 0.f)); break;
                                 case Vm_Mouse_Y: to_push = (u16)CLAMP(mouse_position.y, 0.f, MAX(window_size.y - 1.f, 0.f)); break;
@@ -1445,7 +1464,7 @@ static void app_start(Platform *platform) {
         if (rom_size == 0) os_exit(1);
 
         Vm *vm = &global_vm;
-        vm->arena = &arena;
+        vm->arena = platform->persistent_arena;
         memcpy(vm->memory, rom, rom_size);
 
         bool print_memory = false;
@@ -1478,7 +1497,13 @@ static void app_start(Platform *platform) {
         }
 
         platform->window_name = "bici";
-        ((Platform_Implementation *)platform)->keep_pixels_between_frames = true;
+        u64 screen_pixel_count = (u64)SCREEN_MAX_WIDTH * SCREEN_MAX_HEIGHT;
+        global_screen.pixels = arena_make(platform->persistent_arena, size_t_from_u64(screen_pixel_count), u32);
+        global_screen.pixel_stride = SCREEN_MAX_WIDTH;
+        global_screen.window_over_screen_scale = SCREEN_INITIAL_SCALE;
+        global_screen.window_over_screen_scale_target = SCREEN_INITIAL_SCALE;
+        u32 black = abgr_from_rgba(0x000000ff);
+        for (u64 i = 0; i < screen_pixel_count; i += 1) global_screen.pixels[i] = black;
         platform->hide_cursor = true;
         // TODO(felix): program should control this
         platform->clear_color = 0x000000ff;
@@ -1491,11 +1516,65 @@ static void app_start(Platform *platform) {
 static void app_update_and_render(Platform *platform) {
     Vm *vm = &global_vm;
 
+    App_Frame_Info *frame = &platform->frame;
+    bool is_control_down = frame->key_down[App_Key_CONTROL];
+    if (is_control_down) {
+        f32 scaled_target = global_screen.window_over_screen_scale_target * expf(frame->scroll * SCREEN_SCALE_LOGARITHM_PER_SCROLL_NOTCH);
+        global_screen.window_over_screen_scale_target = CLAMP(scaled_target, (f32)SCREEN_LEAST_SCALE, (f32)SCREEN_GREATEST_SCALE);
+    }
+
+    f32 approach_fraction = 1.f - expf(-frame->seconds_since_last_frame * SCREEN_SCALE_APPROACH_RATE_PER_SECOND);
+    f32 scale_difference = global_screen.window_over_screen_scale_target - global_screen.window_over_screen_scale;
+    f32 approached_scale = global_screen.window_over_screen_scale + scale_difference * approach_fraction;
+
+    V2 window_size = frame->window_size;
+    f32 scale_that_fits_screen_memory = MAX(window_size.x / (f32)SCREEN_MAX_WIDTH, window_size.y / (f32)SCREEN_MAX_HEIGHT);
+    f32 window_over_screen_scale = MAX(approached_scale, scale_that_fits_screen_memory);
+    global_screen.window_over_screen_scale = window_over_screen_scale;
+    global_screen.size = (V2){ .x = ceilf(window_size.x / window_over_screen_scale), .y = ceilf(window_size.y / window_over_screen_scale) };
+    global_screen.mouse_position = v2_scale(platform->frame.mouse_position, 1.f / window_over_screen_scale);
+
     u16 vm_on_screen_update_pc = vm_load16(vm, Vm_Device_SCREEN | (Vm_Device)Vm_Screen_UPDATE);
     vm_run_to_break(platform, vm, vm_on_screen_update_pc);
 
     u16 vm_on_system_quit_pc = vm_load16(vm, Vm_Device_SYSTEM | (Vm_Device)Vm_System_QUIT);
     vm_run_to_break(platform, vm, vm_on_system_quit_pc);
+
+    u32 screen_width = (u32)global_screen.size.x;
+    u32 screen_height = (u32)global_screen.size.y;
+    bool has_screen = screen_width > 0 && screen_height > 0;
+    if (has_screen) {
+        String screen_fragment_source = S(STRINGIFY(
+            void main() {
+                vec2 texture_size = vec2(textureSize(gpu_texture_0, 0));
+                vec2 texel_position = gpu_uv * texture_size;
+                vec2 antialiased_texel_position = floor(texel_position) + min(fract(texel_position) / fwidth(texel_position), 1.0) - 0.5;
+                gpu_color_out = vec4(texture(gpu_texture_0, antialiased_texel_position / texture_size).rgb, 1.0);
+            }
+        ));
+        bool shader_ok = true;
+        GPU_Shader_Id screen_shader = gpu_shader_id(platform, &(GPU_Shader){ .fragment_source = screen_fragment_source }, &shader_ok);
+        ensure(shader_ok);
+
+        enum { SCREEN_TEXTURE_KEY = 1 };
+        u64 screen_pixels_size = ((u64)(screen_height - 1) * SCREEN_MAX_WIDTH + screen_width) * sizeof *global_screen.pixels;
+        GPU_Texture_Id screen_texture = gpu_texture_id(platform, &(GPU_Texture){
+            .key = SCREEN_TEXTURE_KEY,
+            .width = screen_width,
+            .height = screen_height,
+            .filter = GPU_Texture_Filter_LINEAR,
+            .pixels = { .data = global_screen.pixels, .size = screen_pixels_size },
+            .pixels_per_row = SCREEN_MAX_WIDTH,
+        });
+
+        f32 scale = global_screen.window_over_screen_scale;
+        gpu_draw(platform, &(GPU_Draw){
+            .shader = screen_shader,
+            .rectangle = { .x = 0, .y = 0, .z = (f32)screen_width * scale, .w = (f32)screen_height * scale },
+            .textures = { screen_texture },
+            .blend_mode = GPU_Blend_Mode_NONE,
+        });
+    }
 
     if (platform->should_quit) {
         print("working stack (bottom->top): { ");

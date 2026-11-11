@@ -4588,6 +4588,7 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         }
 
         if (linker == Build_Linker_CLANG && use_asan) build_push_argument(&link, "-fsanitize=address");
+        if (target_os == BASE_OS_WASM && build_mode == Build_Mode_RELEASE) build_push_argument(&link, "-Wl,--strip-all");
 
         for (u64 i = 0; i < objects.count; i += 1) build_push_argument(&link, objects.items[i].object_path);
 

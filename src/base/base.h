@@ -1382,6 +1382,7 @@ typedef struct {
     App_Frame_Info frame;
     Arena *persistent_arena;
     Arena *frame_arena;
+    u64 frame_arena_startup_reservation_in_bytes;
     GPU_Frame_Stats gpu_stats_of_last_frame;
 
     bool hide_cursor;
@@ -1408,6 +1409,8 @@ typedef struct {
     static void app_start(Platform *);
     static void app_update_and_render(Platform *);
 #endif
+
+static void base_platform_reserve_frame_arena(Platform *platform);
 
 
 // TODO(felix): Reorder neighbouring draws by state when their blend mode does not depend on order.
@@ -3076,7 +3079,6 @@ static const char *build_linker_initial_command[Build_Linker_COUNT][BASE_OS_COUN
         "-nostdlib",
         "-Wl,--no-entry",
         "-Wl,--allow-undefined", // NOTE(felix): consider --allow-undefined-file for explicit whitelist
-        "-Wl,--initial-memory=134217728", // 128mb, but TODO(felix): make configurable
         "-Wl,--stack-first",
         "-Wl,-z,stack-size=1048576", // NOTE(felix): 1mb matches windows. I ran into stack overflow on macOS but not on Windows for some reason--on the same project, in the same browser
         0,
@@ -3466,278 +3468,6 @@ static bool build_flag_changes_preprocessor(String flag) {
     defines = defines || string_starts_with(flag, S("-std")) || string_starts_with(flag, S("/std"));
     return defines;
 }
-
-static const char build_wasm_html_file[] = STRINGIFY(
-    <!doctype html><meta charset=utf-8>
-
-    <style>
-        html, body {
-            margin: 0;
-            height: 100%;
-            overflow: hidden;
-            background: #808080;
-        }
-        canvas {
-            width: 100vw;
-            height: 100vh;
-            display: block;
-        }
-    </style>
-
-    <canvas id=wasm_canvas width=0 height=0></canvas>
-
-    <script>
-        (async () => {
-            const canvas = document.getElementById("wasm_canvas");
-            const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: true, stencil: true });
-            if (gl === null) {
-                document.body.textContent = "This page needs WebGL2, which is not available in this browser.";
-                return;
-            }
-            gl.getExtension("EXT_color_buffer_float");
-
-            let wasm = null;
-            const memory_u8 = () => new Uint8Array(wasm.instance.exports.memory.buffer);
-            const memory_i32 = () => new Int32Array(wasm.instance.exports.memory.buffer);
-            const memory_u32 = () => new Uint32Array(wasm.instance.exports.memory.buffer);
-            const read_string = (pointer, count) => new TextDecoder().decode(memory_u8().subarray(pointer, pointer + count));
-            const read_cstring = pointer => {
-                const bytes = memory_u8();
-                let end = pointer;
-                while (bytes[end] != 0) end += 1;
-                return read_string(pointer, end - pointer);
-            };
-
-            const gl_objects = [null];
-            const gl_uniform_locations = [null];
-            const gl_object_add = object => {
-                gl_objects.push(object);
-                return gl_objects.length - 1;
-            };
-            const gl_generate = (count, pointer, create) => {
-                const ids = memory_i32();
-                for (let i = 0; i < count; i += 1) ids[(pointer >> 2) + i] = gl_object_add(create());
-            };
-            const gl_delete = (count, pointer, destroy) => {
-                const ids = memory_i32();
-                for (let i = 0; i < count; i += 1) {
-                    const id = ids[(pointer >> 2) + i];
-                    destroy(gl_objects[id]);
-                    gl_objects[id] = null;
-                }
-            };
-            const gl_delete_one = (id, destroy) => {
-                destroy(gl_objects[id]);
-                gl_objects[id] = null;
-            };
-            const GL_FLOAT = 0x1406;
-            const GL_HALF_FLOAT = 0x140B;
-            const GL_INFO_LOG_LENGTH = 0x8B84;
-            const gl_pixel_view = type => {
-                const buffer = wasm.instance.exports.memory.buffer;
-                let view = new Uint8Array(buffer);
-                if (type == GL_HALF_FLOAT) view = new Uint16Array(buffer);
-                if (type == GL_FLOAT) view = new Float32Array(buffer);
-                return view;
-            };
-            const gl_pixel_offset = (type, pointer) => pointer / gl_pixel_view(type).BYTES_PER_ELEMENT;
-            const gl_integer_from_parameter = value => {
-                let integer = value;
-                if (value === true) integer = 1;
-                if (value === false) integer = 0;
-                return integer;
-            };
-            const gl_write_info_log = (log, capacity, length_pointer, log_pointer) => {
-                const bytes = new TextEncoder().encode(log ?? "");
-                const count = Math.max(0, Math.min(bytes.length, capacity - 1));
-                const memory = memory_u8();
-                memory.set(bytes.subarray(0, count), log_pointer);
-                memory[log_pointer + count] = 0;
-                if (length_pointer != 0) memory_i32()[length_pointer >> 2] = count;
-            };
-
-            const gl_imports = {
-                glActiveTexture: texture => gl.activeTexture(texture),
-                glAttachShader: (program, shader) => gl.attachShader(gl_objects[program], gl_objects[shader]),
-                glBindBuffer: (target, buffer) => gl.bindBuffer(target, gl_objects[buffer]),
-                glBindBufferRange: (target, index, buffer, offset, size) => gl.bindBufferRange(target, index, gl_objects[buffer], offset, size),
-                glBindFramebuffer: (target, framebuffer) => gl.bindFramebuffer(target, gl_objects[framebuffer]),
-                glBindRenderbuffer: (target, renderbuffer) => gl.bindRenderbuffer(target, gl_objects[renderbuffer]),
-                glBindTexture: (target, texture) => gl.bindTexture(target, gl_objects[texture]),
-                glBindVertexArray: array => gl.bindVertexArray(gl_objects[array]),
-                glBlendFunc: (source, destination) => gl.blendFunc(source, destination),
-                glBufferData: (target, size, data, usage) => {
-                    if (data == 0) gl.bufferData(target, size, usage);
-                    else gl.bufferData(target, memory_u8(), usage, data, size);
-                },
-                glCheckFramebufferStatus: target => gl.checkFramebufferStatus(target),
-                glClear: mask => gl.clear(mask),
-                glClearColor: (red, green, blue, alpha) => gl.clearColor(red, green, blue, alpha),
-                glCompileShader: shader => gl.compileShader(gl_objects[shader]),
-                glCreateProgram: () => gl_object_add(gl.createProgram()),
-                glCreateShader: type => gl_object_add(gl.createShader(type)),
-                glCullFace: mode => gl.cullFace(mode),
-                glDebugMessageCallbackKHR: () => {},
-                glDeleteBuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteBuffer(object)),
-                glDeleteFramebuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteFramebuffer(object)),
-                glDeleteProgram: program => gl_delete_one(program, object => gl.deleteProgram(object)),
-                glDeleteRenderbuffers: (count, pointer) => gl_delete(count, pointer, object => gl.deleteRenderbuffer(object)),
-                glDeleteShader: shader => gl_delete_one(shader, object => gl.deleteShader(object)),
-                glDeleteTextures: (count, pointer) => gl_delete(count, pointer, object => gl.deleteTexture(object)),
-                glDepthFunc: function_ => gl.depthFunc(function_),
-                glDepthMask: flag => gl.depthMask(flag != 0),
-                glDisable: capability => gl.disable(capability),
-                glDisableVertexAttribArray: index => gl.disableVertexAttribArray(index),
-                glDrawArraysInstanced: (mode, first, count, instance_count) => gl.drawArraysInstanced(mode, first, count, instance_count),
-                glDrawElementsInstanced: (mode, count, type, offset, instance_count) => gl.drawElementsInstanced(mode, count, type, offset, instance_count),
-                glEnable: capability => gl.enable(capability),
-                glEnableVertexAttribArray: index => gl.enableVertexAttribArray(index),
-                glFramebufferRenderbuffer: (target, attachment, renderbuffer_target, renderbuffer) => gl.framebufferRenderbuffer(target, attachment, renderbuffer_target, gl_objects[renderbuffer]),
-                glFramebufferTexture2D: (target, attachment, texture_target, texture, level) => gl.framebufferTexture2D(target, attachment, texture_target, gl_objects[texture], level),
-                glGenBuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createBuffer()),
-                glGenFramebuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createFramebuffer()),
-                glGenRenderbuffers: (count, pointer) => gl_generate(count, pointer, () => gl.createRenderbuffer()),
-                glGenTextures: (count, pointer) => gl_generate(count, pointer, () => gl.createTexture()),
-                glGenVertexArrays: (count, pointer) => gl_generate(count, pointer, () => gl.createVertexArray()),
-                glGenerateMipmap: target => gl.generateMipmap(target),
-                glGetActiveUniformBlockiv: (program, index, name, pointer) => {
-                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(gl.getActiveUniformBlockParameter(gl_objects[program], index, name));
-                },
-                glGetIntegerv: (name, pointer) => {
-                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(gl.getParameter(name));
-                },
-                glGetProgramInfoLog: (program, capacity, length_pointer, log_pointer) => gl_write_info_log(gl.getProgramInfoLog(gl_objects[program]), capacity, length_pointer, log_pointer),
-                glGetProgramiv: (program, name, pointer) => {
-                    let value = 0;
-                    if (name == GL_INFO_LOG_LENGTH) value = (gl.getProgramInfoLog(gl_objects[program]) ?? "").length + 1;
-                    else value = gl.getProgramParameter(gl_objects[program], name);
-                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(value);
-                },
-                glGetShaderInfoLog: (shader, capacity, length_pointer, log_pointer) => gl_write_info_log(gl.getShaderInfoLog(gl_objects[shader]), capacity, length_pointer, log_pointer),
-                glGetShaderiv: (shader, name, pointer) => {
-                    let value = 0;
-                    if (name == GL_INFO_LOG_LENGTH) value = (gl.getShaderInfoLog(gl_objects[shader]) ?? "").length + 1;
-                    else value = gl.getShaderParameter(gl_objects[shader], name);
-                    memory_i32()[pointer >> 2] = gl_integer_from_parameter(value);
-                },
-                glGetUniformBlockIndex: (program, name) => gl.getUniformBlockIndex(gl_objects[program], read_cstring(name)),
-                glGetUniformLocation: (program, name) => {
-                    const location = gl.getUniformLocation(gl_objects[program], read_cstring(name));
-                    let id = -1;
-                    if (location !== null) {
-                        gl_uniform_locations.push(location);
-                        id = gl_uniform_locations.length - 1;
-                    }
-                    return id;
-                },
-                glLinkProgram: program => gl.linkProgram(gl_objects[program]),
-                glPixelStorei: (name, value) => gl.pixelStorei(name, value),
-                glReadPixels: (x, y, width, height, format, type, pointer) => gl.readPixels(x, y, width, height, format, type, gl_pixel_view(type), gl_pixel_offset(type, pointer)),
-                glRenderbufferStorage: (target, format, width, height) => gl.renderbufferStorage(target, format, width, height),
-                glScissor: (x, y, width, height) => gl.scissor(x, y, width, height),
-                glShaderSource: (shader, count, strings_pointer, lengths_pointer) => {
-                    const pointers = memory_u32();
-                    const lengths = memory_i32();
-                    let source = "";
-                    for (let i = 0; i < count; i += 1) {
-                        const pointer = pointers[(strings_pointer >> 2) + i];
-                        const length = lengths_pointer == 0 ? -1 : lengths[(lengths_pointer >> 2) + i];
-                        source += length < 0 ? read_cstring(pointer) : read_string(pointer, length);
-                    }
-                    gl.shaderSource(gl_objects[shader], source);
-                },
-                glTexImage2D: (target, level, internal_format, width, height, border, format, type, pixels) => {
-                    if (pixels == 0) gl.texImage2D(target, level, internal_format, width, height, border, format, type, null);
-                    else gl.texImage2D(target, level, internal_format, width, height, border, format, type, gl_pixel_view(type), gl_pixel_offset(type, pixels));
-                },
-                glTexParameteri: (target, name, value) => gl.texParameteri(target, name, value),
-                glTexSubImage2D: (target, level, x, y, width, height, format, type, pixels) => gl.texSubImage2D(target, level, x, y, width, height, format, type, gl_pixel_view(type), gl_pixel_offset(type, pixels)),
-                glUniform1i: (location, value) => gl.uniform1i(gl_uniform_locations[location] ?? null, value),
-                glUniform2f: (location, x, y) => gl.uniform2f(gl_uniform_locations[location] ?? null, x, y),
-                glUniformBlockBinding: (program, index, binding) => gl.uniformBlockBinding(gl_objects[program], index, binding),
-                glUseProgram: program => gl.useProgram(gl_objects[program]),
-                glVertexAttribDivisor: (index, divisor) => gl.vertexAttribDivisor(index, divisor),
-                glVertexAttribIPointer: (index, size, type, stride, offset) => gl.vertexAttribIPointer(index, size, type, stride, offset),
-                glVertexAttribPointer: (index, size, type, normalised, stride, offset) => gl.vertexAttribPointer(index, size, type, normalised != 0, stride, offset),
-                glViewport: (x, y, width, height) => gl.viewport(x, y, width, height),
-            };
-
-            const imports = { env: {
-                ...gl_imports,
-                js_file_write: (name_cstring, pointer, count) => {
-                    const bytes = memory_u8().slice(pointer, pointer + count);
-                    const name = read_cstring(name_cstring);
-
-                    console.assert(!name.includes("/") && !name.includes("\\"), "js_file_write: path separators forbidden in name", name);
-
-                    const blob = new Blob([bytes]);
-                    const a = document.createElement("a");
-                    a.href = URL.createObjectURL(blob);
-                    a.download = name;
-                    a.click();
-                    URL.revokeObjectURL(a.href);
-                },
-                js_performance_now: () => {
-                    return performance.now();
-                },
-                js_set_cursor_hidden: hidden => {
-                    canvas.style.cursor = hidden ? "none" : "";
-                },
-                os_write_console_js: (pointer, count) => {
-                    console.log(read_string(pointer, count));
-                },
-            } };
-
-            // TODO(felix): make .wasm file name changeable in build
-            wasm = await WebAssembly.instantiateStreaming(fetch("module.wasm"), imports);
-            const exports = wasm.instance.exports;
-
-            exports.platform__start();
-
-            let mouse_x = 0, mouse_y = 0;
-            canvas.addEventListener("mousemove", e => {
-                const rect = canvas.getBoundingClientRect();
-                mouse_x = (e.clientX - rect.left) * devicePixelRatio;
-                mouse_y = (e.clientY - rect.top) * devicePixelRatio;
-            });
-
-            function write_js_string(string) {
-                const bytes = new TextEncoder().encode(string);
-                const buffer = exports.platform__get_temp_js_string_buffer();
-                memory_u8().set(bytes, buffer);
-                return [buffer, bytes.length];
-            }
-            addEventListener("keydown", e => {
-                const [buffer, length] = write_js_string(e.code);
-                exports.platform__on_key_down(buffer, length);
-            });
-            addEventListener("keyup", e => {
-                const [buffer, length] = write_js_string(e.code);
-                exports.platform__on_key_up(buffer, length);
-            });
-
-            canvas.addEventListener("mousedown", e => exports.platform__on_mouse_down(e.button));
-            canvas.addEventListener("mouseup", e => exports.platform__on_mouse_up(e.button));
-            canvas.addEventListener("wheel", e => {
-                e.preventDefault();
-                exports.platform__on_scroll(e.deltaX, e.deltaY);
-            }, { passive: false });
-
-            function frame() {
-                const real_width = Math.round(window.innerWidth * devicePixelRatio);
-                const real_height = Math.round(window.innerHeight * devicePixelRatio);
-                if (canvas.width != real_width || canvas.height != real_height) {
-                    canvas.width = real_width;
-                    canvas.height = real_height;
-                }
-
-                exports.platform__update_and_render(real_width, real_height, mouse_x, mouse_y);
-                requestAnimationFrame(frame);
-            }
-            requestAnimationFrame(frame);
-        })();
-    </script>
-);
 
 static void build_rebuild_and_rerun_self_if_out_of_date(Arena *scratch_arena, const char **arguments, u64 argument_count) {
     #if BASE_OS == BASE_OS_WINDOWS
@@ -4630,13 +4360,39 @@ static u32 build_default_everything(Arena *scratch_arena, const char *program_na
         } else exit_code = 1;
 
         if (target_os == BASE_OS_WASM && exit_code == 0) {
+            const char *glue_path = cstring_print(scratch.arena, "%sbase%cbase_platform_wasm.js", &source_folder[3], path_separator);
+            bool glue_ok = false;
+            String glue = os_read_entire_file(scratch.arena, glue_path, &glue_ok);
+            if (!glue_ok) log_error("failed reading '%s'", glue_path);
+
+            bool glue_written = false;
+            const char *glue_output_path = cstring_print(scratch.arena, "%s%cmodule.js", build_folder, path_separator);
+            if (glue_ok) {
+                fs_remove_file(glue_output_path);
+                glue_written = os_write_entire_file(glue_output_path, glue.data, glue.count);
+
+                if (glue_written) print("wrote '%s'\n", glue_output_path);
+                else print("unable to write '%s'\n", glue_output_path);
+            }
+
+            const char *page_path = cstring_print(scratch.arena, "%sbase%cbase_platform_wasm.html", &source_folder[3], path_separator);
+            bool page_ok = false;
+            String page = {0};
+            if (glue_written) {
+                page = os_read_entire_file(scratch.arena, page_path, &page_ok);
+                if (!page_ok) log_error("failed reading '%s'", page_path);
+            }
+
+            bool html_ok = false;
             const char *html_output_path = cstring_print(scratch.arena, "%s%c%s.html", build_folder, path_separator, program_name);
+            if (page_ok) {
+                fs_remove_file(html_output_path);
+                html_ok = os_write_entire_file(html_output_path, page.data, page.count);
 
-            fs_remove_file(html_output_path);
-            exit_code = !os_write_entire_file(html_output_path, build_wasm_html_file, sizeof build_wasm_html_file - 1);
-
-            if (exit_code == 0) print("wrote '%s'\n", html_output_path);
-            else print("unable to write '%s'\n", html_output_path);
+                if (html_ok) print("wrote '%s'\n", html_output_path);
+                else print("unable to write '%s'\n", html_output_path);
+            }
+            exit_code = !html_ok;
         }
     }
 
@@ -4710,6 +4466,15 @@ static void app_frame_info_reset_end_of_frame(App_Frame_Info *frame) {
     frame->scroll = 0;
     memset(frame->mouse_clicked, 0, sizeof frame->mouse_clicked);
     memset(frame->key_pressed, 0, sizeof frame->key_pressed);
+}
+
+static void base_platform_reserve_frame_arena(Platform *platform) {
+    bool app_start_didnt_allocate_from_platform_arenas = platform->persistent_arena->memory == 0 && platform->frame_arena->memory == 0;
+    assert(app_start_didnt_allocate_from_platform_arenas);
+
+    u64 frame_arena_reservation = platform->frame_arena_startup_reservation_in_bytes;
+    if (frame_arena_reservation == 0) frame_arena_reservation = ARENA_DEFAULT_RESERVE_SIZE;
+    *platform->frame_arena = arena_reserve(size_t_from_u64(frame_arena_reservation));
 }
 
 typedef struct {

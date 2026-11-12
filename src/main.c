@@ -147,7 +147,7 @@ typedef struct {
 static Vm global_vm = {0};
 
 typedef struct {
-    u32 *pixels;
+    u8 *pixels;
     i32 pixel_stride;
     V2 size;
     V2 mouse_position;
@@ -195,17 +195,6 @@ static void vm_push16(Vm *vm, u16 byte2) { vm_push8(vm, byte2 >> 8); vm_push8(vm
 static u16  vm_pop16(Vm *vm) { u16 val = (u16)vm_s(vm_sp - 1) | (u16)(vm_s(vm_sp - 2) << 8); if (!(vm->current_mode & Vm_Mode_KEEP)) vm_sp -= 2; return val; }
 static u16  vm_load16(Vm *vm, u16 addr) { return (u16)(((u16)vm_mem(addr) << 8) | (u16)vm_mem(addr + 1)); }
 static void vm_store16(Vm *vm, u16 addr, u16 val) { vm_mem(addr) = (u8)(val >> 8); vm_mem(addr + 1) = (u8)val; } // TODO(felix): ensure correct
-
-static inline u32 pixel_from_colour(Vm *vm, u8 colour_index) {
-    assert(colour_index < 4);
-    Vm_System_Action colour_offset = Vm_System_COLOUR_0 + colour_index * 2;
-    u16 colour = get16(&vm->memory[Vm_Device_SYSTEM | (Vm_Device)colour_offset]);
-    u32 r = ((u32)colour & 0x0f00) >> 8;
-    u32 g = ((u32)colour & 0x00f0) >> 4;
-    u32 b = ((u32)colour & 0x000f) >> 0;
-    u32 rgba = (r << 28) | (r << 24) | (g << 20) | (g << 16) | (b << 12) | (b << 8) | 0xff;
-    return abgr_from_rgba(rgba);
-}
 
 static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
     vm->program_counter = program_counter;
@@ -319,7 +308,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                             u16 y = get16(y_address);
                             u16 screen_width = (u16)global_screen.size.x;
                             u16 screen_height = (u16)global_screen.size.y;
-                            u32 *pixels = global_screen.pixels;
+                            u8 *pixels = global_screen.pixels;
                             i32 stride = global_screen.pixel_stride;
                             switch (action) {
                                 case Vm_Screen_PIXEL: {
@@ -332,13 +321,11 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                     u8 colour = argument & 0x0f;
                                     if (colour > 3) panic("[write:screen/pixel] colour #%02x is invalid; there are only 4 palette colours", colour);
 
-                                    u32 pixel = pixel_from_colour(vm, colour);
-
                                     if (fill_y && !fill_x) unreachable;
                                     u16 right = fill_x ? screen_width : x + 1;
                                     u16 bottom = fill_y ? screen_height : y + 1;
                                     for (u16 row = y; row < bottom; row += 1) {
-                                        for (u16 column = x; column < right; column += 1) pixels[row * stride + column] = pixel;
+                                        for (u16 column = x; column < right; column += 1) pixels[row * stride + column] = colour;
                                     }
                                 } break;
                                 case Vm_Screen_SPRITE: {
@@ -349,7 +336,7 @@ static void vm_run_to_break(Platform *platform, Vm *vm, u16 program_counter) {
                                     u8 use_background_layer = argument & 0x40;
                                     u8 flip_y = argument & 0x20;
                                     u8 flip_x = argument & 0x10;
-                                    u32 colours[] = { pixel_from_colour(vm, argument & 0x03), pixel_from_colour(vm, (argument & 0x0c) >> 2) };
+                                    u8 colours[] = { argument & 0x03, (u8)((argument & 0x0c) >> 2) };
 
                                     // TODO(felix)
                                     assert(!two_bits_per_pixel);
@@ -1497,13 +1484,12 @@ static void app_start(Platform *platform) {
         }
 
         platform->window_name = "bici";
-        u64 screen_pixel_count = (u64)SCREEN_MAX_WIDTH * SCREEN_MAX_HEIGHT;
-        global_screen.pixels = arena_make(platform->persistent_arena, size_t_from_u64(screen_pixel_count), u32);
+        platform->frame_arena_startup_reservation_in_bytes = 4 * 1024 * 1024;
+        static u8 screen_colour_indices[SCREEN_MAX_WIDTH * SCREEN_MAX_HEIGHT];
+        global_screen.pixels = screen_colour_indices;
         global_screen.pixel_stride = SCREEN_MAX_WIDTH;
         global_screen.window_over_screen_scale = SCREEN_INITIAL_SCALE;
         global_screen.window_over_screen_scale_target = SCREEN_INITIAL_SCALE;
-        u32 black = abgr_from_rgba(0x000000ff);
-        for (u64 i = 0; i < screen_pixel_count; i += 1) global_screen.pixels[i] = black;
         platform->hide_cursor = true;
         // TODO(felix): program should control this
         platform->clear_color = 0x000000ff;
@@ -1545,11 +1531,28 @@ static void app_update_and_render(Platform *platform) {
     bool has_screen = screen_width > 0 && screen_height > 0;
     if (has_screen) {
         String screen_fragment_source = S(STRINGIFY(
+            layout(std140) uniform gpu_arguments { vec4 palette[4]; };
+
+            vec3 palette_colour_at(ivec2 texel, ivec2 last_texel) {
+                ivec2 clamped_texel = clamp(texel, ivec2(0), last_texel);
+                int colour_index = int(texelFetch(gpu_texture_0, clamped_texel, 0).r * 255.0 + 0.5);
+                return palette[colour_index].rgb;
+            }
+
             void main() {
-                vec2 texture_size = vec2(textureSize(gpu_texture_0, 0));
-                vec2 texel_position = gpu_uv * texture_size;
+                ivec2 texture_size = textureSize(gpu_texture_0, 0);
+                vec2 texel_position = gpu_uv * vec2(texture_size);
                 vec2 antialiased_texel_position = floor(texel_position) + min(fract(texel_position) / fwidth(texel_position), 1.0) - 0.5;
-                gpu_color_out = vec4(texture(gpu_texture_0, antialiased_texel_position / texture_size).rgb, 1.0);
+
+                vec2 sample_position = antialiased_texel_position - 0.5;
+                vec2 first_texel = floor(sample_position);
+                vec2 weight = sample_position - first_texel;
+                ivec2 texel = ivec2(first_texel);
+                ivec2 last_texel = texture_size - 1;
+
+                vec3 top = mix(palette_colour_at(texel, last_texel), palette_colour_at(texel + ivec2(1, 0), last_texel), weight.x);
+                vec3 bottom = mix(palette_colour_at(texel + ivec2(0, 1), last_texel), palette_colour_at(texel + ivec2(1, 1), last_texel), weight.x);
+                gpu_color_out = vec4(mix(top, bottom, weight.y), 1.0);
             }
         ));
         bool shader_ok = true;
@@ -1562,16 +1565,30 @@ static void app_update_and_render(Platform *platform) {
             .key = SCREEN_TEXTURE_KEY,
             .width = screen_width,
             .height = screen_height,
-            .filter = GPU_Texture_Filter_LINEAR,
+            .format = GPU_Texture_Format_R8,
+            .filter = GPU_Texture_Filter_NEAREST,
             .pixels = { .data = global_screen.pixels, .size = screen_pixels_size },
             .pixels_per_row = SCREEN_MAX_WIDTH,
         });
+
+        typedef struct { V4 palette[4]; } Screen_Arguments;
+        Screen_Arguments screen_arguments = {0};
+        for (u8 colour_index = 0; colour_index < 4; colour_index += 1) {
+            u16 colour = get16(&vm->memory[Vm_Device_SYSTEM | (Vm_Device)(Vm_System_COLOUR_0 + colour_index * 2)]);
+            screen_arguments.palette[colour_index] = (V4){
+                .x = (f32)((colour & 0x0f00) >> 8) / 15.f,
+                .y = (f32)((colour & 0x00f0) >> 4) / 15.f,
+                .z = (f32)(colour & 0x000f) / 15.f,
+                .w = 1.f,
+            };
+        }
 
         f32 scale = global_screen.window_over_screen_scale;
         gpu_draw(platform, &(GPU_Draw){
             .shader = screen_shader,
             .rectangle = { .x = 0, .y = 0, .z = (f32)screen_width * scale, .w = (f32)screen_height * scale },
             .textures = { screen_texture },
+            .arguments = gpu_arguments(screen_arguments),
             .blend_mode = GPU_Blend_Mode_NONE,
         });
     }

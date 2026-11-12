@@ -132,6 +132,7 @@ void platform__start(void) {
     base->frame_arena = &frame_arena;
 
     app_start(base);
+    base_platform_reserve_frame_arena(base);
 
     base->frame.dpi_scale = 1.f;
     gles3__initialise(&platform__.gpu, base->persistent_arena);

@@ -134,6 +134,9 @@ update:
             push file_copy write.2
 
             jsi.2 save_current_program_routine_addresses
+
+            drop
+            push.2 screen_update load.2 jmp
         }
 
         /end_click_check:

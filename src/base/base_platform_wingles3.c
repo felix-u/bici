@@ -153,6 +153,7 @@ static void program(void) {
     ImmDisableIME((unsigned long)IME_ALL_THREADS_IN_PROCESS);
 
     app_start(&platform.base);
+    base_platform_reserve_frame_arena(&platform.base);
 
     window_procedure__platform = &platform;
     const char *window_name = platform.base.window_name != 0 ? platform.base.window_name : "app";
